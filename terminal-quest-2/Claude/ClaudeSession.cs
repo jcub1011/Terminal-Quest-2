@@ -11,8 +11,8 @@ namespace TerminalQuest.Claude
     /// <remarks>
     /// One process is held open for the whole conversation, so context and the prompt cache both
     /// survive across turns — the second and later turns read their prefix from cache instead of
-    /// rebuilding it. The session runs with no tools, no MCP servers and no skills; it is purely
-    /// text in, text out.
+    /// rebuilding it. The session sees only what <see cref="ClaudeSessionOptions"/> declares: no
+    /// skills, no plugins, and no MCP servers beyond the one the caller supplies.
     /// <para>
     /// All JSON is handled with <see cref="JsonDocument"/> and <see cref="Utf8JsonWriter"/> rather
     /// than <c>JsonSerializer</c>, so the type stays free of reflection and is safe under
@@ -98,8 +98,8 @@ namespace TerminalQuest.Claude
                 startInfo.WorkingDirectory = workingDirectory;
             }
 
-            // ArgumentList quotes each element itself, so the embedded MCP JSON and the empty
-            // --tools value survive without hand-rolled escaping.
+            // ArgumentList quotes each element itself, so the embedded MCP JSON — braces, quotes,
+            // an executable path with spaces in it — survives without hand-rolled escaping.
             foreach (var argument in BuildArguments(_options))
             {
                 startInfo.ArgumentList.Add(argument);
@@ -270,14 +270,27 @@ namespace TerminalQuest.Claude
             yield return "--verbose";
             yield return "--include-partial-messages";
 
-            // Strip the session down to nothing. --tools "" alone is not sufficient: without the
-            // rest of these the process still loads user MCP servers, skills and plugins, which
-            // costs tens of thousands of prompt tokens per session.
+            // Strip the session down to exactly what the caller asked for. Naming the tools is not
+            // sufficient on its own: without the rest of these the process still loads the user's
+            // own MCP servers, skills and plugins, which costs tens of thousands of prompt tokens
+            // per session. --strict-mcp-config in particular is what keeps --mcp-config the whole
+            // truth rather than an addition to whatever the user has configured.
             yield return "--tools";
-            yield return string.Empty;
+            yield return options.AllowedTools;
+
+            // --tools decides which tools exist; --allowed-tools decides which may run without
+            // being asked about. Both are needed: under any permission mode a tool that is only
+            // named in the first is offered to the model and then refused when it calls, which it
+            // reports to the player as the game being broken.
+            if (options.AllowedTools is { Length: > 0 })
+            {
+                yield return "--allowed-tools";
+                yield return options.AllowedTools;
+            }
+
             yield return "--strict-mcp-config";
             yield return "--mcp-config";
-            yield return "{\"mcpServers\":{}}";
+            yield return options.McpConfigJson;
             yield return "--disable-slash-commands";
             yield return "--setting-sources";
             yield return string.Empty;

@@ -30,10 +30,17 @@ namespace TerminalQuest.Ui
             var row = 0;
 
             // Health is the one field that changes meaning as it drops, so it changes colour too.
-            var healthRole = _state.Health <= _state.MaxHealth / 4 ? TextRole.Danger : TextRole.Normal;
-            DrawField(ref row, width, height, "HP", $"{_state.Health}/{_state.MaxHealth}", healthRole);
-            DrawField(ref row, width, height, "Gold", _state.Gold.ToString(), TextRole.Item);
+            // A save with no player character yet has no bar to draw rather than a misleading 0/0.
+            var hasPlayer = _state.MaxHealth > 0;
+            var healthRole = hasPlayer && _state.Health <= _state.MaxHealth / 4 ? TextRole.Danger : TextRole.Normal;
+            DrawField(ref row, width, height, "HP", hasPlayer ? $"{_state.Health}/{_state.MaxHealth}" : "-", healthRole);
             DrawField(ref row, width, height, "Turn", _state.Turn.ToString(), TextRole.Normal);
+
+            DrawSeparator(ref row, width, height);
+
+            // The place name gets the full width: it is prose, not a short value, and pushing it
+            // to the right margin as a field would truncate almost every one of them.
+            DrawText(ref row, width, height, _state.Location.Length > 0 ? _state.Location : "nowhere", TextRole.Place);
 
             DrawSeparator(ref row, width, height);
 

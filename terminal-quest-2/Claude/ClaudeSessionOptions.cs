@@ -13,10 +13,32 @@ namespace TerminalQuest.Claude
         public required string? Model { get; init; }
 
         /// <summary>
-        /// Replaces Claude Code's default system prompt outright. Keep it short — with no tools
-        /// and no MCP servers this is essentially the entire prompt prefix.
+        /// Replaces Claude Code's default system prompt outright. Keep it short — alongside the
+        /// declared tools this is essentially the entire prompt prefix.
         /// </summary>
         public string SystemPrompt { get; init; } = "You are a helpful assistant. Answer concisely.";
+
+        /// <summary>
+        /// The value passed to <c>--mcp-config</c>, verbatim. Defaults to no servers at all.
+        /// <para>
+        /// Paired with <c>--strict-mcp-config</c>, this is the complete set of servers the session
+        /// may see: the user's own configured servers never load, however this is set.
+        /// </para>
+        /// </summary>
+        public string McpConfigJson { get; init; } = "{\"mcpServers\":{}}";
+
+        /// <summary>
+        /// The comma-separated set of tools the session may use. Empty — the default — leaves it
+        /// with no tools whatsoever.
+        /// </summary>
+        /// <remarks>
+        /// Declaring a server in <see cref="McpConfigJson"/> is not enough on its own: a tool that
+        /// is not named here stays invisible to the model. This drives both <c>--tools</c>, which
+        /// decides what exists, and <c>--allowed-tools</c>, which decides what may run unprompted.
+        /// There is deliberately no way to set those apart: a tool the model can see but is not
+        /// permitted to call is worse than one it cannot see at all.
+        /// </remarks>
+        public string AllowedTools { get; init; } = string.Empty;
 
         /// <summary>Executable to launch. Resolved against PATH when not an absolute path.</summary>
         public string ExecutablePath { get; init; } = "claude";
