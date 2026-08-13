@@ -8,8 +8,10 @@ namespace TerminalQuest
     {
         private const string SystemPrompt =
             "You are the narrator of a terminal adventure game. Answer in at most two sentences. "
-          + "Mark up your prose semantically: wrap items in [item]...[/], dangers in [danger]...[/], "
-          + "spoken words in [speech]...[/], and place names in [place]...[/]. "
+          + "Mark up your prose semantically, closing each tag by name: "
+          + "items as [item]a rusted key[/item], dangers as [danger]a wolf[/danger], "
+          + "spoken words as [speech]\"who goes there?\"[/speech], "
+          + "and place names as [place]the Hollow Gate[/place]. "
           + "Use no other formatting, and never use square brackets for anything else.";
 
         static async Task<int> Main(string[] args)

@@ -111,13 +111,9 @@ namespace TerminalQuest.Ui
             var name = _tag.ToString();
             _tag.Clear();
 
-            if (name == "/")
+            if (name.StartsWith('/'))
             {
-                if (_roles.Count > 0)
-                {
-                    _roles.Pop();
-                }
-
+                CloseRole(name, run);
                 return;
             }
 
@@ -129,6 +125,45 @@ namespace TerminalQuest.Ui
 
             // Not a tag we know. Show it as the narrator wrote it.
             run.Append('[').Append(name).Append(']');
+        }
+
+        /// <summary>
+        /// Handles a closing tag. Both the bare <c>[/]</c> and the named <c>[/place]</c> form are
+        /// accepted - models emit either regardless of what the prompt asks for, and an
+        /// unrecognised closer would otherwise be printed into the narration as literal text.
+        /// </summary>
+        private void CloseRole(string name, StringBuilder run)
+        {
+            var closing = name[1..];
+
+            // Bare "[/]" closes whatever is innermost.
+            if (closing.Length == 0)
+            {
+                if (_roles.Count > 0)
+                {
+                    _roles.Pop();
+                }
+
+                return;
+            }
+
+            if (!TryParseRole(closing, out var role))
+            {
+                // A closer for a tag we never understood; show it as written.
+                run.Append('[').Append(name).Append(']');
+                return;
+            }
+
+            // Unmatched closer - drop it rather than printing it or corrupting the role stack.
+            if (!_roles.Contains(role))
+            {
+                return;
+            }
+
+            // Pop through to the named role, so a missing inner closer cannot strand the stack.
+            while (_roles.Count > 0 && _roles.Pop() != role)
+            {
+            }
         }
 
         private static bool TryParseRole(string name, out TextRole role)
