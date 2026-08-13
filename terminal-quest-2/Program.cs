@@ -1,48 +1,106 @@
-using System.Text;
+using Terminal.Gui.App;
 using TerminalQuest.Claude;
+using TerminalQuest.Ui;
 
 namespace TerminalQuest
 {
     internal class Program
     {
-        static async Task Main(string[] args)
+        private const string SystemPrompt =
+            "You are the narrator of a terminal adventure game. Answer in at most two sentences. "
+          + "Mark up your prose semantically: wrap items in [item]...[/], dangers in [danger]...[/], "
+          + "spoken words in [speech]...[/], and place names in [place]...[/]. "
+          + "Use no other formatting, and never use square brackets for anything else.";
+
+        static async Task<int> Main(string[] args)
         {
-            Console.OutputEncoding = Encoding.UTF8;
+            var state = new GameState();
 
             await using var claude = new ClaudeSession(new ClaudeSessionOptions
             {
                 Model = "claude-haiku-4-5-20251001",
-                SystemPrompt = "You are the narrator of a terminal adventure game. "
-                             + "Answer in at most two sentences.",
+                SystemPrompt = SystemPrompt,
             });
 
-            claude.OnTextDelta += Console.Write;
-
+            // Start the session before the TUI takes over the terminal. A process that fails to
+            // launch then reports plainly, instead of inside a UI that is about to be torn down.
             Console.Write("Starting Claude... ");
-            await claude.StartAsync();
-            Console.WriteLine("ready.");
-            Console.WriteLine("Type a message. Press Enter on an empty line to quit.");
-
-            while (true)
+            try
             {
-                Console.Write("\n> ");
-                var line = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(line))
+                await claude.StartAsync();
+            }
+            catch (ClaudeException ex)
+            {
+                Console.WriteLine("failed.");
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+
+            Console.WriteLine("ready.");
+
+            // TQ_DRIVER selects the Terminal.Gui driver; valid names are "windows", "dotnet" and
+            // "ansi" (null picks the platform default). The Windows driver is reported to render
+            // 24-bit colour incorrectly under conhost, so set TQ_DRIVER=ansi if colours look
+            // wrong in cmd or PowerShell. Windows Terminal handles the default fine.
+            var driver = Environment.GetEnvironmentVariable("TQ_DRIVER");
+
+            using var app = Application.Create().Init(driver);
+
+            using var window = new GameWindow(state);
+            var pump = new NarrationPump(app, window.Narration);
+
+            claude.OnTextDelta += pump.Enqueue;
+
+            window.QuitRequested += () => app.RequestStop(window);
+            window.CommandEntered += text =>
+            {
+                state.Turn++;
+                window.InputEnabled = false;
+                _ = Task.Run(() => RunTurnAsync(text));
+            };
+
+            window.Narration.AddLine("Terminal Quest", TextRole.System);
+            window.Narration.AddLine("Type a command and press Enter. PgUp/PgDn scrolls. Esc quits.", TextRole.System);
+            window.Narration.AddBlankLine();
+
+            // Open on a narrated scene rather than an empty pane.
+            window.InputEnabled = false;
+            _ = Task.Run(() => RunTurnAsync("Begin the adventure. Describe the opening scene."));
+
+            app.Run(window);
+            return 0;
+
+            async Task RunTurnAsync(string prompt)
+            {
+                try
                 {
-                    break;
+                    var turn = await claude.SendAsync(prompt);
+                    pump.CompleteBlock();
+
+                    app.Invoke(() =>
+                    {
+                        state.CostUsd += turn.CostUsd;
+                        state.LastCacheRead = turn.CacheReadTokens;
+                        state.LastDurationMs = turn.DurationMs;
+
+                        if (turn.IsError)
+                        {
+                            window.Narration.AddLine($"[{turn.Text}]", TextRole.Danger);
+                        }
+
+                        window.InputEnabled = true;
+                        window.Narration.ScrollToBottom();
+                    });
                 }
-
-                var turn = await claude.SendAsync(line);
-                Console.WriteLine();
-
-                if (turn.IsError)
+                catch (Exception ex)
                 {
-                    Console.WriteLine($"[error] {turn.Text}");
+                    app.Invoke(() =>
+                    {
+                        window.Narration.CommitBlock();
+                        window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
+                        window.InputEnabled = true;
+                    });
                 }
-
-                Console.WriteLine(
-                    $"[session {claude.SessionId} | cache read {turn.CacheReadTokens}, "
-                  + $"written {turn.CacheCreationTokens} | ${turn.CostUsd:F4} | {turn.DurationMs}ms]");
             }
         }
     }

@@ -8,6 +8,13 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Report every trim/AOT warning individually instead of collapsing them
+         to one per assembly, so publish output is actionable. -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Terminal.Gui" Version="2.4.17" />
+  </ItemGroup>
 
 </Project>
