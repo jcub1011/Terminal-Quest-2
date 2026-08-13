@@ -31,9 +31,10 @@ namespace TerminalQuest
           + "nothing you merely say is remembered. Never invent health, inventory, or who is "
           + "present - read them.\n\n"
 
-          + "Call get_state before narrating the first scene of a session. If the save is empty, "
-          + "create the player with upsert_character, create where they begin with upsert_location, "
-          + "and move_character them into it.\n\n"
+          + "Call get_state before narrating the first scene of a session. The player character is "
+          + "made before the session starts, by the player: never invent one, never replace one, "
+          + "and never ask who they are - read them. If no location is on record, create where they "
+          + "begin with upsert_location and move_character them into it.\n\n"
 
           + "Record what happens as it happens: damage or healing with update_character; items "
           + "gained or lost with add_item and remove_item; travel with move_character, after "
@@ -54,9 +55,20 @@ namespace TerminalQuest
 
           + "Tool calls are silent. The player sees only your prose.";
 
-        private const string NewGamePrompt =
-            "This is a new save. Create the player character and where they begin, then describe "
-          + "the opening scene.";
+        /// <summary>
+        /// Opening turn for a save whose player named where they begin. Everything the narrator
+        /// needs is already on disk, so this only has to stop it from building a second one.
+        /// </summary>
+        private const string OpeningPrompt =
+            "This is the first scene. The player character and where they begin are already on "
+          + "record. Call get_state, then describe the place as they stand in it. Do not create "
+          + "the player and do not ask who they are.";
+
+        /// <summary>Opening turn for a save whose player left the starting place to the narrator.</summary>
+        private const string OpeningPromptNoPlace =
+            "This is the first scene. The player character is already on record but has nowhere to "
+          + "be. Call get_state, then invent where they begin: upsert_location, move_character them "
+          + "into it, and describe it. Do not create the player and do not ask who they are.";
 
         private const string ContinuePrompt =
             "This save is being resumed. Call get_state, then set the scene where the player left "
@@ -104,6 +116,10 @@ namespace TerminalQuest
 
             using var app = Application.Create().Init(driver);
 
+            // Before any screen opens: the game is keyboard-only, so the terminal keeps the mouse
+            // and with it text selection, right-click copy and right-click paste.
+            MouseReporting.Disable(app);
+
             // The save has to be chosen before the narrator exists: its folder becomes a command
             // line argument to the state server, which the CLI launches as it starts.
             var store = ChooseSave(app);
@@ -112,23 +128,61 @@ namespace TerminalQuest
                 return 0;
             }
 
-            var state = new GameState { SaveName = store.Name };
-
             // A save that will not load must not start a turn: the narrator would see an empty
             // world through get_state and cheerfully build a new one on top of the broken files.
+            // It must not be seeded with a character either, for the same reason - so this is read
+            // before the character screen runs rather than after it.
             string? startupError = null;
-            var isNewGame = true;
+            var needsCharacter = false;
 
             try
             {
                 // A save with nobody in it has never been played, whatever its metadata says.
-                isNewGame = store.ReadCharacters().Characters.Count == 0;
-                state.Turn = store.ReadMetadata().Turn;
-                state.RefreshFrom(store);
+                needsCharacter = store.ReadCharacters().Characters.Count == 0;
             }
             catch (SaveException ex)
             {
                 startupError = ex.Message;
+            }
+
+            // Set only when this run made the character, so the opening turn can tell the narrator
+            // what is already on disk. Re-deriving it from an empty roster would not work: by then
+            // the character has been written.
+            var startedFresh = false;
+            var hasStartLocation = false;
+
+            if (needsCharacter && startupError is null)
+            {
+                var created = CreateCharacter(app, store);
+
+                // Backing out of the character screen means backing out of the game. The save
+                // folder is left as the menu made it - empty, and offered again next time.
+                if (created is null)
+                {
+                    return 0;
+                }
+
+                startedFresh = true;
+                hasStartLocation = created.Value.HasStartLocation;
+                startupError = created.Value.Error;
+            }
+
+            var state = new GameState { SaveName = store.Name };
+
+            if (startupError is null)
+            {
+                try
+                {
+                    state.Turn = store.ReadMetadata().Turn;
+
+                    // Read after seeding, so the pane opens showing the health and kit the player
+                    // just chose rather than filling in once the first turn lands.
+                    state.RefreshFrom(store);
+                }
+                catch (SaveException ex)
+                {
+                    startupError = ex.Message;
+                }
             }
 
             await using var claude = new ClaudeSession(new ClaudeSessionOptions
@@ -235,7 +289,9 @@ namespace TerminalQuest
                     return;
                 }
 
-                await RunTurnAsync(isNewGame ? NewGamePrompt : ContinuePrompt);
+                await RunTurnAsync(startedFresh
+                    ? hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace
+                    : ContinuePrompt);
             }
 
             async Task RunTurnAsync(string prompt)
@@ -318,6 +374,56 @@ namespace TerminalQuest
             app.Run(menu);
 
             return menu.Chosen;
+        }
+
+        /// <summary>What the character screen settled, once it has been written to the save.</summary>
+        /// <param name="HasStartLocation">
+        /// Whether the player named where they begin. Decides which opening prompt the narrator
+        /// gets, since the alternative is that it has to invent one.
+        /// </param>
+        /// <param name="Error">The save write that failed, if one did.</param>
+        private readonly record struct StartedCharacter(bool HasStartLocation, string? Error);
+
+        /// <summary>
+        /// Runs the character screen and seeds the save from it. Null when the player quit instead
+        /// of making anyone.
+        /// </summary>
+        /// <remarks>
+        /// A third <c>app.Run</c> in the same process, following <see cref="ChooseSave"/>: the
+        /// answers have to exist before <see cref="ClaudeSession"/> is started, because the whole
+        /// point is that the narrator reads the character rather than inventing one.
+        /// </remarks>
+        private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store)
+        {
+            using var window = new NewCharacterWindow(store.Name);
+
+            window.Done += () => app.RequestStop(window);
+            window.Cancelled += () => app.RequestStop(window);
+
+            app.Run(window);
+
+            if (!window.Confirmed)
+            {
+                return null;
+            }
+
+            try
+            {
+                NewGame.Create(
+                    store,
+                    window.PlayerName,
+                    window.Description,
+                    window.Template,
+                    window.StartLocation);
+            }
+            catch (SaveException ex)
+            {
+                // Reported into the transcript by the caller, on a screen the player will be
+                // looking at, rather than swallowed here where there is nowhere to show it.
+                return new StartedCharacter(window.StartLocation is not null, ex.Message);
+            }
+
+            return new StartedCharacter(window.StartLocation is not null, null);
         }
     }
 }

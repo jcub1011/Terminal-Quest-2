@@ -24,9 +24,21 @@ namespace TerminalQuest.Ui
         private const int InputHeight = 3;
         private const int HintHeight = 1;
 
+        private const string Hint =
+            "Up/Down and Enter to continue a save.  Del deletes one.  Esc quits.";
+
         private readonly SaveListView _list;
         private readonly TextField _name;
         private readonly Label _error;
+
+        /// <summary>
+        /// The save the next Del keypress will destroy, or null when nothing is half-confirmed.
+        /// <para>
+        /// Held by name rather than by index: the list is rebuilt after every delete, and an index
+        /// would quietly come to mean a different save.
+        /// </para>
+        /// </summary>
+        private string? _pendingDelete;
 
         public SaveMenuWindow()
         {
@@ -49,7 +61,7 @@ namespace TerminalQuest.Ui
                 Y = Pos.Bottom(_list),
                 Width = Dim.Fill(),
                 Height = HintHeight,
-                Text = failure ?? "Up/Down and Enter to continue a save.  Esc quits.",
+                Text = failure ?? Hint,
             };
             _error.SetScheme(Theme.CreateScheme());
 
@@ -93,6 +105,19 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
+            // Del means "delete the highlighted save" only while the name box is empty. With text
+            // in it the player is editing, and Del has to keep its ordinary meaning there - the
+            // same empty-box convention that decides what Enter does.
+            if (key == Key.Delete && (_name.Text?.Length ?? 0) == 0)
+            {
+                Delete();
+                return true;
+            }
+
+            // Any key that is not Del abandons a half-confirmed delete, so a pending confirmation
+            // cannot survive the player moving on and be triggered by an unrelated Del later.
+            CancelPendingDelete();
+
             // The arrows drive the list even though focus lives in the name field, so continuing
             // an existing save never needs a Tab first.
             if (key == Key.CursorUp)
@@ -108,6 +133,52 @@ namespace TerminalQuest.Ui
             }
 
             return base.OnKeyDown(key);
+        }
+
+        /// <summary>
+        /// Del once asks, Del again destroys. A save is a playthrough, and there is no undo - but
+        /// a modal here would be the only one in the game, so the confirmation is the second press.
+        /// </summary>
+        private void Delete()
+        {
+            if (_list.Selected is not { } selected)
+            {
+                Fail("There is no save to delete.");
+                return;
+            }
+
+            if (!SaveStore.Matches(_pendingDelete, selected.Name))
+            {
+                _pendingDelete = selected.Name;
+                Fail($"Delete '{selected.Name}' and everything in it? Del again to confirm.");
+                return;
+            }
+
+            _pendingDelete = null;
+
+            try
+            {
+                SavePaths.Delete(selected.Name);
+            }
+            catch (Exception ex) when (ex is SaveException or ArgumentException)
+            {
+                Fail(ex.Message);
+                return;
+            }
+
+            _list.Saves = ReadSaves(out var failure);
+            Fail(failure ?? $"Deleted '{selected.Name}'.");
+        }
+
+        private void CancelPendingDelete()
+        {
+            if (_pendingDelete is null)
+            {
+                return;
+            }
+
+            _pendingDelete = null;
+            Fail(Hint);
         }
 
         public void FocusInput() => _name.SetFocus();

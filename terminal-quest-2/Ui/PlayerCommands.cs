@@ -54,6 +54,9 @@ namespace TerminalQuest.Ui
                     case "saves":
                         Saves(lines, store);
                         break;
+                    case "delete":
+                        Delete(lines, store, argument);
+                        break;
                     case "quit":
                     case "exit":
                         return new PlayerCommandResult { Lines = lines, Quit = true };
@@ -80,6 +83,7 @@ namespace TerminalQuest.Ui
             Describe(lines, "/characters [name]", "who you have met, and what they remember");
             Describe(lines, "/locations [name]", "where you have been, and what happened there");
             Describe(lines, "/saves", "every save on this machine");
+            Describe(lines, "/delete <name>", "destroy another save, for good");
             Describe(lines, "/quit", "leave the game");
             lines.Add(StyledLine.FromText("Anything else is spoken to the world.", TextRole.System));
         }
@@ -289,6 +293,47 @@ namespace TerminalQuest.Ui
             }
 
             lines.Add(StyledLine.FromText(SavePaths.Root, TextRole.System));
+        }
+
+        /// <summary>
+        /// Destroys another save.
+        /// <para>
+        /// The name has to be typed out in full - there is no highlighted thing to mean, and no
+        /// undo afterwards, so the typing is the confirmation. The save being played is refused
+        /// outright: the narrator's state server has its folder open, and pulling the files out
+        /// from under a live session would corrupt the very playthrough the player is in.
+        /// </para>
+        /// </summary>
+        private static void Delete(List<StyledLine> lines, SaveStore store, string argument)
+        {
+            if (argument.Length == 0)
+            {
+                lines.Add(StyledLine.FromText("Name the save to delete: /delete <name>.", TextRole.System));
+                lines.Add(StyledLine.FromText("/saves lists them. There is no undo.", TextRole.System));
+                return;
+            }
+
+            if (SaveStore.Matches(argument, store.Name))
+            {
+                lines.Add(StyledLine.FromText(
+                    "That is the save you are playing. Leave with /quit and delete it from the menu with Del.",
+                    TextRole.Danger));
+                return;
+            }
+
+            if (!SavePaths.IsValidName(argument))
+            {
+                lines.Add(StyledLine.FromText($"'{argument}' was never a save name.", TextRole.Danger));
+                return;
+            }
+
+            if (!SavePaths.Delete(argument))
+            {
+                lines.Add(StyledLine.FromText($"There is no save called '{argument}'.", TextRole.Danger));
+                return;
+            }
+
+            lines.Add(StyledLine.FromText($"Deleted '{argument}'.", TextRole.System));
         }
 
         private static void Describe(List<StyledLine> lines, string command, string meaning)

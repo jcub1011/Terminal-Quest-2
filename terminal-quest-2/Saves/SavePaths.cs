@@ -107,6 +107,43 @@ namespace TerminalQuest.Saves
         }
 
         /// <summary>
+        /// Deletes a save and everything in it. There is no undo and no recycle bin, so the caller
+        /// is expected to have confirmed with the player first.
+        /// </summary>
+        /// <remarks>
+        /// The path is rebuilt from <see cref="Root"/> and the validated name rather than taken
+        /// from the caller: a recursive delete is the one operation here where accepting a path
+        /// from elsewhere could reach outside the saves folder entirely.
+        /// </remarks>
+        /// <returns>False when there was no such save; it was already gone.</returns>
+        /// <exception cref="ArgumentException">The name could never have been a save.</exception>
+        /// <exception cref="SaveException">The folder exists but could not be removed.</exception>
+        public static bool Delete(string name)
+        {
+            if (!IsValidName(name))
+            {
+                throw new ArgumentException($"'{name}' is not a usable save name.", nameof(name));
+            }
+
+            var directory = Path.Combine(Root, name.Trim());
+
+            if (!Directory.Exists(directory))
+            {
+                return false;
+            }
+
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SaveException($"Could not delete '{name}': {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
         /// Whether a name can be a folder. Rejects path separators and reserved characters rather
         /// than silently rewriting them, so the name in the menu is always the name on disk.
         /// </summary>

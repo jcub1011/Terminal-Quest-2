@@ -230,10 +230,13 @@ namespace TerminalQuest.Mcp
 
             if (playerName is null)
             {
+                // Normally unreachable: the player character is made on the character screen before
+                // a session starts. A save that reaches here has lost its roster, so say so rather
+                // than inviting the narrator to quietly replace whoever used to be here.
                 text.AppendLine(
-                    "This save is empty. Create the player with upsert_character (kind: player), "
-                  + "create their starting place with upsert_location, then move_character them "
-                  + "into it before narrating.");
+                    "There is no player on record, which should not happen - the player character "
+                  + "is created before the session starts. Say so plainly rather than inventing "
+                  + "one, and do not narrate a scene.");
                 return ToolOutcome.Ok(text.ToString().TrimEnd());
             }
 
