@@ -3,28 +3,30 @@ using Terminal.Gui.ViewBase;
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The rows of whichever settings page is open.
+    /// The rows of whichever menu is open - the start page's options, or a level of the settings.
     /// <para>
-    /// A fourth hand-drawn list, and the one place the game does share one. <see cref="SaveListView"/>,
-    /// <see cref="ClassListView"/> and the provider list it replaces were deliberately left
-    /// unfactored because their columns differ and a common control would have taken a formatter
-    /// callback for the sake of three call sites. That does not hold here: every settings page is
-    /// the same shape by construction, pages hand over plain <see cref="SettingsRow"/> values
-    /// rather than a delegate, and the number of call sites grows with every setting added. It is
-    /// scoped to the settings screen and named for it, so it does not read as the general list
-    /// control the rest of the game does without.
+    /// The one hand-drawn list the game does share. <see cref="SaveListView"/> and
+    /// <see cref="ClassListView"/> were deliberately left unfactored because their columns differ
+    /// and a common control would have taken a formatter callback for the sake of two call sites.
+    /// That does not hold here: a menu row is the same shape wherever it appears - a label, a
+    /// value, whether it is in force, and whether it leads deeper - callers hand over plain
+    /// <see cref="MenuRow"/> values rather than a delegate, and the number of call sites grows
+    /// with every setting added.
     /// </para>
     /// </summary>
-    internal sealed class SettingsListView : ThemedView
+    internal sealed class MenuListView : ThemedView
     {
         /// <summary>Two columns for the cursor and two for the active marker.</summary>
         private const int MarkerWidth = 4;
 
-        private IReadOnlyList<SettingsRow> _rows = [];
+        /// <summary>What the chevron on a row that leads deeper costs at the right edge.</summary>
+        private const string Submenu = " >";
+
+        private IReadOnlyList<MenuRow> _rows = [];
         private int _selectedIndex;
 
         /// <summary>What to draw. Setting it keeps the cursor in range of the new rows.</summary>
-        public IReadOnlyList<SettingsRow> Rows
+        public IReadOnlyList<MenuRow> Rows
         {
             get => _rows;
 
@@ -53,7 +55,7 @@ namespace TerminalQuest.Ui
         /// <para>
         /// A page of settings wants its values lined up under each other so they read as a column;
         /// a page of choices wants the aside pushed away from the name it belongs to. Both shapes
-        /// come up, so the page says which it wants.
+        /// come up, so the caller says which it wants.
         /// </para>
         /// </summary>
         public int ValueColumn { get; set; }
@@ -73,9 +75,9 @@ namespace TerminalQuest.Ui
 
             BeginPaint(width, height);
 
-            // No scroll window, unlike the save and class lists: every page here is a handful of
+            // No scroll window, unlike the save and class lists: every menu here is a handful of
             // rows, and keeping the drawn row and its index the same number is what lets the
-            // window drop an editor onto a row without any arithmetic to get wrong.
+            // settings screen drop an editor onto a row without any arithmetic to get wrong.
             for (var row = 0; row < height && row < _rows.Count; row++)
             {
                 DrawRow(_rows[row], row, width);
@@ -84,7 +86,7 @@ namespace TerminalQuest.Ui
             return true;
         }
 
-        private void DrawRow(SettingsRow entry, int row, int width)
+        private void DrawRow(MenuRow entry, int row, int width)
         {
             var isCursor = row == _selectedIndex;
 
@@ -104,24 +106,37 @@ namespace TerminalQuest.Ui
             var label = Fit(entry.Label, Math.Max(0, width - MarkerWidth));
             AddStr(label);
 
+            // The chevron owns the right edge outright, so a long value is dropped or truncated
+            // before the one mark saying this row leads somewhere is.
+            var edge = width;
+
+            if (entry.HasSubmenu && width > MarkerWidth + Submenu.Length)
+            {
+                edge = width - Submenu.Length;
+
+                Move(edge, row);
+                SetRole(TextRole.System);
+                AddStr(Submenu);
+            }
+
             if (entry.Value.Length == 0)
             {
                 return;
             }
 
             var start = MarkerWidth + label.Length + 1;
-            var column = ValueColumn > 0 ? ValueColumn : width - entry.Value.Length;
+            var column = ValueColumn > 0 ? ValueColumn : edge - entry.Value.Length;
 
             // Dropped rather than overlapped: a value crushed against its own label is worse than
             // a value the player can see by widening the terminal.
-            if (column < start)
+            if (column < start || column >= edge)
             {
                 return;
             }
 
             Move(column, row);
             SetRole(TextRole.System);
-            AddStr(Fit(entry.Value, Math.Max(0, width - column)));
+            AddStr(Fit(entry.Value, edge - column));
         }
 
         private int Clamp(int index) => Math.Clamp(index, 0, Math.Max(0, _rows.Count - 1));

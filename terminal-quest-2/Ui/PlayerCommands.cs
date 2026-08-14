@@ -288,7 +288,7 @@ namespace TerminalQuest.Ui
                 var line = new StyledLine();
                 line.Append("  ", TextRole.System);
                 line.Append(save.Name, save.Name == store.Name ? TextRole.Item : TextRole.Normal);
-                line.Append($"  turn {save.Turn}", TextRole.System);
+                line.Append($"  turn {save.Turn}  {save.SizeText}", TextRole.System);
                 lines.Add(line);
             }
 

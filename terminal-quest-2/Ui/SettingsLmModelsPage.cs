@@ -28,21 +28,21 @@ namespace TerminalQuest.Ui
 
         public override bool CanSelect(int index) => index >= 0 && index <= _models.Count;
 
-        public override IReadOnlyList<SettingsRow> Rows
+        public override IReadOnlyList<MenuRow> Rows
         {
             get
             {
                 var stored = Draft.LmStudioModel?.Trim() ?? string.Empty;
-                var rows = new SettingsRow[_models.Count + 1];
+                var rows = new MenuRow[_models.Count + 1];
 
                 // Leaving it unset is a real answer, not an absence of one: the server narrates
                 // with whatever it has loaded, which is what a single-model setup wants.
-                rows[0] = new SettingsRow(Unset, string.Empty, stored.Length == 0);
+                rows[0] = new MenuRow(Unset, string.Empty, stored.Length == 0);
 
                 for (var index = 0; index < _models.Count; index++)
                 {
                     var name = _models[index];
-                    rows[index + 1] = new SettingsRow(
+                    rows[index + 1] = new MenuRow(
                         name,
                         string.Empty,
                         string.Equals(name, stored, StringComparison.Ordinal));

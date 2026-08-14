@@ -28,16 +28,16 @@ namespace TerminalQuest.Ui
         public override string Hint =>
             "Enter picks the adapter.  Right opens its settings.  Left goes back.  Ctrl+Enter saves.";
 
-        public override IReadOnlyList<SettingsRow> Rows
+        public override IReadOnlyList<MenuRow> Rows
         {
             get
             {
-                var rows = new SettingsRow[Adapters.Length];
+                var rows = new MenuRow[Adapters.Length];
 
                 for (var index = 0; index < Adapters.Length; index++)
                 {
                     var (provider, name, detail) = Adapters[index];
-                    rows[index] = new SettingsRow(name, detail, provider == Draft.Provider);
+                    rows[index] = new MenuRow(name, detail, provider == Draft.Provider, HasSubmenu: true);
                 }
 
                 return rows;

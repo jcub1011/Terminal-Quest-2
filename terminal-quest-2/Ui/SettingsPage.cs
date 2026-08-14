@@ -32,14 +32,14 @@ namespace TerminalQuest.Ui
         /// The rows, rebuilt from <see cref="Draft"/> on every read so a change made on this page
         /// or a deeper one is on screen without anything having to invalidate anything.
         /// </summary>
-        public abstract IReadOnlyList<SettingsRow> Rows { get; }
+        public abstract IReadOnlyList<MenuRow> Rows { get; }
 
         /// <summary>What the keys do here, for the hint line.</summary>
         public abstract string Hint { get; }
 
         /// <summary>
         /// Where the value column starts, or 0 to right-align. See
-        /// <see cref="SettingsListView.ValueColumn"/>.
+        /// <see cref="MenuListView.ValueColumn"/>.
         /// </summary>
         public virtual int ValueColumn => 0;
 

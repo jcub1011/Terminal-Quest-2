@@ -49,7 +49,7 @@ namespace TerminalQuest.Ui
         private readonly List<(SettingsPage Page, int Cursor)> _trail = [];
 
         private readonly BreadcrumbView _breadcrumb;
-        private readonly SettingsListView _list;
+        private readonly MenuListView _list;
         private readonly Label _hint;
         private readonly TextField _editor;
 
@@ -83,7 +83,7 @@ namespace TerminalQuest.Ui
                 Height = 1,
             };
 
-            _list = new SettingsListView
+            _list = new MenuListView
             {
                 X = 0,
                 Y = Pos.Bottom(_breadcrumb),
@@ -139,9 +139,9 @@ namespace TerminalQuest.Ui
 
         protected override bool OnKeyDown(Key key)
         {
-            // Two Escs in a row is the only thing that discards; anything else in between means
-            // the player was not answering that question.
-            if (key != Key.Esc)
+            // Two presses of a leaving key in a row is the only thing that discards; anything else
+            // in between means the player was not answering that question.
+            if (key != Key.Esc && key != Key.CursorLeft)
             {
                 _discardArmed = false;
             }
@@ -229,15 +229,13 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
+            // Left and Esc both walk up a level, and the settings screen is itself one level below
+            // the start page - so from the top of the trail they leave, guarded by the same
+            // unsaved-changes prompt either way. Nothing here can walk a player out of settings
+            // they have not saved without asking.
             if (key == Key.CursorLeft)
             {
-                // Only ever up the tree. Leaving the screen is Esc's job, so an arrow key cannot
-                // walk a player out of settings they have not saved.
-                if (_trail.Count > 1)
-                {
-                    GoBack();
-                }
-
+                GoBack();
                 return true;
             }
 
@@ -341,7 +339,7 @@ namespace TerminalQuest.Ui
             if (!_discardArmed)
             {
                 _discardArmed = true;
-                Fail("Unsaved changes.  Ctrl+Enter saves, Esc again discards.");
+                Fail("Unsaved changes.  Ctrl+Enter saves, Esc or Left again discards.");
                 return;
             }
 

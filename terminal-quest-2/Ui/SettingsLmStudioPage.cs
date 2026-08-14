@@ -33,7 +33,7 @@ namespace TerminalQuest.Ui
 
         public override int ValueColumn => ValuesAt;
 
-        public override IReadOnlyList<SettingsRow> Rows =>
+        public override IReadOnlyList<MenuRow> Rows =>
         [
             new("Address", Draft.LmStudioBaseUrl, false),
             new("Model", Draft.LmStudioModel is { Length: > 0 } model ? model : Unset, false),

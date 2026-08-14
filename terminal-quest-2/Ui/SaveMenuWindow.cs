@@ -8,11 +8,17 @@ using TerminalQuest.Saves;
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The startup screen: pick a save, or name a new one.
+    /// The startup screen: continue, load, start something new, or leave.
     /// <para>
     /// This runs before the narrator process exists, because the save folder has to be known
     /// before the MCP server can be pointed at it - the choice made here becomes a command-line
     /// argument to a child process, so it cannot be deferred.
+    /// </para>
+    /// <para>
+    /// Two levels, in the shape <see cref="SettingsWindow"/> established: the options, and the
+    /// list of saves behind Load. The view tree is built once and never changes - switching levels
+    /// swaps which list is visible and nothing else. Two levels rather than a page trail because
+    /// there are only ever two and their rows are different shapes.
     /// </para>
     /// <para>
     /// Owns no game logic. It sets <see cref="Chosen"/> and stops; the host decides what opening
@@ -21,26 +27,44 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class SaveMenuWindow : Window
     {
-        private const int InputHeight = 3;
-        private const int HintHeight = 1;
-        private const int NarratorHeight = 1;
+        /// <summary>The narrator line, the hint line, and the row the editor sits on.</summary>
+        private const int FooterHeight = 3;
 
-        private const string Hint =
-            "Up/Down and Enter to continue a save.  Del deletes one.  Ctrl+S for settings.  Esc quits.";
+        private const string OptionsHint =
+            "Press the letter in brackets, or Up/Down and Enter.  Right opens a submenu.";
 
-        private readonly SaveListView _list;
-        private readonly TextField _name;
-        private readonly Label _error;
+        private const string SavesHint =
+            "Enter loads.  R renames.  D duplicates.  X deletes.  Left goes back.";
+
+        /// <summary>Where the options live, so the keys and the rows cannot drift apart.</summary>
+        private const int ContinueRow = 0;
+        private const int LoadRow = 1;
+        private const int NewSaveRow = 2;
+        private const int SettingsRow = 3;
+        private const int QuitRow = 4;
+
+        private readonly MenuListView _options;
+        private readonly SaveListView _saves;
+        private readonly BreadcrumbView _breadcrumb;
         private readonly Label _narrator;
+        private readonly Label _hint;
+        private readonly Label _prompt;
+        private readonly TextField _editor;
+
+        private Level _level = Level.Options;
+        private Editing _editing = Editing.None;
 
         /// <summary>
-        /// The save the next Del keypress will destroy, or null when nothing is half-confirmed.
+        /// The save the next X keypress will destroy, or null when nothing is half-confirmed.
         /// <para>
-        /// Held by name rather than by index: the list is rebuilt after every delete, and an index
-        /// would quietly come to mean a different save.
+        /// Held by name rather than by index: the list is rebuilt and re-sorted after every
+        /// operation, and an index would quietly come to mean a different save.
         /// </para>
         /// </summary>
         private string? _pendingDelete;
+
+        /// <summary>The save being renamed, held by name for the same reason.</summary>
+        private string? _renaming;
 
         /// <param name="narrator">
         /// A one-line summary of the provider a game started here would use. Shown because the
@@ -53,56 +77,84 @@ namespace TerminalQuest.Ui
             BorderStyle = LineStyle.Rounded;
             SetScheme(Theme.CreateScheme());
 
-            _list = new SaveListView
-            {
-                X = 0,
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill() - (InputHeight + HintHeight + NarratorHeight),
-                Saves = ReadSaves(out var failure),
-            };
-
-            _narrator = new Label
-            {
-                X = 0,
-                Y = Pos.Bottom(_list),
-                Width = Dim.Fill(),
-                Height = NarratorHeight,
-                Text = $"Narrator: {narrator}",
-            };
-            _narrator.SetScheme(Theme.CreateScheme());
-
-            _error = new Label
-            {
-                X = 0,
-                Y = Pos.Bottom(_narrator),
-                Width = Dim.Fill(),
-                Height = HintHeight,
-                Text = failure ?? Hint,
-            };
-            _error.SetScheme(Theme.CreateScheme());
-
-            _name = new TextField
+            _breadcrumb = new BreadcrumbView
             {
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
                 Height = 1,
             };
-            _name.Accepting += OnNameAccepting;
 
-            var frame = new FrameView
+            // Both lists own the same rectangle; only the one for the current level is visible.
+            _options = new MenuListView
             {
-                Title = "new save name",
                 X = 0,
-                Y = Pos.Bottom(_error),
+                Y = Pos.Bottom(_breadcrumb),
                 Width = Dim.Fill(),
-                Height = InputHeight,
-                BorderStyle = LineStyle.Rounded,
+                Height = Dim.Fill() - FooterHeight,
             };
-            frame.Add(_name);
 
-            Add(_list, _narrator, _error, frame);
+            _saves = new SaveListView
+            {
+                X = 0,
+                Y = Pos.Bottom(_breadcrumb),
+                Width = Dim.Fill(),
+                Height = Dim.Fill() - FooterHeight,
+                Visible = false,
+            };
+
+            _narrator = Line($"Narrator: {narrator}", Pos.Bottom(_options));
+            _hint = Line(string.Empty, Pos.Bottom(_narrator));
+
+            _prompt = Line(string.Empty, Pos.Bottom(_hint));
+            _prompt.Width = Dim.Auto();
+            _prompt.Visible = false;
+
+            // One editor for both jobs - naming a new save and renaming an old one - on its own
+            // row rather than dropped onto a list row. The save list scrolls, so a row's index and
+            // its position on screen are not the same number, and there is no arithmetic here to
+            // get wrong.
+            _editor = new TextField
+            {
+                X = Pos.Right(_prompt),
+                Y = Pos.Bottom(_hint),
+                Width = Dim.Fill(),
+                Height = 1,
+                Visible = false,
+                CanFocus = false,
+            };
+            _editor.SetScheme(Theme.CreateScheme());
+            _editor.Accepting += OnEditorAccepting;
+
+            Add(_breadcrumb, _options, _saves, _narrator, _hint, _prompt, _editor);
+
+            Reload(out var failure);
+            ShowLevel();
+
+            if (failure is not null)
+            {
+                Fail(failure);
+            }
+
+            // The window has no visible focusable child while browsing, so it has to hold focus
+            // itself for the keys to arrive at all. Asked for here rather than in the constructor
+            // because that is too early to stick.
+            Initialized += (_, _) => SetFocus();
+        }
+
+        /// <summary>Which of the two levels is on screen.</summary>
+        private enum Level
+        {
+            Options,
+            Saves,
+        }
+
+        /// <summary>What the editor on the bottom row is currently collecting, if anything.</summary>
+        private enum Editing
+        {
+            None,
+            NewSave,
+            Rename,
         }
 
         /// <summary>The save the player settled on, or null when they quit instead.</summary>
@@ -120,44 +172,166 @@ namespace TerminalQuest.Ui
         /// </summary>
         public event Action? SettingsRequested;
 
-        protected override bool OnKeyDown(Key key)
+        protected override bool OnKeyDown(Key key) =>
+            _editing != Editing.None ? OnKeyDownEditing(key)
+            : _level == Level.Saves ? OnKeyDownSaves(key)
+            : OnKeyDownOptions(key);
+
+        /// <summary>
+        /// Keys while a name is being typed.
+        /// <para>
+        /// The focused editor has already had its turn by the time this runs - Terminal.Gui offers
+        /// a key to the focused subview first - so everything printable, and Enter, is gone before
+        /// we see it. That is what keeps the bare letters on the saves level from firing at a
+        /// player who is only spelling a name. The important key here is Esc: it has to close the
+        /// editor and stop, or a single press would close the editor and back out of the level
+        /// underneath it in one go.
+        /// </para>
+        /// </summary>
+        private bool OnKeyDownEditing(Key key)
         {
-            if (key == Key.Esc || key == Key.Q.WithCtrl)
+            if (key == Key.Esc)
+            {
+                EndEdit();
+                ShowHint();
+                return true;
+            }
+
+            // Swallowed: the arrows belong to the text, and a field ignores them at either end of
+            // what is typed. One arriving here would move a list the player cannot see the cursor
+            // on, or walk out of the level underneath.
+            if (key == Key.CursorUp || key == Key.CursorDown
+                || key == Key.CursorLeft || key == Key.CursorRight)
+            {
+                return true;
+            }
+
+            if (key == Key.Q.WithCtrl)
             {
                 Cancelled?.Invoke();
                 return true;
             }
 
-            if (key == Key.S.WithCtrl)
+            return base.OnKeyDown(key);
+        }
+
+        private bool OnKeyDownOptions(Key key)
+        {
+            // Esc is Quit's second key rather than a separate act: on the options level there is
+            // nothing left to back out of, so leaving is all it can mean.
+            if (Letter(key, Key.Q) || key == Key.Esc || key == Key.Q.WithCtrl)
+            {
+                Cancelled?.Invoke();
+                return true;
+            }
+
+            if (Letter(key, Key.C))
+            {
+                Continue();
+                return true;
+            }
+
+            if (Letter(key, Key.L))
+            {
+                GoToSaves();
+                return true;
+            }
+
+            if (Letter(key, Key.N))
+            {
+                BeginNewSave();
+                return true;
+            }
+
+            if (Letter(key, Key.S))
             {
                 SettingsRequested?.Invoke();
                 return true;
             }
 
-            // Del means "delete the highlighted save" only while the name box is empty. With text
-            // in it the player is editing, and Del has to keep its ordinary meaning there - the
-            // same empty-box convention that decides what Enter does.
-            if (key == Key.Delete && (_name.Text?.Length ?? 0) == 0)
-            {
-                Delete();
-                return true;
-            }
-
-            // Any key that is not Del abandons a half-confirmed delete, so a pending confirmation
-            // cannot survive the player moving on and be triggered by an unrelated Del later.
-            CancelPendingDelete();
-
-            // The arrows drive the list even though focus lives in the name field, so continuing
-            // an existing save never needs a Tab first.
             if (key == Key.CursorUp)
             {
-                _list.MoveSelection(-1);
+                _options.MoveSelection(-1);
                 return true;
             }
 
             if (key == Key.CursorDown)
             {
-                _list.MoveSelection(1);
+                _options.MoveSelection(1);
+                return true;
+            }
+
+            // Enter and Right are the same act here: every option either does something or leads
+            // somewhere, and none of them is a value to choose between.
+            if (key == Key.Enter || key == Key.CursorRight)
+            {
+                Activate(_options.SelectedIndex);
+                return true;
+            }
+
+            return base.OnKeyDown(key);
+        }
+
+        private bool OnKeyDownSaves(Key key)
+        {
+            // Esc backs out one level rather than quitting: leaving the game is what Esc means on
+            // the options level, one press further out.
+            if (key == Key.Esc || key == Key.CursorLeft)
+            {
+                CancelPendingDelete();
+                GoToOptions();
+                return true;
+            }
+
+            if (key == Key.Q.WithCtrl)
+            {
+                Cancelled?.Invoke();
+                return true;
+            }
+
+            // Del is kept alongside X, because it is what this screen has always answered to.
+            if (Letter(key, Key.X) || key == Key.Delete)
+            {
+                Delete();
+                return true;
+            }
+
+            // Any key that is not the delete key abandons a half-confirmed delete, so a pending
+            // confirmation cannot survive the player moving on and be triggered by an unrelated
+            // press later.
+            CancelPendingDelete();
+
+            if (key == Key.CursorUp)
+            {
+                _saves.MoveSelection(-1);
+                return true;
+            }
+
+            if (key == Key.CursorDown)
+            {
+                _saves.MoveSelection(1);
+                return true;
+            }
+
+            if (key == Key.Enter)
+            {
+                if (_saves.Selected is { } selected)
+                {
+                    Open(selected.Name);
+                }
+
+                return true;
+            }
+
+            if (Letter(key, Key.R))
+            {
+                BeginRename();
+                return true;
+            }
+
+            if (Letter(key, Key.D))
+            {
+                Duplicate();
                 return true;
             }
 
@@ -165,12 +339,167 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Del once asks, Del again destroys. A save is a playthrough, and there is no undo - but
-        /// a modal here would be the only one in the game, so the confirmation is the second press.
+        /// Whether a keypress is a letter, in either case. The unshifted key is what the hint line
+        /// names, but a player with caps lock on sends the shifted one and means the same thing.
+        /// </summary>
+        private static bool Letter(Key key, Key letter) => key == letter || key == letter.WithShift;
+
+        private void Activate(int index)
+        {
+            switch (index)
+            {
+                case ContinueRow:
+                    Continue();
+                    break;
+
+                case LoadRow:
+                    GoToSaves();
+                    break;
+
+                case NewSaveRow:
+                    BeginNewSave();
+                    break;
+
+                case SettingsRow:
+                    SettingsRequested?.Invoke();
+                    break;
+
+                case QuitRow:
+                    Cancelled?.Invoke();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Opens the save saved most recently, which is the first one the list hands back. Nothing
+        /// tracks a "last played" pointer separately: <see cref="SaveMetadata.LastPlayed"/> is
+        /// stamped after every turn and <see cref="SavePaths.List"/> already sorts on it.
+        /// </summary>
+        private void Continue()
+        {
+            if (Latest() is not { } latest)
+            {
+                Fail("There is nothing to continue yet.  New Save starts one.");
+                return;
+            }
+
+            Open(latest.Name);
+        }
+
+        private void GoToSaves()
+        {
+            if (_saves.Saves.Count == 0)
+            {
+                Fail("There are no saves to load yet.  New Save starts one.");
+                return;
+            }
+
+            _level = Level.Saves;
+            ShowLevel();
+        }
+
+        private void GoToOptions()
+        {
+            _level = Level.Options;
+            ShowLevel();
+        }
+
+        /// <summary>
+        /// Asks for a name, then makes a save nobody has played. Unlike the box this screen used
+        /// to have, a name that is already taken is refused rather than quietly loaded: New Save
+        /// says what it means, and Load is right above it for the other case.
+        /// </summary>
+        private void BeginNewSave()
+        {
+            _editing = Editing.NewSave;
+            BeginEdit("new save name: ", string.Empty);
+            SetHint("Enter creates it.  Esc goes back.");
+        }
+
+        private void BeginRename()
+        {
+            if (_saves.Selected is not { } selected)
+            {
+                return;
+            }
+
+            _renaming = selected.Name;
+            _editing = Editing.Rename;
+            BeginEdit($"rename '{selected.Name}' to: ", selected.Name);
+            SetHint("Enter renames it.  Esc leaves it alone.");
+        }
+
+        /// <summary>Takes what was typed. The editor stays open when the name will not do.</summary>
+        private void Commit()
+        {
+            var typed = _editor.Text?.Trim() ?? string.Empty;
+            var editing = _editing;
+
+            if (typed.Length == 0)
+            {
+                Fail("Type a name first.");
+                return;
+            }
+
+            if (!SavePaths.IsValidName(typed))
+            {
+                Fail("That name will not work as a folder. Avoid \\ / : * ? \" < > |");
+                return;
+            }
+
+            if (editing == Editing.NewSave)
+            {
+                if (SavePaths.Exists(typed))
+                {
+                    Fail($"There is already a save called '{typed}'.  Load it instead.");
+                    return;
+                }
+
+                EndEdit();
+                Open(typed);
+                return;
+            }
+
+            if (_renaming is not { } from)
+            {
+                EndEdit();
+                return;
+            }
+
+            // Nothing typed but the name it already had. Closing quietly is the honest answer;
+            // announcing a rename that did not happen is not.
+            if (string.Equals(from, typed, StringComparison.Ordinal))
+            {
+                EndEdit();
+                ShowHint();
+                return;
+            }
+
+            try
+            {
+                SavePaths.Rename(from, typed);
+            }
+            catch (Exception ex) when (ex is SaveException or ArgumentException)
+            {
+                Fail(ex.Message);
+                return;
+            }
+
+            EndEdit();
+            Reload(out var failure);
+
+            // By name, because the list has been re-sorted around the new one.
+            _saves.Select(typed);
+            Fail(failure ?? $"Renamed '{from}' to '{typed}'.");
+        }
+
+        /// <summary>
+        /// X once asks, X again destroys. A save is a playthrough, and there is no undo - but a
+        /// modal here would be the only one in the game, so the confirmation is the second press.
         /// </summary>
         private void Delete()
         {
-            if (_list.Selected is not { } selected)
+            if (_saves.Selected is not { } selected)
             {
                 Fail("There is no save to delete.");
                 return;
@@ -179,7 +508,7 @@ namespace TerminalQuest.Ui
             if (!SaveStore.Matches(_pendingDelete, selected.Name))
             {
                 _pendingDelete = selected.Name;
-                Fail($"Delete '{selected.Name}' and everything in it? Del again to confirm.");
+                Fail($"Delete '{selected.Name}' and everything in it?  X again to confirm.");
                 return;
             }
 
@@ -195,58 +524,40 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            _list.Saves = ReadSaves(out var failure);
+            Reload(out var failure);
+
+            // The last save can be deleted from in here, and an empty list has nothing to act on.
+            if (_saves.Saves.Count == 0)
+            {
+                GoToOptions();
+            }
+
             Fail(failure ?? $"Deleted '{selected.Name}'.");
         }
 
-        private void CancelPendingDelete()
+        private void Duplicate()
         {
-            if (_pendingDelete is null)
+            if (_saves.Selected is not { } selected)
             {
+                Fail("There is no save to duplicate.");
                 return;
             }
 
-            _pendingDelete = null;
-            Fail(Hint);
-        }
+            string copy;
 
-        public void FocusInput() => _name.SetFocus();
-
-        private void OnNameAccepting(object? sender, CommandEventArgs e)
-        {
-            // Handled either way: Enter must never propagate up and trigger a default accept on
-            // the window itself.
-            e.Handled = true;
-
-            var typed = _name.Text?.Trim() ?? string.Empty;
-
-            // An empty box means "continue what is highlighted"; text in it means "make this one".
-            if (typed.Length == 0)
+            try
             {
-                if (_list.Selected is not { } selected)
-                {
-                    Fail("Type a name to start a new save.");
-                    return;
-                }
-
-                Open(selected.Name);
+                copy = SavePaths.Duplicate(selected.Name);
+            }
+            catch (Exception ex) when (ex is SaveException or ArgumentException)
+            {
+                Fail(ex.Message);
                 return;
             }
 
-            if (!SavePaths.IsValidName(typed))
-            {
-                Fail("That name will not work as a folder. Avoid \\ / : * ? \" < > |");
-                return;
-            }
-
-            if (SavePaths.Exists(typed))
-            {
-                // Loading it is almost certainly what was meant, and is not destructive either way.
-                Open(typed);
-                return;
-            }
-
-            Open(typed);
+            Reload(out var failure);
+            _saves.Select(copy);
+            Fail(failure ?? $"Copied '{selected.Name}' to '{copy}'.");
         }
 
         private void Open(string name)
@@ -264,13 +575,124 @@ namespace TerminalQuest.Ui
             Done?.Invoke();
         }
 
-        private void Fail(string message)
+        private void CancelPendingDelete()
         {
-            _error.Text = message;
-            _error.SetNeedsDraw();
+            if (_pendingDelete is null)
+            {
+                return;
+            }
+
+            _pendingDelete = null;
+            ShowHint();
         }
 
-        private static IReadOnlyList<SaveMetadata> ReadSaves(out string? failure)
+        private void BeginEdit(string prompt, string text)
+        {
+            _prompt.Text = prompt;
+            _prompt.Visible = true;
+
+            _editor.Text = text;
+            _editor.CanFocus = true;
+            _editor.Visible = true;
+            _editor.SetFocus();
+        }
+
+        /// <summary>Puts the editor away, taking the focus off it before it goes.</summary>
+        private void EndEdit()
+        {
+            SetFocus();
+
+            _editor.Visible = false;
+            _editor.CanFocus = false;
+            _editor.Text = string.Empty;
+            _prompt.Visible = false;
+
+            _editing = Editing.None;
+            _renaming = null;
+        }
+
+        /// <summary>Enter inside the editor. Handled either way, so it never reaches the window.</summary>
+        private void OnEditorAccepting(object? sender, CommandEventArgs e)
+        {
+            e.Handled = true;
+            Commit();
+        }
+
+        /// <summary>Rebuilds the rows and the breadcrumb after the level has changed.</summary>
+        private void ShowLevel()
+        {
+            var onSaves = _level == Level.Saves;
+
+            _breadcrumb.Crumbs = onSaves ? ["Terminal Quest", "Load"] : ["Terminal Quest"];
+            _options.Visible = !onSaves;
+            _saves.Visible = onSaves;
+
+            RefreshOptions();
+            ShowHint();
+        }
+
+        /// <summary>
+        /// Rebuilt rather than kept, because Continue names a save that a delete, a rename or a
+        /// duplicate may have just changed.
+        /// </summary>
+        private void RefreshOptions()
+        {
+            var cursor = _options.SelectedIndex;
+
+            _options.Rows =
+            [
+                Latest() is { } save
+                    ? new MenuRow($"[C]ontinue [{save.Name}]", string.Empty)
+                    : new MenuRow("[C]ontinue", "no saves yet"),
+                new MenuRow("[L]oad", string.Empty, HasSubmenu: true),
+                new MenuRow("[N]ew Save", string.Empty),
+                new MenuRow("[S]ettings", string.Empty, HasSubmenu: true),
+                new MenuRow("[Q]uit", string.Empty),
+            ];
+
+            _options.SelectedIndex = cursor;
+        }
+
+        /// <summary>Reloads the save list from disk, and with it the Continue row.</summary>
+        private void Reload(out string? failure)
+        {
+            _saves.Saves = ReadSaves(out failure);
+            RefreshOptions();
+        }
+
+        private SaveEntry? Latest() => _saves.Saves.Count > 0 ? _saves.Saves[0] : null;
+
+        private void ShowHint() => SetHint(_level == Level.Saves ? SavesHint : OptionsHint);
+
+        private void Fail(string message) => SetHint(message);
+
+        private void SetHint(string text)
+        {
+            if (_hint.Text == text)
+            {
+                return;
+            }
+
+            _hint.Text = text;
+            _hint.SetNeedsDraw();
+        }
+
+        private static Label Line(string text, Pos y)
+        {
+            var label = new Label
+            {
+                X = 0,
+                Y = y,
+                Width = Dim.Fill(),
+                Height = 1,
+                Text = text,
+            };
+
+            label.SetScheme(Theme.CreateScheme());
+            return label;
+        }
+
+        private static IReadOnlyList<SaveEntry> ReadSaves(out string? failure)
         {
             try
             {

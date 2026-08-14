@@ -26,7 +26,7 @@ namespace TerminalQuest.Ui
         // still not something to open.
         public override bool CanSelect(int index) => index >= 0 && index < Rows.Count;
 
-        public override IReadOnlyList<SettingsRow> Rows
+        public override IReadOnlyList<MenuRow> Rows
         {
             get
             {
@@ -38,17 +38,17 @@ namespace TerminalQuest.Ui
                 // this list has never heard of. Showing it as an extra row is the honest answer:
                 // the player sees what is actually in force and can leave it be, where silently
                 // rewriting it to something nearby would change their game without asking.
-                var rows = new SettingsRow[known.Length + (match < 0 ? 1 : 0)];
+                var rows = new MenuRow[known.Length + (match < 0 ? 1 : 0)];
 
                 for (var index = 0; index < known.Length; index++)
                 {
                     var entry = known[index];
-                    rows[index] = new SettingsRow(entry.Name, entry.Detail, index == match);
+                    rows[index] = new MenuRow(entry.Name, entry.Detail, index == match);
                 }
 
                 if (match < 0)
                 {
-                    rows[^1] = new SettingsRow("(custom)", stored, true);
+                    rows[^1] = new MenuRow("(custom)", stored, true);
                 }
 
                 return rows;

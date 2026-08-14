@@ -19,11 +19,11 @@ namespace TerminalQuest.Ui
         public override string Title => "Settings";
 
         public override string Hint =>
-            "Enter or Right opens a tab.  Ctrl+Enter saves.  Esc leaves.";
+            "Enter or Right opens a tab.  Ctrl+Enter saves.  Left or Esc leaves.";
 
-        public override IReadOnlyList<SettingsRow> Rows =>
+        public override IReadOnlyList<MenuRow> Rows =>
         [
-            new("Model Selection", Summary(), false),
+            new("Model Selection", Summary(), HasSubmenu: true),
         ];
 
         public override SettingsPage? Enter(int index) =>
