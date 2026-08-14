@@ -161,6 +161,11 @@ namespace TerminalQuest.Ui
         /// The list of commands, read out of <see cref="All"/> rather than written out again here,
         /// so a command added to the table cannot go unmentioned. Aliases are left out: they are
         /// spellings of rows already on the list, not further things the game does.
+        /// <para>
+        /// The keys underneath are written out, because they are not commands and have no table:
+        /// <see cref="All"/> is paired with the switch in <see cref="Execute"/>, and a row added
+        /// there for a key would be a suggestion that errors when taken.
+        /// </para>
         /// </summary>
         private static void Help(List<StyledLine> lines)
         {
@@ -175,6 +180,15 @@ namespace TerminalQuest.Ui
             }
 
             lines.Add(StyledLine.FromText("Anything else is spoken to the world.", TextRole.System));
+
+            lines.Add(StyledLine.FromText("Keys", TextRole.System));
+
+            // First on the list, and named as the terminal's rather than the game's, because that
+            // is what it is: the game draws characters and never chooses their size.
+            Describe(lines, "Ctrl+= / Ctrl+-", "your terminal's own text size");
+            Describe(lines, "PgUp / PgDn", "scroll the transcript");
+            Describe(lines, "Ctrl+G", "write this line in an editor");
+            Describe(lines, "Esc", "back to the menu");
         }
 
         private static void Story(List<StyledLine> lines, SaveStore store)

@@ -16,6 +16,16 @@ namespace TerminalQuest.Ui
     /// or none of it. What it costs is the terminal's own selection and clipboard: in Windows
     /// Terminal those move onto Shift+drag and Shift+right-click, and Ctrl+Shift+C/V are unaffected.
     /// </para>
+    /// <para>
+    /// Windows Terminal's own Ctrl+Scroll font zoom is a third cost, and the one with no shifted
+    /// spelling to move onto: with reporting on, the terminal forwards Ctrl+wheel to us rather than
+    /// acting on it. There is no way to have both. Reporting is all-or-nothing, no escape sequence
+    /// sets the font - Windows Terminal does not implement xterm's OSC 50 - and SetCurrentConsoleFontEx
+    /// is a silent no-op under ConPTY, which is what Windows Terminal is. So the game cannot resize
+    /// its own text and must not pretend to. Ctrl+= and Ctrl+- are untouched by any of this, being
+    /// keyboard bindings the terminal consumes before we are offered them, and they are what the
+    /// hints on the save menu, at the head of a session, and under /help point players at.
+    /// </para>
     /// </summary>
     internal static class MouseReporting
     {

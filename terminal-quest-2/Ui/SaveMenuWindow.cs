@@ -36,6 +36,13 @@ namespace TerminalQuest.Ui
         private const string OptionsHint =
             "Press the letter in brackets, or Up/Down and Enter.  Right opens a submenu.";
 
+        /// <summary>
+        /// The second options row. Not a key of this menu's at all - it is the terminal's - but this
+        /// is the first screen a player sees, which makes it where the note is worth the row.
+        /// </summary>
+        private const string OptionsHintMore =
+            "Ctrl+= and Ctrl+- resize your terminal's text.";
+
         private const string SavesHint =
             "Enter loads.  R renames.  D duplicates.";
 
@@ -790,7 +797,7 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            SetHint(OptionsHint);
+            SetHint(OptionsHint, OptionsHintMore);
         }
 
         private void Fail(string message) => SetHint(message);

@@ -261,6 +261,13 @@ namespace TerminalQuest
             window.Narration.AddLine(
                 "Type a command and press Enter. /help lists yours. The wheel and PgUp/PgDn scroll. Esc returns to the menu.",
                 TextRole.System);
+
+            // Its own line rather than folded into the one above, because the players who need it
+            // are the ones least well served by a long line. The terminal's keys rather than the
+            // game's: see MouseReporting for why Ctrl+Scroll is not among them.
+            window.Narration.AddLine(
+                "Most terminals resize their own text with Ctrl+= and Ctrl+-.",
+                TextRole.System);
             window.Narration.AddBlankLine();
 
             if (startupError is not null)
