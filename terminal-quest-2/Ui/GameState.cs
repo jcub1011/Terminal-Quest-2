@@ -62,12 +62,11 @@ namespace TerminalQuest.Ui
             SaveName = store.Name;
 
             var characters = store.ReadCharacters();
-            var playerName = SaveStore.PlayerName(characters);
-            var player = SaveStore.FindCharacter(characters, playerName);
+            var player = SaveStore.Player(characters);
 
             Health = player?.Health ?? 0;
             MaxHealth = player?.MaxHealth ?? 0;
-            Location = SaveStore.LocationOf(store.ReadLocations(), playerName)?.Name ?? string.Empty;
+            Location = SaveStore.WhereIs(store.ReadLocations(), player?.Id)?.Name ?? string.Empty;
 
             var inventory = store.ReadInventory();
             Money = inventory.Money;

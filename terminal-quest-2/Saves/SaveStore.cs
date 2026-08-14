@@ -29,6 +29,16 @@ namespace TerminalQuest.Saves
 
         private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+        /// <summary>
+        /// The save shape this build writes and can read.
+        /// <para>
+        /// 1 was the original, where a character's name was their identity. 2 gave characters,
+        /// locations and items opaque ids and turned rosters and memory subjects into references to
+        /// them; the two are not interchangeable, and a version 1 save is not converted.
+        /// </para>
+        /// </summary>
+        public const int CurrentSchemaVersion = 2;
+
         public SaveStore(string directory)
         {
             ArgumentException.ThrowIfNullOrEmpty(directory);
@@ -68,7 +78,49 @@ namespace TerminalQuest.Saves
         /// </summary>
         public int CurrentTurn() => ReadMetadata().Turn;
 
+        /// <summary>
+        /// Throws unless this save is one this build can play.
+        /// <para>
+        /// Called before anything reads the world and, crucially, before the narrator is started:
+        /// a narrator pointed at a save this build misreads would see a half-empty world through
+        /// <c>get_state</c> and cheerfully write a new one on top of it.
+        /// </para>
+        /// <para>
+        /// A save with nobody in it is adopted rather than rejected, whatever its metadata says.
+        /// There is no playthrough in it to lose, and an empty folder is what both the save menu
+        /// and an older build leave behind.
+        /// </para>
+        /// </summary>
+        /// <exception cref="SaveException">
+        /// The save predates <see cref="CurrentSchemaVersion"/>, or postdates this build.
+        /// </exception>
+        public void RequireSupportedSchema()
+        {
+            var version = ReadMetadata().SchemaVersion;
+
+            if (version == CurrentSchemaVersion)
+            {
+                return;
+            }
+
+            if (version == 0 && ReadCharacters().Characters.Count == 0)
+            {
+                return;
+            }
+
+            throw new SaveException(version < CurrentSchemaVersion
+                ? $"'{Name}' was saved before characters, places and items had stable identifiers, "
+                + "and cannot be opened by this version. Older saves are not converted - start a new game."
+                : $"'{Name}' was saved by a newer version of Terminal Quest. Update the game, or start a new game.");
+        }
+
         /// <summary>Stamps the save as played, recording the turn reached.</summary>
+        /// <remarks>
+        /// Deliberately does not stamp <see cref="SaveMetadata.SchemaVersion"/>, though it repairs
+        /// <see cref="SaveMetadata.Name"/> and <see cref="SaveMetadata.Created"/>. Filling the
+        /// version in here would quietly promote a genuine old save to the current shape on the
+        /// first turn - which is the exact thing <see cref="RequireSupportedSchema"/> exists to stop.
+        /// </remarks>
         public void Touch(int turn)
         {
             var metadata = ReadMetadata();
@@ -89,7 +141,14 @@ namespace TerminalQuest.Saves
             WriteMetadata(metadata);
         }
 
-        /// <summary>Finds a character by name, case-insensitively. Null when there is no such character.</summary>
+        /// <summary>
+        /// Finds a character by name, case-insensitively. Null when there is no such character.
+        /// </summary>
+        /// <remarks>
+        /// The name half of the seam: what the narrator and the player say, turned into the record
+        /// that holds the id everything else points at. Look up by <see cref="FindCharacterById"/>
+        /// once you are past it.
+        /// </remarks>
         public static Character? FindCharacter(CharacterFile file, string? name) =>
             name is { Length: > 0 }
                 ? file.Characters.Find(character => Matches(character.Name, name))
@@ -101,15 +160,38 @@ namespace TerminalQuest.Saves
                 ? file.Locations.Find(location => Matches(location.Name, name))
                 : null;
 
-        /// <summary>The name of the character marked <see cref="CharacterKind.Player"/>, if any.</summary>
-        public static string? PlayerName(CharacterFile file) =>
-            file.Characters.Find(static character => character.Kind == CharacterKind.Player)?.Name;
+        /// <summary>Finds a character by id. Null when nothing on record answers to it.</summary>
+        public static Character? FindCharacterById(CharacterFile file, string? id) =>
+            id is { Length: > 0 }
+                ? file.Characters.Find(character => string.Equals(character.Id, id, StringComparison.Ordinal))
+                : null;
 
-        /// <summary>The location holding the named character, if any holds them.</summary>
-        public static Location? LocationOf(LocationFile file, string? characterName) =>
-            characterName is { Length: > 0 }
+        /// <summary>Finds a location by id.</summary>
+        public static Location? FindLocationById(LocationFile file, string? id) =>
+            id is { Length: > 0 }
+                ? file.Locations.Find(location => string.Equals(location.Id, id, StringComparison.Ordinal))
+                : null;
+
+        /// <summary>The character marked <see cref="CharacterKind.Player"/>, if there is one.</summary>
+        public static Character? Player(CharacterFile file) =>
+            file.Characters.Find(static character => character.Kind == CharacterKind.Player);
+
+        /// <summary>The name of the character marked <see cref="CharacterKind.Player"/>, if any.</summary>
+        public static string? PlayerName(CharacterFile file) => Player(file)?.Name;
+
+        /// <summary>
+        /// The location holding a character, if any holds them.
+        /// </summary>
+        /// <remarks>
+        /// Takes an id, not a name. Named <c>WhereIs</c> rather than the <c>LocationOf</c> it
+        /// replaced on purpose: the parameter changed meaning without changing type, so the
+        /// compiler could not have caught a call site that kept passing a name - it would simply
+        /// have stopped matching anything. A new name forces every caller to be looked at.
+        /// </remarks>
+        public static Location? WhereIs(LocationFile file, string? characterId) =>
+            characterId is { Length: > 0 }
                 ? file.Locations.Find(location =>
-                    location.Characters.Exists(present => Matches(present, characterName)))
+                    location.CharacterIds.Contains(characterId, StringComparer.Ordinal))
                 : null;
 
         /// <summary>
@@ -120,12 +202,16 @@ namespace TerminalQuest.Saves
         /// a remove would eventually leave someone standing in two places at once.
         /// </para>
         /// </summary>
+        /// <param name="characterId">Who is moving. An id - see <see cref="WhereIs"/> on why.</param>
+        /// <param name="destinationId">Where they are going.</param>
         /// <returns>False when the destination does not exist; the file is left untouched.</returns>
-        public bool MoveCharacter(string characterName, string locationName)
+        public bool MoveCharacter(string characterId, string destinationId)
         {
+            ArgumentException.ThrowIfNullOrEmpty(characterId);
+
             var file = ReadLocations();
 
-            var destination = FindLocation(file, locationName);
+            var destination = FindLocationById(file, destinationId);
             if (destination is null)
             {
                 return false;
@@ -133,13 +219,11 @@ namespace TerminalQuest.Saves
 
             foreach (var location in file.Locations)
             {
-                location.Characters.RemoveAll(present => Matches(present, characterName));
+                location.CharacterIds.RemoveAll(present =>
+                    string.Equals(present, characterId, StringComparison.Ordinal));
             }
 
-            // The spelling in characters.json wins over whatever the caller typed, so the roster
-            // does not accumulate three casings of the same name.
-            var canonical = FindCharacter(ReadCharacters(), characterName)?.Name ?? characterName.Trim();
-            destination.Characters.Add(canonical);
+            destination.CharacterIds.Add(characterId);
 
             WriteLocations(file);
             return true;

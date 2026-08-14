@@ -121,6 +121,7 @@ namespace TerminalQuest.Saves
                 var now = DateTimeOffset.Now;
                 store.WriteMetadata(new SaveMetadata
                 {
+                    SchemaVersion = SaveStore.CurrentSchemaVersion,
                     Name = name.Trim(),
                     Created = now,
                     LastPlayed = now,

@@ -17,7 +17,7 @@ namespace TerminalQuest.Saves
         /// Writes the player, their kit and - when one was named - where they begin.
         /// </summary>
         /// <param name="store">The save to seed. Expected to hold no characters yet.</param>
-        /// <param name="name">The player's name. Permanent: the narrator cannot rename anyone.</param>
+        /// <param name="name">The player's name. Changeable later - see <see cref="Character.Id"/>.</param>
         /// <param name="description">Free prose about who they are. May be empty.</param>
         /// <param name="template">The archetype chosen, which decides health, coin and the kit.</param>
         /// <param name="startLocation">
@@ -37,15 +37,23 @@ namespace TerminalQuest.Saves
 
             var trimmedName = name.Trim();
 
+            // Stamped before anything else is written, so a folder that gets abandoned halfway
+            // through seeding is still recognisably a save of this shape rather than an old one.
+            var metadata = store.ReadMetadata();
+            metadata.SchemaVersion = SaveStore.CurrentSchemaVersion;
+            store.WriteMetadata(metadata);
+
             var characters = store.ReadCharacters();
-            characters.Characters.Add(new Character
+            var player = new Character
             {
+                Id = characters.TakeId(),
                 Name = trimmedName,
                 Kind = CharacterKind.Player,
                 MaxHealth = template.MaxHealth,
                 Health = template.MaxHealth,
                 Description = ComposeDescription(description, template),
-            });
+            };
+            characters.Characters.Add(player);
             store.WriteCharacters(characters);
 
             var inventory = store.ReadInventory();
@@ -57,6 +65,7 @@ namespace TerminalQuest.Saves
                 // place, so handing one out would spend the next save's kit.
                 inventory.Items.Add(new Item
                 {
+                    Id = inventory.TakeId(),
                     Name = item.Name,
                     Quantity = item.Quantity,
                     Description = item.Description,
@@ -73,17 +82,19 @@ namespace TerminalQuest.Saves
             var place = startLocation.Trim();
 
             var locations = store.ReadLocations();
-            locations.Locations.Add(new Location
+            var start = new Location
             {
+                Id = locations.TakeId(),
                 Name = place,
 
                 // Left empty on purpose. The narrator writes what the place looks like on the first
                 // turn; a description invented here would be one the story never agreed to.
                 Description = string.Empty,
-            });
+            };
+            locations.Locations.Add(start);
             store.WriteLocations(locations);
 
-            store.MoveCharacter(trimmedName, place);
+            store.MoveCharacter(player.Id, start.Id);
         }
 
         /// <summary>

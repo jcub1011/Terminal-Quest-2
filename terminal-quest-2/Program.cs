@@ -53,7 +53,16 @@ namespace TerminalQuest
 
           + "Give a memory to every character who perceived something, not only the one it "
           + "happened to - a witness remembers what they saw. Write it from their vantage point, "
-          + "using {This} for the one remembering and {Player} for the player.\n\n"
+          + "using {This} for the one remembering and {Player} for the player. Name who or what a "
+          + "memory concerns in 'subjects', using names already on record so it can be found "
+          + "again.\n\n"
+
+          + "Names can change. A character who gives a false name and later admits their real one, "
+          + "or a place the player learns the true name of, is renamed with update_character or "
+          + "update_location - not replaced with a second record. Where people stand and what they "
+          + "remember follow a rename by themselves, but prose you have already written is left "
+          + "alone, so an old memory will still say the old name. Treat that as the character's own "
+          + "recollection rather than a mistake to correct, and never narrate the correction.\n\n"
 
           + "Tool calls are silent. The player sees only your prose.";
 
@@ -99,7 +108,14 @@ namespace TerminalQuest
         {
             try
             {
-                return await McpServer.RunAsync(new SaveStore(saveDirectory));
+                var store = new SaveStore(saveDirectory);
+
+                // The game checks this before starting us, so reaching it here means the server was
+                // pointed at a folder some other way. Refuse rather than serve a world we would
+                // read wrong - the narrator would build on top of whatever we got back.
+                store.RequireSupportedSchema();
+
+                return await McpServer.RunAsync(store);
             }
             catch (Exception ex)
             {
@@ -184,6 +200,10 @@ namespace TerminalQuest
 
             try
             {
+                // Before anything else, and before the narrator is created further down: a save
+                // this build would misread must not reach a turn.
+                store.RequireSupportedSchema();
+
                 // A save with nobody in it has never been played, whatever its metadata says.
                 needsCharacter = store.ReadCharacters().Characters.Count == 0;
             }

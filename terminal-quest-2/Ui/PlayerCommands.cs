@@ -333,7 +333,11 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            var playerName = SaveStore.PlayerName(store.ReadCharacters());
+            // Read once and kept: the roster below holds ids, so it needs the same document the
+            // player's name came from to render anybody at all.
+            var characters = store.ReadCharacters();
+            var playerName = SaveStore.PlayerName(characters);
+            var index = WorldIndex.Build(characters);
 
             if (argument.Length == 0)
             {
@@ -345,9 +349,10 @@ namespace TerminalQuest.Ui
                     line.Append("  ", TextRole.System);
                     line.Append(location.Name, TextRole.Place);
 
-                    if (location.Characters.Count > 0)
+                    var present = string.Join(", ", index.NamesOf(location.CharacterIds));
+                    if (present.Length > 0)
                     {
-                        line.Append($"  {string.Join(", ", location.Characters)}", TextRole.System);
+                        line.Append($"  {present}", TextRole.System);
                     }
 
                     lines.Add(line);

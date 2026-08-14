@@ -12,5 +12,15 @@ namespace TerminalQuest.Saves
         /// whether the player has any or not. Never negative - the tools refuse to overspend.
         /// </summary>
         public int Money { get; set; }
+
+        /// <summary>The counter behind <c>itm_N</c>. Monotonic - see <see cref="CharacterFile.NextId"/>.</summary>
+        public int NextId { get; set; }
+
+        /// <summary>Allocates the next free id and advances the counter. The caller writes the file.</summary>
+        public string TakeId()
+        {
+            NextId = EntityIds.Ceiling(EntityIds.Item, Items.Select(item => item.Id), NextId) + 1;
+            return EntityIds.Item + NextId;
+        }
     }
 }

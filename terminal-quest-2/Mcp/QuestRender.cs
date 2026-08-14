@@ -55,17 +55,19 @@ namespace TerminalQuest.Mcp
             $"  [turn {memory.Turn}] {Placeholders.Resolve(memory.Text, owner, playerName)}";
 
         /// <summary>A location's headline: name and who is standing in it.</summary>
-        public static string LocationLine(Location location)
+        /// <param name="index">
+        /// Resolves the roster, which holds ids. The model must never see one, so this is required
+        /// rather than optional - see <see cref="WorldIndex"/>.
+        /// </param>
+        public static string LocationLine(Location location, WorldIndex index)
         {
-            var present = location.Characters.Count == 0
-                ? "nobody here"
-                : string.Join(", ", location.Characters);
+            var roster = Roster(location, index);
 
-            return $"{location.Name} ({present})";
+            return $"{location.Name} ({(roster.Length == 0 ? "nobody here" : roster)})";
         }
 
         /// <summary>Full location record, history included.</summary>
-        public static string Location(Location location, string? playerName)
+        public static string Location(Location location, WorldIndex index, string? playerName)
         {
             var text = new StringBuilder();
             text.AppendLine(location.Name);
@@ -75,9 +77,11 @@ namespace TerminalQuest.Mcp
                 text.AppendLine(location.Description);
             }
 
-            text.AppendLine(location.Characters.Count == 0
+            var roster = Roster(location, index);
+
+            text.AppendLine(roster.Length == 0
                 ? "Here now: nobody."
-                : $"Here now: {string.Join(", ", location.Characters)}.");
+                : $"Here now: {roster}.");
 
             if (location.Events.Count == 0)
             {
@@ -94,6 +98,14 @@ namespace TerminalQuest.Mcp
 
             return text.ToString().TrimEnd();
         }
+
+        /// <summary>
+        /// Who is present, by name. Empty when nobody is - which an id that resolves to nobody also
+        /// counts as, since a reference to a character no longer on record describes an empty room
+        /// more truthfully than it describes anything else.
+        /// </summary>
+        private static string Roster(Location location, WorldIndex index) =>
+            string.Join(", ", index.NamesOf(location.CharacterIds));
 
         /// <summary>One durable change to a place, resolved.</summary>
         public static string LocationEvent(LocationEvent entry, string owner, string? playerName) =>

@@ -80,7 +80,7 @@ namespace TerminalQuest.Ui
             _place = MakeField();
             _place.Accepting += OnFieldAccepting;
 
-            var nameFrame = Labelled("name (permanent - it cannot be changed later)", _name, Pos.Bottom(_hint));
+            var nameFrame = Labelled("name", _name, Pos.Bottom(_hint));
             var descriptionFrame = Labelled("who you are", _description, Pos.Bottom(nameFrame));
             var placeFrame = Labelled("where you begin (optional - blank lets the narrator choose)", _place, Pos.Bottom(descriptionFrame));
 

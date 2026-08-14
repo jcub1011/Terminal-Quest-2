@@ -58,12 +58,15 @@ namespace TerminalQuest.Mcp
                 """),
 
             new("update_character",
-                "Change one property of a character. Use this the moment someone takes damage or heals.",
+                "Change one property of a character. Use this the moment someone takes damage or "
+              + "heals. Renaming is allowed and safe - it does not disturb where they are standing "
+              + "or what anyone remembers - but prose already written is not rewritten, so old "
+              + "memories will still say the old name.",
                 """
                 {"type":"object",
                  "properties":{
-                   "name":{"type":"string"},
-                   "property":{"type":"string","enum":["health","maxHealth","description","kind"]},
+                   "name":{"type":"string","description":"Who to change, by their current name."},
+                   "property":{"type":"string","enum":["name","health","maxHealth","description","kind"]},
                    "value":{"type":"string","description":"The new value. Numbers may be given as digits."}},
                  "required":["name","property","value"]}
                 """),
@@ -115,6 +118,20 @@ namespace TerminalQuest.Mcp
                    "name":{"type":"string"},
                    "description":{"type":"string"}},
                  "required":["name"]}
+                """),
+
+            new("update_location",
+                "Rename a place, or rewrite its description. Renaming is safe - it does not disturb "
+              + "who is standing there or what happened there - but prose already written is not "
+              + "rewritten. Use upsert_location to create somewhere new; this only changes a place "
+              + "that already exists.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "name":{"type":"string","description":"Which place to change, by its current name."},
+                   "property":{"type":"string","enum":["name","description"]},
+                   "value":{"type":"string"}},
+                 "required":["name","property","value"]}
                 """),
 
             new("move_character",
@@ -226,6 +243,7 @@ namespace TerminalQuest.Mcp
             "list_locations" => ListLocations(store),
             "get_location" => GetLocation(store, arguments),
             "upsert_location" => UpsertLocation(store, arguments),
+            "update_location" => UpdateLocation(store, arguments),
             "move_character" => MoveCharacter(store, arguments),
             "add_location_event" => AddLocationEvent(store, arguments),
             "get_inventory" => GetInventory(store),
@@ -244,13 +262,13 @@ namespace TerminalQuest.Mcp
             var locations = store.ReadLocations();
             var metadata = store.ReadMetadata();
 
-            var playerName = SaveStore.PlayerName(characters);
+            var player = SaveStore.Player(characters);
 
             var text = new StringBuilder();
             text.AppendLine($"Save '{store.Name}', turn {metadata.Turn}.");
             text.AppendLine();
 
-            if (playerName is null)
+            if (player is null)
             {
                 // Normally unreachable: the player character is made on the character screen before
                 // a session starts. A save that reaches here has lost its roster, so say so rather
@@ -262,16 +280,18 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Ok(text.ToString().TrimEnd());
             }
 
-            var player = SaveStore.FindCharacter(characters, playerName)!;
+            var playerName = player.Name;
+            var index = WorldIndex.Build(characters, locations);
+
             text.AppendLine("PLAYER");
             text.AppendLine(QuestRender.Character(player, playerName));
             text.AppendLine();
 
             text.AppendLine("WHERE THEY ARE");
-            var here = SaveStore.LocationOf(locations, playerName);
+            var here = SaveStore.WhereIs(locations, player.Id);
             text.AppendLine(here is null
                 ? "Nowhere on record. Call upsert_location and move_character."
-                : QuestRender.Location(here, playerName));
+                : QuestRender.Location(here, index, playerName));
             text.AppendLine();
 
             text.AppendLine("INVENTORY");
@@ -307,8 +327,10 @@ namespace TerminalQuest.Mcp
 
             text.AppendLine();
             text.AppendLine("OTHERS ON RECORD");
+            // By id, not by name: two characters sharing a name is not supposed to happen, but if it
+            // ever did, filtering on the name would hide the wrong one from the narrator entirely.
             var others = characters.Characters
-                .Where(character => !SaveStore.Matches(character.Name, playerName))
+                .Where(character => !string.Equals(character.Id, player.Id, StringComparison.Ordinal))
                 .ToList();
             text.AppendLine(others.Count == 0
                 ? "  (nobody yet)"
@@ -369,8 +391,14 @@ namespace TerminalQuest.Mcp
 
             if (character is null)
             {
-                character = new Character { Name = name.Trim() };
+                character = new Character { Id = file.TakeId(), Name = name.Trim() };
                 file.Characters.Add(character);
+            }
+            else if (character.Id.Length == 0)
+            {
+                // Self-repair for a record added by hand. Everything that points at a character
+                // points at its id, so one without an id can never be stood anywhere or remembered.
+                character.Id = file.TakeId();
             }
 
             if (Text(arguments, "kind") is { Length: > 0 } kind)
@@ -471,14 +499,44 @@ namespace TerminalQuest.Mcp
                     character.Kind = kind;
                     break;
 
-                // Renaming would strand the old name in every location roster and every memory
-                // that spells it out, so it is refused rather than half-done.
+                // Renaming is a single field write: rosters and memory subjects point at the id, not
+                // the name. Returns here rather than falling through, because the message wants the
+                // name that is being left behind.
                 case "name":
-                    return ToolOutcome.Fail("Characters cannot be renamed.");
+                {
+                    var proposed = value.Trim();
+
+                    if (proposed.Length == 0)
+                    {
+                        return ToolOutcome.Fail("A character needs a name.");
+                    }
+
+                    // Names stay unique even though they are no longer identity: the narrator asks
+                    // for characters by name, and two answering to one name would resolve to
+                    // whichever came first - worse than refusing, because it would look like it
+                    // worked. No suffixing either; a silently altered name is one the prose will
+                    // not match.
+                    if (SaveStore.FindCharacter(file, proposed) is { } clash
+                        && !ReferenceEquals(clash, character))
+                    {
+                        return ToolOutcome.Fail(
+                            $"There is already a character called '{clash.Name}'. Pick a name nobody "
+                          + "else has, or update that one instead.");
+                    }
+
+                    var former = character.Name;
+                    character.Name = proposed;
+                    store.WriteCharacters(file);
+
+                    return ToolOutcome.Ok(
+                        $"{former} is now {QuestRender.CharacterLine(character)}. Rosters and memory "
+                      + $"subjects follow automatically, but memories written before now still spell "
+                      + $"out '{former}' in their prose - they are not rewritten.");
+                }
 
                 default:
                     return ToolOutcome.Fail(
-                        $"'{property}' is not a character property. Use health, maxHealth, description or kind.");
+                        $"'{property}' is not a character property. Use name, health, maxHealth, description or kind.");
             }
 
             store.WriteCharacters(file);
@@ -505,20 +563,55 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Fail($"There is no character named '{name}'. Create them with upsert_character first.");
             }
 
+            // Subjects arrive as names and are stored as ids, so the index still points at the right
+            // people once they have been renamed. Anything naming nothing on record is dropped
+            // rather than kept as raw text: a list holding both ids and prose would be ambiguous in
+            // exactly the way ids were introduced to stop. Nothing is lost, because the memory's own
+            // text is searched too and was always the authority.
+            var index = WorldIndex.Build(file, store.ReadLocations(), store.ReadInventory());
+            var subjectIds = new List<string>();
+            var unresolved = new List<string>();
+
+            foreach (var subject in Strings(arguments, "subjects"))
+            {
+                if (index.IdOf(subject) is { } id)
+                {
+                    if (!subjectIds.Contains(id, StringComparer.Ordinal))
+                    {
+                        subjectIds.Add(id);
+                    }
+                }
+                else if (subject.Trim() is { Length: > 0 } trimmed)
+                {
+                    unresolved.Add(trimmed);
+                }
+            }
+
             var memory = new Saves.Memory
             {
                 Id = SaveStore.NextId(character.Memories, static entry => entry.Id),
                 Turn = store.CurrentTurn(),
                 Text = memoryText,
-                Subjects = Strings(arguments, "subjects"),
+                SubjectIds = subjectIds,
             };
 
             character.Memories.Add(memory);
             store.WriteCharacters(file);
 
-            return ToolOutcome.Ok(
-                $"{character.Name} will remember:{Environment.NewLine}"
-              + QuestRender.Memory(memory, character.Name, SaveStore.PlayerName(file)));
+            var result = new StringBuilder();
+            result.Append($"{character.Name} will remember:{Environment.NewLine}");
+            result.Append(QuestRender.Memory(memory, character.Name, SaveStore.PlayerName(file)));
+
+            // Said only when something was dropped, so the narrator learns to put a thing on record
+            // before indexing memories against it.
+            if (unresolved.Count > 0)
+            {
+                result.Append(
+                    $"{Environment.NewLine}(Not on record, so not indexed: {string.Join(", ", unresolved)}. "
+                  + "The memory itself is still searched by its text.)");
+            }
+
+            return ToolOutcome.Ok(result.ToString());
         }
 
         private static ToolOutcome GetMemories(SaveStore store, JsonElement arguments)
@@ -543,12 +636,28 @@ namespace TerminalQuest.Mcp
 
             if (about is { Length: > 0 })
             {
-                // Subjects are the index, but the prose is authoritative: a memory that names
-                // someone only in its text still answers "what do you know about them".
+                var index = WorldIndex.Build(file, store.ReadLocations(), store.ReadInventory());
+
+                // Null when the narrator asked about something nobody has put on record - "the
+                // storm" - which is fine: the prose branch below still answers for it.
+                var aboutId = index.IdOf(about);
+                var currentName = index.NameOf(aboutId);
+
                 memories = memories.Where(memory =>
-                    memory.Subjects.Exists(subject =>
-                        Placeholders.Mentions(subject, about, character.Name, playerName))
-                    || Placeholders.Mentions(memory.Text, about, character.Name, playerName));
+                    // The index, and the reason it holds ids: a memory tagged with somebody answers
+                    // for whatever they are called today, which matching on names never could.
+                    (aboutId is not null && memory.SubjectIds.Contains(aboutId, StringComparer.Ordinal))
+
+                    // Subjects are the index, but the prose is authoritative: a memory that names
+                    // someone only in its text still answers "what do you know about them".
+                    || Placeholders.Mentions(memory.Text, about, character.Name, playerName)
+
+                    // And by the name they go by now, so asking about somebody by their current
+                    // name still finds prose written when they were called something else - or
+                    // rather, finds the prose that spells out the name the asker did not use.
+                    || (currentName is not null
+                        && !SaveStore.Matches(currentName, about)
+                        && Placeholders.Mentions(memory.Text, currentName, character.Name, playerName)));
             }
 
             var matched = memories.ToList();
@@ -582,10 +691,13 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Ok("Nowhere on record yet.");
             }
 
+            // Rosters hold ids, so who is standing where cannot be rendered without the characters.
+            var index = WorldIndex.Build(store.ReadCharacters());
+
             var text = new StringBuilder();
             foreach (var location in file.Locations)
             {
-                text.AppendLine(QuestRender.LocationLine(location));
+                text.AppendLine(QuestRender.LocationLine(location, index));
             }
 
             return ToolOutcome.Ok(text.ToString().TrimEnd());
@@ -601,9 +713,15 @@ namespace TerminalQuest.Mcp
             var file = store.ReadLocations();
             var location = SaveStore.FindLocation(file, name);
 
-            return location is null
-                ? ToolOutcome.Fail($"There is no place named '{name}'. Use list_locations, or upsert_location to create it.")
-                : ToolOutcome.Ok(QuestRender.Location(location, SaveStore.PlayerName(store.ReadCharacters())));
+            if (location is null)
+            {
+                return ToolOutcome.Fail($"There is no place named '{name}'. Use list_locations, or upsert_location to create it.");
+            }
+
+            var characters = store.ReadCharacters();
+
+            return ToolOutcome.Ok(
+                QuestRender.Location(location, WorldIndex.Build(characters), SaveStore.PlayerName(characters)));
         }
 
         private static ToolOutcome UpsertLocation(SaveStore store, JsonElement arguments)
@@ -619,8 +737,13 @@ namespace TerminalQuest.Mcp
 
             if (location is null)
             {
-                location = new Saves.Location { Name = name.Trim() };
+                location = new Saves.Location { Id = file.TakeId(), Name = name.Trim() };
                 file.Locations.Add(location);
+            }
+            else if (location.Id.Length == 0)
+            {
+                // Self-repair for a place added by hand; nobody can be stood in one without an id.
+                location.Id = file.TakeId();
             }
 
             if (Text(arguments, "description") is { Length: > 0 } description)
@@ -631,6 +754,81 @@ namespace TerminalQuest.Mcp
             store.WriteLocations(file);
 
             return ToolOutcome.Ok($"{(isNew ? "Created" : "Updated")}: {location.Name}");
+        }
+
+        /// <summary>
+        /// Changes one property of a place that already exists.
+        /// <para>
+        /// Separate from <see cref="UpsertLocation"/> rather than folded into it, because an upsert
+        /// that renamed would be indistinguishable from a mistyped name that should have created
+        /// somewhere new - and the wrong guess either loses a place or invents one.
+        /// </para>
+        /// </summary>
+        private static ToolOutcome UpdateLocation(SaveStore store, JsonElement arguments)
+        {
+            if (Text(arguments, "name") is not { Length: > 0 } name)
+            {
+                return ToolOutcome.Fail("update_location needs a name.");
+            }
+
+            if (Text(arguments, "property") is not { Length: > 0 } property)
+            {
+                return ToolOutcome.Fail("update_location needs a property.");
+            }
+
+            // Text first: RawText alone would keep the quotes a JSON string is delimited by. The
+            // fallback is for a model that sends a bare number or boolean where a string was asked
+            // for, matching UpdateCharacter.
+            var value = Text(arguments, "value") ?? RawText(arguments, "value") ?? string.Empty;
+
+            var file = store.ReadLocations();
+            var location = SaveStore.FindLocation(file, name);
+
+            if (location is null)
+            {
+                return ToolOutcome.Fail($"There is no place named '{name}'. Create it with upsert_location first.");
+            }
+
+            switch (property.Trim().ToLowerInvariant())
+            {
+                case "name":
+                {
+                    var proposed = value.Trim();
+
+                    if (proposed.Length == 0)
+                    {
+                        return ToolOutcome.Fail("A place needs a name.");
+                    }
+
+                    if (SaveStore.FindLocation(file, proposed) is { } clash
+                        && !ReferenceEquals(clash, location))
+                    {
+                        return ToolOutcome.Fail(
+                            $"There is already a place called '{clash.Name}'. Pick a name nothing "
+                          + "else has, or update that one instead.");
+                    }
+
+                    var former = location.Name;
+                    location.Name = proposed;
+                    store.WriteLocations(file);
+
+                    return ToolOutcome.Ok(
+                        $"{former} is now called {location.Name}. Who is standing there and what "
+                      + $"happened there are unchanged, but prose written before now still says "
+                      + $"'{former}' - it is not rewritten.");
+                }
+
+                case "description":
+                    location.Description = value;
+                    break;
+
+                default:
+                    return ToolOutcome.Fail(
+                        $"'{property}' is not a place property. Use name or description.");
+            }
+
+            store.WriteLocations(file);
+            return ToolOutcome.Ok($"Updated: {location.Name}");
         }
 
         private static ToolOutcome MoveCharacter(SaveStore store, JsonElement arguments)
@@ -645,18 +843,30 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Fail("move_character needs a location.");
             }
 
-            if (SaveStore.FindCharacter(store.ReadCharacters(), characterName) is null)
+            // Both names are resolved to records here, at the edge, and only ids go any further in.
+            var characters = store.ReadCharacters();
+            var character = SaveStore.FindCharacter(characters, characterName);
+
+            if (character is null)
             {
                 return ToolOutcome.Fail($"There is no character named '{characterName}'. Create them with upsert_character first.");
             }
 
-            if (!store.MoveCharacter(characterName, locationName))
+            var destination = SaveStore.FindLocation(store.ReadLocations(), locationName);
+
+            if (destination is null)
             {
                 return ToolOutcome.Fail($"There is no place named '{locationName}'. Create it with upsert_location first.");
             }
 
-            var destination = SaveStore.FindLocation(store.ReadLocations(), locationName)!;
-            return ToolOutcome.Ok($"Moved. {QuestRender.LocationLine(destination)}");
+            if (!store.MoveCharacter(character.Id, destination.Id))
+            {
+                return ToolOutcome.Fail($"There is no place named '{locationName}'. Create it with upsert_location first.");
+            }
+
+            // Re-read: the roster this prints is the one the move just wrote.
+            var moved = SaveStore.FindLocationById(store.ReadLocations(), destination.Id)!;
+            return ToolOutcome.Ok($"Moved. {QuestRender.LocationLine(moved, WorldIndex.Build(characters))}");
         }
 
         private static ToolOutcome AddLocationEvent(SaveStore store, JsonElement arguments)
@@ -732,10 +942,16 @@ namespace TerminalQuest.Mcp
             var file = store.ReadInventory();
             var item = file.Items.Find(candidate => SaveStore.Matches(candidate.Name, name));
 
+            // Still merged by name: two stacks of "iron key" should be one stack, and that is a
+            // judgement about what the thing is rather than about which record it lives in.
             if (item is null)
             {
-                item = new Item { Name = name.Trim(), Quantity = 0 };
+                item = new Item { Id = file.TakeId(), Name = name.Trim(), Quantity = 0 };
                 file.Items.Add(item);
+            }
+            else if (item.Id.Length == 0)
+            {
+                item.Id = file.TakeId();
             }
 
             item.Quantity += quantity;

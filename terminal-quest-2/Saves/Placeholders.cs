@@ -9,6 +9,14 @@ namespace TerminalQuest.Saves
     /// between "Rowan" the name and "the character this memory belongs to" - which is exactly what
     /// makes a memory portable between characters who witnessed the same thing.
     /// </para>
+    /// <para>
+    /// These two are also the only names in stored prose that a rename reaches. Ids keep every
+    /// reference one record makes to another correct, but the text of a memory is free prose, and a
+    /// third party it spells out by name still says the old one afterwards. That is accepted rather
+    /// than fixed: rewriting it would mean substituting a name across everything anybody remembers,
+    /// which cannot tell a character called Bess from the word "largesse", cannot be undone, and
+    /// would quietly edit records the player may have written by hand.
+    /// </para>
     /// </summary>
     internal static class Placeholders
     {
