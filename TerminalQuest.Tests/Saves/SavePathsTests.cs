@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 
@@ -354,6 +356,30 @@ namespace TerminalQuest.Tests.Saves
 
             Assert.Equal("Riverbend (copy)", copy);
             Assert.Equal("The ford", Assert.Single(SavePaths.Open(copy).ReadStory().Events).Title);
+        }
+
+        [Fact]
+        public void Duplicating_takes_the_logs_along_with_the_documents()
+        {
+            // The logs belong to the playthrough being copied, so a duplicate carries its history and
+            // continues its numbering rather than starting over. Nothing in the copy is special-cased -
+            // this works because the folder is the save - so it is asserted rather than assumed, which is
+            // also what would catch a future log being written somewhere outside it.
+            using var root = new SavesRoot();
+            var store = SavePaths.Open("Riverbend");
+
+            var noArguments = JsonDocument.Parse("{}").RootElement;
+
+            store.Journal.Append(new JournalEntry { Turn = 1, Tool = "get_state", Arguments = noArguments });
+            store.Ledger.Append(new LedgerEntry { Turn = 1, Claim = "The ford runs high." });
+
+            var copy = SavePaths.Open(SavePaths.Duplicate("Riverbend"));
+
+            Assert.Equal("get_state", Assert.Single(copy.Journal.Read().Entries).Tool);
+            Assert.Equal("The ford runs high.", Assert.Single(copy.Ledger.Read().Entries).Claim);
+            Assert.Equal(
+                2,
+                copy.Journal.Append(new JournalEntry { Turn = 1, Tool = "get_story", Arguments = noArguments }));
         }
 
         [Fact]

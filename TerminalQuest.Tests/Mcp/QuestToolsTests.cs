@@ -547,5 +547,141 @@ namespace TerminalQuest.Tests.Mcp
                 Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
             }
         }
+
+        // ---- Descriptions are extended, never replaced ---------------------------------------
+
+        [Fact]
+        public void Upserting_a_place_adds_to_its_description_rather_than_replacing_it()
+        {
+            // The only surface in the save where the world can contradict what the player was told. A
+            // second visit adds to the place; it does not overwrite what they already saw.
+            using var save = Seeded();
+
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns in the race."}""");
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"The roof has fallen in."}""");
+
+            var mill = SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!;
+
+            Assert.Contains("A wheel turns in the race.", mill.Description, StringComparison.Ordinal);
+            Assert.Contains("The roof has fallen in.", mill.Description, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Upserting_a_place_twice_with_the_same_words_does_not_double_it()
+        {
+            using var save = Seeded();
+
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
+
+            Assert.Equal(
+                "A wheel turns.",
+                SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!.Description);
+        }
+
+        [Fact]
+        public void Updating_a_place_description_with_nothing_leaves_it_alone()
+        {
+            // Used to blank the field outright, because the assignment did not check for an empty value.
+            using var save = Seeded();
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
+
+            Call(save.Store, "update_location", """{"name":"The Mill","property":"description","value":""}""");
+
+            Assert.Equal(
+                "A wheel turns.",
+                SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!.Description);
+        }
+
+        [Fact]
+        public void Updating_a_place_description_adds_to_it()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
+
+            Call(save.Store, "update_location", """{"name":"The Mill","property":"description","value":"Ivy has taken the south wall."}""");
+
+            var mill = SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!;
+
+            Assert.Contains("A wheel turns.", mill.Description, StringComparison.Ordinal);
+            Assert.Contains("Ivy has taken the south wall.", mill.Description, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void An_overlong_place_description_is_refused_and_names_add_location_event()
+        {
+            // The ceiling exists so that "grows forever" becomes a refusal naming somewhere better to put
+            // the change, rather than a field that quietly taxes every later turn.
+            using var save = Seeded();
+            Call(save.Store, "upsert_location", $$"""{"name":"The Mill","description":"{{new string('x', Descriptions.MaxLength - 2)}}"}""");
+
+            var outcome = Call(save.Store, "upsert_location", """{"name":"The Mill","description":"And a heron on the weir."}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("add_location_event", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Upserting_a_character_adds_to_their_description()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Keeps the inn."}""");
+
+            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Lost a brother to the fever."}""");
+
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+
+            Assert.Contains("Keeps the inn.", bess.Description, StringComparison.Ordinal);
+            Assert.Contains("Lost a brother to the fever.", bess.Description, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Updating_a_character_description_with_nothing_leaves_it_alone()
+        {
+            // The same blanking bug as the location one, in the other handler.
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Keeps the inn."}""");
+
+            Call(save.Store, "update_character", """{"name":"Bess","property":"description","value":""}""");
+
+            Assert.Equal(
+                "Keeps the inn.",
+                SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Description);
+        }
+
+        [Fact]
+        public void An_overlong_character_description_is_refused_and_names_somewhere_to_put_it()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", $$"""{"name":"Bess","description":"{{new string('x', Descriptions.MaxLength - 2)}}"}""");
+
+            var outcome = Call(save.Store, "upsert_character", """{"name":"Bess","description":"She whistles when she is lying."}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("add_memory", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void No_tool_promises_everything_a_character_knows()
+        {
+            // get_character used to advertise itself as returning a character "in full, including
+            // everything they know", which is exactly what the lifecycle gate makes untrue. The sentence
+            // is the kind a later edit reintroduces without noticing.
+            foreach (var tool in QuestTools.Definitions)
+            {
+                Assert.DoesNotContain("everything they know", tool.Description, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        [Fact]
+        public void No_tool_offers_to_rewrite_a_description()
+        {
+            // A tool that advertises rewriting will be used to rewrite, whatever the handler then does
+            // with it - so the wording has to change with the behaviour.
+            foreach (var tool in QuestTools.Definitions)
+            {
+                Assert.DoesNotContain("rewrite its description", tool.Description, StringComparison.OrdinalIgnoreCase);
+            }
+        }
     }
 }

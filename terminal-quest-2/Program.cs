@@ -21,7 +21,11 @@ namespace TerminalQuest
         /// </para>
         /// </summary>
         private const string SystemPrompt =
-            "You are the narrator of a terminal adventure game. Answer in at most two sentences. "
+            "You are the narrator of a terminal adventure game. Write as much as the moment deserves: a "
+          + "line when a line will do, and several paragraphs when the player has walked somewhere worth "
+          + "looking at or somebody has something to say. Do not pad, and do not summarise what you could "
+          + "show instead. End where the player has to decide something, and leave the deciding to them - "
+          + "never narrate their choices, their words, or what they do next. "
           + "Mark up your prose semantically, closing each tag by name: "
           + "items as [item]a rusted key[/item], dangers as [danger]a wolf[/danger], "
           + "spoken words as [speech]\"who goes there?\"[/speech], "
@@ -74,6 +78,14 @@ namespace TerminalQuest
           + "memory concerns in 'subjects', using names already on record so it can be found "
           + "again.\n\n"
 
+          + "Some characters know things others do not. Give somebody a secret with grant_secret, and "
+          + "grant it to everyone who ought to be in on it. You are only ever shown a secret when you "
+          + "ask about the character holding it, so what comes back is what that character may act on - "
+          + "never assume anybody else knows it. If you have already read one character's secrets this "
+          + "turn, another who does not share them cannot be read until the next turn: let them hold "
+          + "their tongue for now rather than working around it. A secret the player has already been "
+          + "told comes back marked common knowledge, and anyone may speak of it.\n\n"
+
           + "Names can change. A character who gives a false name and later admits their real one, "
           + "or a place the player learns the true name of, is renamed with update_character or "
           + "update_location - not replaced with a second record. Where people stand and what they "
@@ -81,11 +93,25 @@ namespace TerminalQuest
           + "alone, so an old memory will still say the old name. Treat that as the character's own "
           + "recollection rather than a mistake to correct, and never narrate the correction.\n\n"
 
+          + "Descriptions work the same way. What you send for a place or a person already on record is "
+          + "added to what it already says and never replaces it, so say only what is new. When "
+          + "something about a place has actually changed - a door replaced, a roof fallen in - record "
+          + "it with add_location_event rather than describing away what the player was shown before.\n\n"
+
           + "Before you invent a place, a person or a thing, call random_noun and "
           + "random_adjective and let the words suggest something you would not otherwise have "
           + "written. They are seeds, not vocabulary: never say them to the player, and never use "
           + "one as a name. A word that suggests nothing is discarded - draw again rather than "
           + "forcing it. Somewhere that could be anywhere is worse than somewhere strange.\n\n"
+
+          + "Then, before writing the turn's prose, settle what that prose will assert and record it with "
+          + "record_claims - one entry for each separate thing you are about to state as true of the "
+          + "world, so a price, a road and a rumour are three. Name who asserts each one, or leave the "
+          + "speaker out when it is your own narration. A character may lie: record it as a lie and the "
+          + "world will hold it as one, to be paid off later, rather than reading it as a mistake to be "
+          + "corrected. If a line will give away a secret somebody is holding, name that secret in "
+          + "'reveals'. Then write the prose, and write what you recorded - this is the last thing you do "
+          + "before speaking, not an afterthought once you have spoken.\n\n"
 
           + "Tool calls are silent, with one exception. Every roll is shown to the player - who "
           + "rolled, what for, and unless it was hidden, what it came to. They see it whether or not "
@@ -98,14 +124,15 @@ namespace TerminalQuest
         /// </summary>
         private const string OpeningPrompt =
             "This is the first scene. The player character and where they begin are already on "
-          + "record. Call get_state, then describe the place as they stand in it. Do not create "
-          + "the player and do not ask who they are.";
+          + "record. Call get_state, then record_claims for what you are about to say, then describe "
+          + "the place as they stand in it. Do not create the player and do not ask who they are.";
 
         /// <summary>Opening turn for a save whose player left the starting place to the narrator.</summary>
         private const string OpeningPromptNoPlace =
             "This is the first scene. The player character is already on record but has nowhere to "
           + "be. Call get_state, then invent where they begin: upsert_location, move_character them "
-          + "into it, and describe it. Do not create the player and do not ask who they are.";
+          + "into it, record_claims for what you are about to say, and describe it. Do not create the "
+          + "player and do not ask who they are.";
 
         /// <summary>
         /// How often the transcript looks for rolls the narrator has just made.
@@ -120,8 +147,9 @@ namespace TerminalQuest
         private static readonly TimeSpan RollPollInterval = TimeSpan.FromMilliseconds(400);
 
         private const string ContinuePrompt =
-            "This save is being resumed. Call get_state, then set the scene where the player left "
-          + "off - describe where they are now rather than recapping what they already lived through.";
+            "This save is being resumed. Call get_state, then record_claims for what you are about to "
+          + "say, then set the scene where the player left off - describe where they are now rather "
+          + "than recapping what they already lived through.";
 
         private static async Task<int> Main(string[] args)
         {
@@ -152,6 +180,10 @@ namespace TerminalQuest
                 // pointed at a folder some other way. Refuse rather than serve a world we would
                 // read wrong - the narrator would build on top of whatever we got back.
                 store.RequireSupportedSchema();
+
+                // Stderr for the same reason everything else here uses it, and because a journal that
+                // will not write must not become a tool the narrator is told refused.
+                QuestJournal.OnFailure = message => Console.Error.WriteLine($"quest server: {message}");
 
                 return await McpServer.RunAsync(store);
             }
@@ -322,6 +354,22 @@ namespace TerminalQuest
 
             narrator.OnTextDelta += pump.Enqueue;
 
+            // Said once and then not again. A journal that cannot be written fails on every tool call,
+            // and a Danger line per call would bury the scene the player is reading - while saying
+            // nothing the first one did not. Only the in-process provider reaches this at all: on the
+            // Claude path the tools run in the state server, which reports on its own stderr.
+            var journalReported = false;
+            QuestJournal.OnFailure = message => app.Invoke(() =>
+            {
+                if (leaving || journalReported)
+                {
+                    return;
+                }
+
+                journalReported = true;
+                window.Narration.AddLine($"[{message}. The story is unaffected; its record is not.]", TextRole.Danger);
+            });
+
             window.LeaveRequested += Leave;
             window.CommandEntered += OnCommandEntered;
             window.CanSubmit = CanSubmit;
@@ -361,6 +409,10 @@ namespace TerminalQuest
             // Detached before the window goes: a delta still arriving from a turn that has not
             // finished unwinding would otherwise be pumped into a view that is being disposed.
             narrator.OnTextDelta -= pump.Enqueue;
+
+            // Cleared for the same reason, one level up: this one is static, so left in place it would
+            // outlive the session and draw the next save's trouble into a window that has closed.
+            QuestJournal.OnFailure = null;
 
             // Leave the save stamped with where the player actually got to.
             TryTouch(store, state.Turn);
@@ -437,8 +489,56 @@ namespace TerminalQuest
                     return;
                 }
 
+                // Before the turn rather than after it, so the ledger's order matches the fiction's: the
+                // player spoke, and then the narrator answered.
+                RecordPlayerClaim(text);
+
                 window.IsBusy = true;
                 _ = Task.Run(() => RunTurnAsync(text));
+            }
+
+            /// <summary>
+            /// Puts the player's line on the ledger as a claim of their own.
+            /// </summary>
+            /// <remarks>
+            /// Taken from what they typed rather than asked of the model, which is both free and more
+            /// reliable - the game is holding the literal text either way.
+            /// <para>
+            /// Recorded unverified, and that is not a placeholder for something the game could work out.
+            /// "I paid the toll last week" may be true, may be a boast, may be a lie being tried on, and
+            /// settling it would take a model call. Unverified is also the honest tier: the claim binds
+            /// nobody until something is built on it.
+            /// </para>
+            /// <para>
+            /// Not every line asserts anything - "go north" asserts nothing - and it is recorded anyway,
+            /// because sorting the assertions from the instructions is that same model call. What follows
+            /// is that a player entry is a record of speech and never a fact to check the world against.
+            /// </para>
+            /// <para>
+            /// Unlike <see cref="TryTouch"/> a failure here does not abort the turn. A missing turn stamp
+            /// means the narrator dates everything it writes wrongly, which damages the save; a missing
+            /// ledger line means a later audit is one entry short.
+            /// </para>
+            /// </remarks>
+            void RecordPlayerClaim(string text)
+            {
+                try
+                {
+                    var player = SaveStore.Player(store.ReadCharacters());
+
+                    store.Ledger.Append(new LedgerEntry
+                    {
+                        Turn = state.Turn,
+                        Speaker = player?.Name ?? string.Empty,
+                        SpeakerId = player?.Id ?? string.Empty,
+                        Claim = text,
+                        Truth = ClaimTruth.Unverified,
+                    });
+                }
+                catch (SaveException ex)
+                {
+                    window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
+                }
             }
 
             void RunPlayerCommand(string text)
@@ -498,6 +598,16 @@ namespace TerminalQuest
                     return;
                 }
 
+                // The scene-setting turn is a turn: it reads the world, it narrates, and the narrator
+                // will date memories and events to it. Left sharing a number with the last session's
+                // final turn, those writes are misdated - and anything that asks what happened "this
+                // turn" is answered with the end of the previous sitting as well as this one.
+                app.Invoke(() =>
+                {
+                    state.Turn++;
+                    TryTouch(store, state.Turn);
+                });
+
                 await RunTurnAsync(startedFresh
                     ? hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace
                     : ContinuePrompt);
@@ -549,6 +659,12 @@ namespace TerminalQuest
                         {
                             window.Narration.AddLine($"[{turn.Text}]", TextRole.Danger);
                         }
+                        else if (ClaimsMissing(turn.Text))
+                        {
+                            window.Narration.AddLine(
+                                "[The narrator wrote prose and recorded no claims. Nothing it said this turn is on the ledger.]",
+                                TextRole.Danger);
+                        }
 
                         // The narrator's writes happened in another process, so this is the only
                         // point at which the pane learns what the turn actually changed.
@@ -585,6 +701,47 @@ namespace TerminalQuest
                 finally
                 {
                     turnLife.Cancel();
+                }
+            }
+
+            /// <summary>
+            /// Whether the turn narrated something and then failed to write down what it said.
+            /// </summary>
+            /// <remarks>
+            /// Reported as a fault rather than shrugged at, because an unextracted claim is invisible to
+            /// any later consistency check - a ledger cannot record a gap in itself. Reported in every
+            /// build too, not only a debug one: the alternative is a shipped game quietly losing its
+            /// record, and if the narrator forgets habitually then a red line every turn is the
+            /// diagnostic working. The fix is the prompt, not this check.
+            /// <para>
+            /// This is also the only place the two facts are ever in hand at once. The journal holds no
+            /// prose and the transcript holds no tool calls, so a batch job over the log could never tell
+            /// a turn that narrated nothing from a turn that narrated and forgot.
+            /// </para>
+            /// <para>
+            /// Prose is taken from the turn's own text rather than from a count of pumped deltas, because
+            /// that text is one of the two things every provider guarantees - a delta count would be a
+            /// fact about the streaming path instead of about the turn.
+            /// </para>
+            /// </remarks>
+            bool ClaimsMissing(string prose)
+            {
+                if (prose.AsSpan().IsWhiteSpace())
+                {
+                    return false;
+                }
+
+                try
+                {
+                    return !store.Journal.ForTurn(state.Turn).Any(entry =>
+                        !entry.Failed && string.Equals(entry.Tool, "record_claims", StringComparison.Ordinal));
+                }
+                catch (SaveException)
+                {
+                    // Silently. A journal that will not parse is a problem, but not one worth reporting as
+                    // though the narrator had misbehaved - and the status refresh a few lines below is
+                    // about to say the save is in trouble anyway.
+                    return false;
                 }
             }
 

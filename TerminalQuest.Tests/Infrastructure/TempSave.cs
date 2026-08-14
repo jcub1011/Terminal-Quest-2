@@ -38,6 +38,13 @@ namespace TerminalQuest.Tests.Infrastructure
         public string ReadRaw(string fileName) =>
             File.ReadAllText(Path.Combine(Directory, fileName));
 
+        /// <summary>
+        /// A line-oriented document as its lines, with the trailing blank a well-formed one ends on
+        /// removed. What an append-only log has to be inspected as.
+        /// </summary>
+        public string[] ReadLines(string fileName) =>
+            ReadRaw(fileName).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
         public bool Has(string fileName) => File.Exists(Path.Combine(Directory, fileName));
 
         /// <summary>The <c>.tmp</c> files left behind by a write, which should always be none.</summary>

@@ -27,8 +27,15 @@ namespace TerminalQuest.Saves
         private const string StoryFileName = "story.json";
         private const string RollsFileName = "rolls.json";
         private const string MetadataFileName = "save.json";
+        private const string JournalFileName = "journal.jsonl";
+        private const string LedgerFileName = "ledger.jsonl";
 
-        private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+        /// <summary>
+        /// Shared with <see cref="AppendLog{TEntry}"/> so that the documents and the logs cannot come
+        /// to disagree about encoding. A preamble written into the middle of a line-oriented file
+        /// corrupts exactly one line while being invisible in every editor.
+        /// </summary>
+        internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
         /// <summary>
         /// The save shape this build writes and can read.
@@ -82,6 +89,22 @@ namespace TerminalQuest.Saves
         /// is, since it is a fresh process per tool call's parent session.
         /// </summary>
         public int CurrentTurn() => ReadMetadata().Turn;
+
+        /// <summary>
+        /// Every tool call, in order, numbered. The version counter the rest of the design stamps
+        /// itself against, and the log a consistency check runs over.
+        /// </summary>
+        /// <remarks>
+        /// Lazy, and not a cache: an <see cref="AppendLog{TEntry}"/> holds a path and a converter and
+        /// never file content, so this does not weaken the rule that the file on disk is the only
+        /// authority.
+        /// </remarks>
+        public AppendLog<JournalEntry> Journal =>
+            field ??= new(Path.Combine(Directory, JournalFileName), LogJsonContext.Readable.JournalEntry);
+
+        /// <summary>Every assertion made to the player, in order, and by whom.</summary>
+        public AppendLog<LedgerEntry> Ledger =>
+            field ??= new(Path.Combine(Directory, LedgerFileName), LogJsonContext.Readable.LedgerEntry);
 
         /// <summary>
         /// Throws unless this save is one this build can play.

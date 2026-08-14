@@ -101,6 +101,63 @@ namespace TerminalQuest.Mcp
         public static string Memory(Memory memory, string owner, string? playerName) =>
             $"  [turn {memory.Turn}] {Placeholders.Resolve(memory.Text, owner, playerName)}";
 
+        /// <summary>
+        /// The secret block of a knowledge fetch: what this character is holding, then what the player
+        /// has already been told and anybody may now speak of. Empty when there is neither.
+        /// </summary>
+        /// <remarks>
+        /// Takes the two lists rather than the character, and that is the point of the signature: a
+        /// character carries dormant secrets, and this must be incapable of printing one. The only
+        /// producer of either argument is <see cref="SecretGate.Release"/>.
+        /// <para>
+        /// The shared block is worded as permission rather than as information, because the narrator's
+        /// question about a spent secret is not what it says - it may well have just said it - but
+        /// whether the thing still has to be handled carefully.
+        /// </para>
+        /// </remarks>
+        public static string Secrets(
+            IReadOnlyList<Secret> held,
+            IReadOnlyList<Secret> common,
+            string owner,
+            string? playerName)
+        {
+            if (held.Count == 0 && common.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var text = new StringBuilder();
+
+            if (held.Count > 0)
+            {
+                text.AppendLine($"Holding in secret - {owner} may act on these, and nobody else knows them:");
+
+                foreach (var secret in held)
+                {
+                    text.AppendLine(Secret(secret, owner, playerName));
+                }
+            }
+
+            if (common.Count > 0)
+            {
+                text.AppendLine("Common knowledge now - the player has been told these, and anyone may speak of them:");
+
+                foreach (var secret in common)
+                {
+                    text.AppendLine(Secret(secret, owner, playerName));
+                }
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// One secret: its name, the turn it was granted on, and what it is. The name comes first
+        /// because it is the handle the narrator has to say back when a line gives the secret away.
+        /// </summary>
+        private static string Secret(Secret secret, string owner, string? playerName) =>
+            $"  {secret.Name} - [turn {secret.Turn}] {Placeholders.Resolve(secret.Text, owner, playerName)}";
+
         /// <summary>A location's headline: name and who is standing in it.</summary>
         /// <param name="index">
         /// Resolves the roster, which holds ids. The model must never see one, so this is required

@@ -47,5 +47,22 @@ namespace TerminalQuest.Saves
 
         /// <summary>Everything they know, oldest first.</summary>
         public List<Memory> Memories { get; set; } = [];
+
+        /// <summary>
+        /// What they know that not everybody may. Absent on a save made before secrets existed, which
+        /// reads as an empty list and is exactly right: nobody was keeping anything.
+        /// </summary>
+        /// <remarks>
+        /// Beside <see cref="Memories"/> rather than inside it, because the two differ only in who may
+        /// be told and that difference is the entire feature. Folding secrets into memories would put
+        /// a gated field on the type that every existing render path already prints in full.
+        /// <para>
+        /// Nothing renders this. Not <see cref="Mcp.QuestRender.Character"/>, not the status pane, not
+        /// the player commands. The only reader is the lifecycle gate, and that is not tidiness: a
+        /// secret reaches the narrator through one function or it does not reach it at all, which is
+        /// what makes withholding structural rather than a matter of the prompt asking nicely.
+        /// </para>
+        /// </remarks>
+        public List<Secret> Secrets { get; set; } = [];
     }
 }

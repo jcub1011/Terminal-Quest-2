@@ -42,6 +42,43 @@ namespace TerminalQuest.Tests.Ui
             }
         }
 
+        [Theory]
+        [InlineData("dormant")]
+        [InlineData("live")]
+        [InlineData("spent")]
+        public void No_player_command_ever_prints_a_secret(string stage)
+        {
+            // Secrets are the narrator's working notes, and these commands answer the player. Spent is
+            // included deliberately: the player heard the prose a character chose to say, not the plot
+            // note behind it, and printing the note would be the prose equivalent of showing them a
+            // hidden roll's total.
+            const string sentinel = "ZZQX-secret-detail-must-not-escape-ZZQX";
+
+            using var save = Seeded();
+            var file = save.Store.ReadCharacters();
+
+            file.Characters[0].Secrets.Add(new Secret
+            {
+                Name = "the sealed cellar",
+                Stage = Enum.Parse<SecretStage>(stage, ignoreCase: true),
+                Text = sentinel,
+                Turn = 1,
+            });
+
+            save.Store.WriteCharacters(file);
+
+            foreach (var command in PlayerCommands.All)
+            {
+                foreach (var typed in new[] { $"/{command.Name}", $"/{command.Name} Rowan" })
+                {
+                    Assert.DoesNotContain(
+                        sentinel,
+                        TextOf(PlayerCommands.Execute(typed, save.Store)),
+                        StringComparison.Ordinal);
+                }
+            }
+        }
+
         [Fact]
         public void An_unknown_command_is_refused_rather_than_spoken_to_the_world()
         {
