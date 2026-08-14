@@ -1,9 +1,9 @@
-namespace TerminalQuest.Claude
+namespace TerminalQuest.Agents.Claude
 {
     /// <summary>
     /// Configuration for a <see cref="ClaudeSession"/>.
     /// </summary>
-    public sealed record ClaudeSessionOptions
+    internal sealed record ClaudeSessionOptions
     {
         /// <summary>
         /// Model to run, for example <c>claude-haiku-4-5-20251001</c> or an alias such as

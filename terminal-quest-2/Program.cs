@@ -1,8 +1,9 @@
 using Terminal.Gui.App;
 
-using TerminalQuest.Claude;
+using TerminalQuest.Agents;
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
+using TerminalQuest.Settings;
 using TerminalQuest.Ui;
 
 namespace TerminalQuest
@@ -121,8 +122,12 @@ namespace TerminalQuest
             MouseReporting.Disable(app);
 
             // The save has to be chosen before the narrator exists: its folder becomes a command
-            // line argument to the state server, which the CLI launches as it starts.
-            var store = ChooseSave(app);
+            // line argument to the state server, which the CLI launches as it starts. The same
+            // screen is where the provider is chosen, for the same reason - both are settled
+            // before anything is built, and neither can be changed once a session is open.
+            var settings = SettingsStore.Read();
+
+            var store = ChooseSave(app, settings);
             if (store is null)
             {
                 return 0;
@@ -185,18 +190,12 @@ namespace TerminalQuest
                 }
             }
 
-            await using var claude = new ClaudeSession(new ClaudeSessionOptions
-            {
-                Model = "claude-haiku-4-5-20251001",
-                SystemPrompt = SystemPrompt,
-                McpConfigJson = QuestServerConfig.Build(store.Directory),
-                AllowedTools = QuestTools.AllowedTools(),
-            });
+            await using var narrator = AgentSessionFactory.Create(settings, store, SystemPrompt);
 
             using var window = new GameWindow(state) { Title = $"Terminal Quest - {store.Name}" };
             var pump = new NarrationPump(app, window.Narration);
 
-            claude.OnTextDelta += pump.Enqueue;
+            narrator.OnTextDelta += pump.Enqueue;
 
             window.QuitRequested += () => app.RequestStop(window);
             window.CommandEntered += OnCommandEntered;
@@ -215,8 +214,8 @@ namespace TerminalQuest
             }
             else
             {
-                // Claude is started here rather than before the UI so that a failure to launch can
-                // be reported into the transcript, on a screen the player is already looking at.
+                // The narrator is started here rather than before the UI so that a failure to launch
+                // can be reported into the transcript, on a screen the player is already looking at.
                 window.InputEnabled = false;
                 window.Narration.AddLine("Waking the narrator...", TextRole.System);
                 _ = Task.Run(OpenAsync);
@@ -271,9 +270,9 @@ namespace TerminalQuest
             {
                 try
                 {
-                    await claude.StartAsync();
+                    await narrator.StartAsync();
                 }
-                catch (ClaudeException ex)
+                catch (AgentException ex)
                 {
                     app.Invoke(() =>
                     {
@@ -298,7 +297,7 @@ namespace TerminalQuest
             {
                 try
                 {
-                    var turn = await claude.SendAsync(prompt);
+                    var turn = await narrator.SendAsync(prompt);
                     pump.CompleteBlock();
 
                     app.Invoke(() =>
@@ -364,17 +363,68 @@ namespace TerminalQuest
         }
 
         /// <summary>Runs the startup screen. Null when the player quit instead of picking a save.</summary>
-        private static SaveStore? ChooseSave(IApplication app)
+        /// <remarks>
+        /// A loop rather than a single screen, because the settings live behind it: opening them
+        /// closes the menu, and coming back has to rebuild it so a save created or deleted in the
+        /// meantime is not missing from the list. <paramref name="settings"/> is mutated in place
+        /// when the player changes anything, so the caller sees what they chose.
+        /// </remarks>
+        private static SaveStore? ChooseSave(IApplication app, AppSettings settings)
         {
-            using var menu = new SaveMenuWindow();
+            while (true)
+            {
+                using var menu = new SaveMenuWindow(Describe(settings));
 
-            menu.Done += () => app.RequestStop(menu);
-            menu.Cancelled += () => app.RequestStop(menu);
+                var settingsRequested = false;
 
-            app.Run(menu);
+                menu.Done += () => app.RequestStop(menu);
+                menu.Cancelled += () => app.RequestStop(menu);
+                menu.SettingsRequested += () =>
+                {
+                    settingsRequested = true;
+                    app.RequestStop(menu);
+                };
 
-            return menu.Chosen;
+                app.Run(menu);
+
+                if (!settingsRequested)
+                {
+                    return menu.Chosen;
+                }
+
+                EditSettings(app, settings);
+            }
         }
+
+        /// <summary>Runs the settings screen and keeps what it settled.</summary>
+        private static void EditSettings(IApplication app, AppSettings settings)
+        {
+            using var window = new SettingsWindow(app, settings);
+
+            window.Done += () => app.RequestStop(window);
+            window.Cancelled += () => app.RequestStop(window);
+
+            app.Run(window);
+
+            if (window.Chosen is not { } chosen)
+            {
+                return;
+            }
+
+            settings.Provider = chosen.Provider;
+            settings.ClaudeModel = chosen.ClaudeModel;
+            settings.LmStudioBaseUrl = chosen.LmStudioBaseUrl;
+            settings.LmStudioModel = chosen.LmStudioModel;
+            settings.LmStudioApiKey = chosen.LmStudioApiKey;
+        }
+
+        /// <summary>The one-line summary of who will be narrating, for the save menu.</summary>
+        private static string Describe(AppSettings settings) => settings.Provider switch
+        {
+            AgentProvider.LmStudio =>
+                $"LM Studio - {(settings.LmStudioModel is { Length: > 0 } model ? model : "whichever model is loaded")}",
+            _ => $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } model ? model : "default model")}",
+        };
 
         /// <summary>What the character screen settled, once it has been written to the save.</summary>
         /// <param name="HasStartLocation">
@@ -389,9 +439,9 @@ namespace TerminalQuest
         /// of making anyone.
         /// </summary>
         /// <remarks>
-        /// A third <c>app.Run</c> in the same process, following <see cref="ChooseSave"/>: the
-        /// answers have to exist before <see cref="ClaudeSession"/> is started, because the whole
-        /// point is that the narrator reads the character rather than inventing one.
+        /// A further <c>app.Run</c> in the same process, following <see cref="ChooseSave"/>: the
+        /// answers have to exist before the narrator is started, because the whole point is that it
+        /// reads the character rather than inventing one.
         /// </remarks>
         private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store)
         {

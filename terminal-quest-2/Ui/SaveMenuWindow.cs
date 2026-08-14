@@ -23,13 +23,15 @@ namespace TerminalQuest.Ui
     {
         private const int InputHeight = 3;
         private const int HintHeight = 1;
+        private const int NarratorHeight = 1;
 
         private const string Hint =
-            "Up/Down and Enter to continue a save.  Del deletes one.  Esc quits.";
+            "Up/Down and Enter to continue a save.  Del deletes one.  Ctrl+S for settings.  Esc quits.";
 
         private readonly SaveListView _list;
         private readonly TextField _name;
         private readonly Label _error;
+        private readonly Label _narrator;
 
         /// <summary>
         /// The save the next Del keypress will destroy, or null when nothing is half-confirmed.
@@ -40,7 +42,12 @@ namespace TerminalQuest.Ui
         /// </summary>
         private string? _pendingDelete;
 
-        public SaveMenuWindow()
+        /// <param name="narrator">
+        /// A one-line summary of the provider a game started here would use. Shown because the
+        /// choice is made on another screen and would otherwise be invisible until the first turn
+        /// either narrated or failed.
+        /// </param>
+        public SaveMenuWindow(string narrator)
         {
             Title = "Terminal Quest";
             BorderStyle = LineStyle.Rounded;
@@ -51,14 +58,24 @@ namespace TerminalQuest.Ui
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
-                Height = Dim.Fill() - (InputHeight + HintHeight),
+                Height = Dim.Fill() - (InputHeight + HintHeight + NarratorHeight),
                 Saves = ReadSaves(out var failure),
             };
+
+            _narrator = new Label
+            {
+                X = 0,
+                Y = Pos.Bottom(_list),
+                Width = Dim.Fill(),
+                Height = NarratorHeight,
+                Text = $"Narrator: {narrator}",
+            };
+            _narrator.SetScheme(Theme.CreateScheme());
 
             _error = new Label
             {
                 X = 0,
-                Y = Pos.Bottom(_list),
+                Y = Pos.Bottom(_narrator),
                 Width = Dim.Fill(),
                 Height = HintHeight,
                 Text = failure ?? Hint,
@@ -85,7 +102,7 @@ namespace TerminalQuest.Ui
             };
             frame.Add(_name);
 
-            Add(_list, _error, frame);
+            Add(_list, _narrator, _error, frame);
         }
 
         /// <summary>The save the player settled on, or null when they quit instead.</summary>
@@ -97,11 +114,23 @@ namespace TerminalQuest.Ui
         /// <summary>Raised when the player leaves without starting anything.</summary>
         public event Action? Cancelled;
 
+        /// <summary>
+        /// Raised when the player wants the settings screen. The host runs it and comes back here,
+        /// so this window is closed rather than kept behind it.
+        /// </summary>
+        public event Action? SettingsRequested;
+
         protected override bool OnKeyDown(Key key)
         {
             if (key == Key.Esc || key == Key.Q.WithCtrl)
             {
                 Cancelled?.Invoke();
+                return true;
+            }
+
+            if (key == Key.S.WithCtrl)
+            {
+                SettingsRequested?.Invoke();
                 return true;
             }
 

@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 
-namespace TerminalQuest.Claude
+namespace TerminalQuest.Agents.Claude
 {
     /// <summary>
     /// A long-lived <c>claude</c> process driven over newline-delimited JSON.
@@ -19,7 +19,7 @@ namespace TerminalQuest.Claude
     /// <c>PublishAot</c>.
     /// </para>
     /// </remarks>
-    public sealed class ClaudeSession : IAsyncDisposable
+    internal sealed class ClaudeSession : IAgentSession
     {
         private const int MaxBufferedStandardErrorChars = 16 * 1024;
 
@@ -33,7 +33,7 @@ namespace TerminalQuest.Claude
         private Process? _process;
         private Task? _stdoutReader;
         private Task? _stderrReader;
-        private TaskCompletionSource<ClaudeTurnResult>? _pendingTurn;
+        private TaskCompletionSource<AgentTurnResult>? _pendingTurn;
         private bool _disposed;
 
         public ClaudeSession(ClaudeSessionOptions options)
@@ -109,11 +109,11 @@ namespace TerminalQuest.Claude
             try
             {
                 process = Process.Start(startInfo)
-                    ?? throw new ClaudeException($"Could not start '{_options.ExecutablePath}'.");
+                    ?? throw new AgentException($"Could not start '{_options.ExecutablePath}'.");
             }
-            catch (Exception ex) when (ex is not ClaudeException)
+            catch (Exception ex) when (ex is not AgentException)
             {
-                throw new ClaudeException($"Could not start '{_options.ExecutablePath}'. Is it on PATH?", ex.Message);
+                throw new AgentException($"Could not start '{_options.ExecutablePath}'. Is it on PATH?", ex.Message);
             }
 
             _process = process;
@@ -139,7 +139,7 @@ namespace TerminalQuest.Claude
                 // Let stderr drain so the exception carries the real reason.
                 await SwallowAsync(_stderrReader).ConfigureAwait(false);
 
-                throw new ClaudeException(
+                throw new AgentException(
                     $"'{_options.ExecutablePath}' exited immediately after starting.",
                     SnapshotStandardError(),
                     process.ExitCode);
@@ -150,7 +150,7 @@ namespace TerminalQuest.Claude
         /// Sends one message and waits for the complete response. Turns are serialized: a second
         /// call waits for the first to finish.
         /// </summary>
-        public async Task<ClaudeTurnResult> SendAsync(string prompt, CancellationToken cancellationToken = default)
+        public async Task<AgentTurnResult> SendAsync(string prompt, CancellationToken cancellationToken = default)
         {
             ArgumentException.ThrowIfNullOrEmpty(prompt);
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -163,11 +163,11 @@ namespace TerminalQuest.Claude
             {
                 if (process.HasExited)
                 {
-                    throw new ClaudeException(
+                    throw new AgentException(
                         "The Claude process has exited.", SnapshotStandardError(), process.ExitCode);
                 }
 
-                var turn = new TaskCompletionSource<ClaudeTurnResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var turn = new TaskCompletionSource<AgentTurnResult>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _pendingTurn = turn;
 
                 await WriteLineAsync(process, BuildUserMessage(prompt), cancellationToken).ConfigureAwait(false);
@@ -189,7 +189,7 @@ namespace TerminalQuest.Claude
                         throw;
                     }
 
-                    throw new ClaudeException(
+                    throw new AgentException(
                         $"Claude did not return a result within {_options.TurnTimeout}.",
                         SnapshotStandardError());
                 }
@@ -335,11 +335,11 @@ namespace TerminalQuest.Claude
             }
             catch (Exception ex)
             {
-                FaultOutstanding(new ClaudeException("Lost the connection to the Claude process.", ex.Message));
+                FaultOutstanding(new AgentException("Lost the connection to the Claude process.", ex.Message));
                 return;
             }
 
-            FaultOutstanding(new ClaudeException(
+            FaultOutstanding(new AgentException(
                 "The Claude process ended before returning a result.",
                 SnapshotStandardError(),
                 process.HasExited ? process.ExitCode : null));
@@ -465,7 +465,7 @@ namespace TerminalQuest.Claude
                 ? candidate
                 : default;
 
-            turn.TrySetResult(new ClaudeTurnResult
+            turn.TrySetResult(new AgentTurnResult
             {
                 Text = ReadString(root, "result") ?? string.Empty,
                 IsError = root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True,

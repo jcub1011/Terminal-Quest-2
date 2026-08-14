@@ -26,16 +26,7 @@ namespace TerminalQuest.Saves
                     return Path.GetFullPath(configured);
                 }
 
-                var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-
-                // GetFolderPath returns empty rather than throwing when the profile is unavailable.
-                // Falling back beside the executable keeps a portable copy of the game playable.
-                if (appData.Length == 0)
-                {
-                    appData = AppContext.BaseDirectory;
-                }
-
-                return Path.Combine(appData, "TerminalQuest", "Saves");
+                return Path.Combine(AppDirectory.Root, "Saves");
             }
         }
 

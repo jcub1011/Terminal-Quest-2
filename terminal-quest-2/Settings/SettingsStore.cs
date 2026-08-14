@@ -1,0 +1,78 @@
+using System.Text;
+using System.Text.Json;
+
+using TerminalQuest.Saves;
+
+namespace TerminalQuest.Settings
+{
+    /// <summary>
+    /// Reads and writes <c>settings.json</c>, next to the saves folder rather than inside it: a
+    /// preference outlives any one playthrough and must not be deleted with one.
+    /// </summary>
+    internal static class SettingsStore
+    {
+        private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+        /// <summary>Where the file lives.</summary>
+        public static string Path => System.IO.Path.Combine(AppDirectory.Root, "settings.json");
+
+        /// <summary>
+        /// The stored settings, or the defaults.
+        /// </summary>
+        /// <remarks>
+        /// Never throws. A settings file that is missing, unreadable or malformed must not stop the
+        /// game starting - unlike a save, nothing in here is the player's work, and the defaults are
+        /// a working configuration. They can see what went wrong on the settings screen, which is
+        /// where they would go to fix it anyway.
+        /// </remarks>
+        public static AppSettings Read()
+        {
+            try
+            {
+                var path = Path;
+
+                if (!File.Exists(path))
+                {
+                    return new AppSettings();
+                }
+
+                var text = File.ReadAllText(path, Utf8NoBom);
+
+                if (text.AsSpan().IsWhiteSpace())
+                {
+                    return new AppSettings();
+                }
+
+                return JsonSerializer.Deserialize(text, SettingsJsonContext.Default.AppSettings)
+                    ?? new AppSettings();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+                return new AppSettings();
+            }
+        }
+
+        /// <summary>Stores the settings, replacing whatever was there.</summary>
+        /// <exception cref="SaveException">The file could not be written.</exception>
+        public static void Write(AppSettings settings)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+
+            var path = Path;
+
+            try
+            {
+                Directory.CreateDirectory(AppDirectory.Root);
+
+                File.WriteAllText(
+                    path,
+                    JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings),
+                    Utf8NoBom);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                throw new SaveException($"Could not write settings: {ex.Message}", ex);
+            }
+        }
+    }
+}
