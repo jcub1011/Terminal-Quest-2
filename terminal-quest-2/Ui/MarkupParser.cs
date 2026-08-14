@@ -166,6 +166,18 @@ namespace TerminalQuest.Ui
             }
         }
 
+        /// <summary>
+        /// The tags the narrator may write, matched exactly by the markup rules at the head of the
+        /// system prompt - the two are a pair and have to be changed together.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="TextRole.Command"/> and <see cref="TextRole.Roll"/> are missing on purpose,
+        /// not by oversight. Both are the game's own voice: the first is the player's line echoed
+        /// back, the second is drawn from the save. Giving the narrator a <c>[roll]</c> tag would let
+        /// it type a roll line - which means inventing a number, or spelling out one it was asked to
+        /// keep quiet. An unknown tag renders as literal text, so if it ever tries, the mistake is
+        /// visible rather than convincing.
+        /// </remarks>
         private static bool TryParseRole(string name, out TextRole role)
         {
             switch (name)

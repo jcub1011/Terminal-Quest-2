@@ -26,6 +26,25 @@ namespace TerminalQuest.Saves
         /// <summary>Background and aptitude: who they are and what they are good at.</summary>
         public string Description { get; set; } = string.Empty;
 
+        /// <summary>
+        /// What they are made of. The six core attributes are always present in effect - seeded at
+        /// creation, and filled in at <see cref="CharacterAttributes.Neutral"/> on read for anyone
+        /// who predates them - and the narrator may add named ones of its own as the story earns
+        /// them.
+        /// <para>
+        /// Where <see cref="Description"/> says what someone is good at, this says how good, in a
+        /// form the dice can use. The two are not redundant: prose is what the narrator reads to
+        /// voice them, and a score is what the resolver reads so that the narrator cannot decide
+        /// the outcome by describing it.
+        /// </para>
+        /// <para>
+        /// A list rather than a dictionary. Order carries meaning - the six in their canonical
+        /// order, then whatever the story grew, in the order it grew them - and a list is what
+        /// every other collection in the save already is, so it hand-edits the same way.
+        /// </para>
+        /// </summary>
+        public List<CharacterAttribute> Attributes { get; set; } = [];
+
         /// <summary>Everything they know, oldest first.</summary>
         public List<Memory> Memories { get; set; } = [];
     }

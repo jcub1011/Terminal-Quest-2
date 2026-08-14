@@ -111,8 +111,20 @@ namespace TerminalQuest.Ui
             return true;
         }
 
-        private static string Detail(ClassTemplate template) =>
-            $"{template.Summary}   HP {template.MaxHealth}";
+        /// <summary>
+        /// What is shown beside the name. The two highest scores rather than all six: the picker is
+        /// a choice about how you want to play, and "STR 16 CON 15" says that in the space the row
+        /// has, where a full spread would not fit and a full spread nobody read would be worse.
+        /// </summary>
+        private static string Detail(ClassTemplate template)
+        {
+            var best = template.Attributes
+                .OrderByDescending(attribute => attribute.Score)
+                .Take(2)
+                .Select(attribute => $"{attribute.Name[..3].ToUpperInvariant()} {attribute.Score}");
+
+            return $"{template.Summary}   HP {template.MaxHealth}   {string.Join("  ", best)}";
+        }
 
         private static string Fit(string text, int width) =>
             text.Length <= width ? text : text[..Math.Max(0, width)];

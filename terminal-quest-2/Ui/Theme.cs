@@ -26,6 +26,13 @@ namespace TerminalQuest.Ui
         private static readonly Ink SystemInk = new(new Color("#8a8375"), TextStyle.None);
         private static readonly Ink CommandInk = new(new Color("#f0e6d2"), TextStyle.Bold);
 
+        /// <summary>
+        /// The dice. A violet of its own rather than a borrowed ink: a roll is a third voice in the
+        /// transcript, neither narration nor the game's furniture. Grey would bury the one number
+        /// the player is looking for among the /help text, and gold already means money and items.
+        /// </summary>
+        private static readonly Ink RollInk = new(new Color("#9a8fd0"), TextStyle.Bold);
+
         public static Ink For(TextRole role) => role switch
         {
             TextRole.Item => ItemInk,
@@ -34,6 +41,7 @@ namespace TerminalQuest.Ui
             TextRole.Place => PlaceInk,
             TextRole.System => SystemInk,
             TextRole.Command => CommandInk,
+            TextRole.Roll => RollInk,
             _ => NormalInk,
         };
 

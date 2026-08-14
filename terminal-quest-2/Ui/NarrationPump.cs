@@ -69,13 +69,22 @@ namespace TerminalQuest.Ui
         /// Flushes anything still queued and closes the paragraph. Safe to call from any thread;
         /// the work is marshalled like everything else.
         /// </summary>
-        public void CompleteBlock()
+        public void CompleteBlock() => _app.Invoke(CompleteBlockNow);
+
+        /// <summary>
+        /// The same, on the calling thread and without marshalling. Only safe from the UI thread.
+        /// </summary>
+        /// <remarks>
+        /// Exists for the roll drain, which is already on the UI thread and has to close the
+        /// paragraph <em>before</em> it adds its lines. Going through
+        /// <see cref="IApplication.Invoke(Action)"/> would queue that work behind the caller instead,
+        /// so the roll would be appended first and the paragraph closed after - which is the exact
+        /// ordering the drain exists to avoid.
+        /// </remarks>
+        public void CompleteBlockNow()
         {
-            _app.Invoke(() =>
-            {
-                Drain();
-                _view.CommitBlock();
-            });
+            Drain();
+            _view.CommitBlock();
         }
     }
 }

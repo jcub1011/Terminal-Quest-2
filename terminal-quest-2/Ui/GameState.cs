@@ -5,6 +5,9 @@ namespace TerminalQuest.Ui
     /// <summary>One line of the status pane's inventory list.</summary>
     internal readonly record struct InventoryEntry(int Quantity, string Name);
 
+    /// <summary>One of the six scores shown in the status pane, abbreviated to fit it.</summary>
+    internal readonly record struct AttributeEntry(string Label, int Score);
+
     /// <summary>
     /// The player-visible state shown in the status pane.
     /// <para>
@@ -34,6 +37,17 @@ namespace TerminalQuest.Ui
         /// they have been flattened into a single string.
         /// </summary>
         public List<InventoryEntry> Inventory { get; } = [];
+
+        /// <summary>
+        /// The player's six core scores, in their canonical order.
+        /// <para>
+        /// Freeform attributes are deliberately left out. There is no bound on how many the narrator
+        /// invents or how long it names them, and the pane is twenty-seven columns wide with an
+        /// inventory underneath that would be pushed off the bottom. They are read with
+        /// <c>/characters</c>, which has the width for them.
+        /// </para>
+        /// </summary>
+        public List<AttributeEntry> Attributes { get; } = [];
 
         /// <summary>Coin in hand, shown on its own line however long the item list gets.</summary>
         public int Money { get; set; }
@@ -67,6 +81,22 @@ namespace TerminalQuest.Ui
             Health = player?.Health ?? 0;
             MaxHealth = player?.MaxHealth ?? 0;
             Location = SaveStore.WhereIs(store.ReadLocations(), player?.Id)?.Name ?? string.Empty;
+
+            Attributes.Clear();
+            if (player is not null)
+            {
+                foreach (var attribute in CharacterAttributes.All(player))
+                {
+                    // The six only, and by their first three letters: the pane has room for a
+                    // three-wide label and a two-digit score, twice to a row, and no more.
+                    if (CharacterAttributes.IsCore(attribute.Name))
+                    {
+                        Attributes.Add(new AttributeEntry(
+                            attribute.Name[..3].ToUpperInvariant(),
+                            attribute.Score));
+                    }
+                }
+            }
 
             var inventory = store.ReadInventory();
             Money = inventory.Money;

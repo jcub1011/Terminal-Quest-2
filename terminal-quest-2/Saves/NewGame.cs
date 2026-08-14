@@ -53,6 +53,13 @@ namespace TerminalQuest.Saves
                 Health = template.MaxHealth,
                 Description = ComposeDescription(description, template),
             };
+
+            // The class's spread, copied rather than shared - the templates are static and the
+            // narrator edits attributes in place, so handing one out would spend the next
+            // character's. Seeding also fills in anything the spread left out, so the player leaves
+            // this screen with all six however the table is edited later.
+            CharacterAttributes.Seed(player, template.Attributes);
+
             characters.Characters.Add(player);
             store.WriteCharacters(characters);
 

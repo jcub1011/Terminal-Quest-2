@@ -30,6 +30,7 @@ namespace TerminalQuest.Ui
         public static readonly IReadOnlyList<PlayerCommandInfo> All =
         [
             new("story", "", "everything that has happened"),
+            new("rolls", "", "every die the world has thrown"),
             new("inventory", "", "what you are carrying"),
             new("inv", "", "what you are carrying", IsAlias: true),
             new("characters", "[name]", "who you have met, and what they remember"),
@@ -120,6 +121,9 @@ namespace TerminalQuest.Ui
                         break;
                     case "story":
                         Story(lines, store);
+                        break;
+                    case "rolls":
+                        Rolls(lines, store);
                         break;
                     case "inventory":
                     case "inv":
@@ -217,6 +221,56 @@ namespace TerminalQuest.Ui
             }
         }
 
+        /// <summary>
+        /// Every roll on record, oldest first.
+        /// </summary>
+        /// <remarks>
+        /// A hidden roll is listed - the player is always told a die was thrown - but its result is
+        /// not printed, here or ever, unless the narrator has since revealed it. That has to hold in
+        /// both places: a number the player could read back afterwards was never hidden at all, and
+        /// a command that quietly undid the concealment would make hiding pointless.
+        /// <para>
+        /// Safe to run mid-turn, like every command here. The narrator writes through a temporary
+        /// file that is renamed over the real one, so a reader never sees half a document even while
+        /// the other process is writing.
+        /// </para>
+        /// </remarks>
+        private static void Rolls(List<StyledLine> lines, SaveStore store)
+        {
+            var rolls = store.ReadRolls().Rolls;
+
+            if (rolls.Count == 0)
+            {
+                lines.Add(StyledLine.FromText("No dice have been thrown yet.", TextRole.System));
+                return;
+            }
+
+            lines.Add(StyledLine.FromText("The dice so far", TextRole.System));
+
+            // Read once for the whole list: rolls hold ids, and every name on screen comes from here.
+            var characters = store.ReadCharacters();
+
+            foreach (var roll in rolls)
+            {
+                var line = new StyledLine();
+                line.Append($"  {roll.Turn,4}  ", TextRole.System);
+
+                foreach (var span in RollWatcher.Line(roll, SaveStore.FindCharacterById(characters, roll.CharacterId)?.Name).Spans)
+                {
+                    line.Append(span);
+                }
+
+                lines.Add(line);
+
+                // The reason gets a line of its own only when the headline showed the attribute
+                // instead, so nothing the player was told at the time is missing from the record.
+                if (roll.Attribute is { Length: > 0 } && roll.Reason is { Length: > 0 })
+                {
+                    lines.Add(StyledLine.FromText($"        {roll.Reason}", TextRole.System));
+                }
+            }
+        }
+
         private static void Inventory(List<StyledLine> lines, SaveStore store)
         {
             var file = store.ReadInventory();
@@ -307,6 +361,27 @@ namespace TerminalQuest.Ui
             {
                 lines.Add(StyledLine.FromText($"  {found.Description}", TextRole.System));
             }
+
+            // The one place a freeform attribute is visible to the player: the status pane has room
+            // for the six and no more, and the roll line only ever names the one it applied.
+            var attributes = new StyledLine();
+            attributes.Append("  ", TextRole.System);
+
+            foreach (var attribute in CharacterAttributes.All(found))
+            {
+                if (attributes.Length > 2)
+                {
+                    attributes.Append("   ", TextRole.System);
+                }
+
+                attributes.Append($"{attribute.Name} ", TextRole.System);
+                attributes.Append(attribute.Score.ToString(), TextRole.Normal);
+                attributes.Append(
+                    $" ({CharacterAttributes.Sign(CharacterAttributes.Modifier(attribute.Score))})",
+                    TextRole.System);
+            }
+
+            lines.Add(attributes);
 
             if (found.Memories.Count == 0)
             {

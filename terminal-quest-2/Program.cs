@@ -44,6 +44,23 @@ namespace TerminalQuest
           + "add_location_event; and each beat of the story - arriving somewhere, meeting someone, "
           + "a bargain struck - with record_event.\n\n"
 
+          + "When an outcome is genuinely in doubt - a leap, a lie, a lock, a blow struck - do not "
+          + "decide it. Call roll first, read the total, and write what the dice said even when it "
+          + "is not the scene you had in mind. Name who is rolling and which of their attributes "
+          + "applies, and the modifier is added for you; a bonus you assert yourself is not a bonus, "
+          + "it is a guess. Use hidden when knowing the number would tell the player something their "
+          + "character does not know - whether a lie was believed, whether a search missed "
+          + "something - and then narrate only what they could actually tell. Call reveal_roll later "
+          + "if the moment comes when they should know after all. Do not roll for things nobody is "
+          + "attempting, and do not roll twice for one attempt.\n\n"
+
+          + "Attributes are what a character is made of, and everyone has the six: Strength, "
+          + "Dexterity, Constitution, Intelligence, Wisdom, Charisma. Change one with set_attribute "
+          + "only when the story has earned it - a season of hard training, a curse, a wound that "
+          + "healed wrong, a reputation won or lost - and use the same tool to invent an attribute "
+          + "the six cannot carry, like standing in a guild or a god's favour. This is not a reward "
+          + "for a good roll.\n\n"
+
           + "On arriving anywhere, call get_location and describe the place as it now stands. What "
           + "happened there has not been undone.\n\n"
 
@@ -64,7 +81,10 @@ namespace TerminalQuest
           + "alone, so an old memory will still say the old name. Treat that as the character's own "
           + "recollection rather than a mistake to correct, and never narrate the correction.\n\n"
 
-          + "Tool calls are silent. The player sees only your prose.";
+          + "Tool calls are silent, with one exception. Every roll is shown to the player - who "
+          + "rolled, what for, and unless it was hidden, what it came to. They see it whether or not "
+          + "you mention it, so do not restate the number as though reporting it, and never write as "
+          + "though no roll was made.";
 
         /// <summary>
         /// Opening turn for a save whose player named where they begin. Everything the narrator
@@ -80,6 +100,18 @@ namespace TerminalQuest
             "This is the first scene. The player character is already on record but has nowhere to "
           + "be. Call get_state, then invent where they begin: upsert_location, move_character them "
           + "into it, and describe it. Do not create the player and do not ask who they are.";
+
+        /// <summary>
+        /// How often the transcript looks for rolls the narrator has just made.
+        /// <para>
+        /// The narrator's tools run in another process and there is nothing to subscribe to, so the
+        /// only way a roll reaches the screen while the turn it belongs to is still running is to go
+        /// looking for it. Fast enough that dice land beside the prose that describes them; slow
+        /// enough that a three-minute turn costs a few hundred reads of a small file, which is
+        /// nothing beside the model call it is waiting on.
+        /// </para>
+        /// </summary>
+        private static readonly TimeSpan RollPollInterval = TimeSpan.FromMilliseconds(400);
 
         private const string ContinuePrompt =
             "This save is being resumed. Call get_state, then set the scene where the player left "
@@ -235,6 +267,12 @@ namespace TerminalQuest
             }
 
             var state = new GameState { SaveName = store.Name };
+            var watcher = new RollWatcher(store);
+
+            // Cleared when the roll log turns out to be unreadable, so the poll stops rather than
+            // reporting the same trouble several times a second. RefreshStatus still says it once,
+            // after the turn, on a pass the player will actually read.
+            var rollsAvailable = true;
 
             if (startupError is null)
             {
@@ -245,6 +283,11 @@ namespace TerminalQuest
                     // Read after seeding, so the pane opens showing the health and kit the player
                     // just chose rather than filling in once the first turn lands.
                     state.RefreshFrom(store);
+
+                    // Rolls already on record belong to sessions that are over. The log is the
+                    // save's memory; the transcript is this sitting's, and replaying a campaign of
+                    // dice into it would bury the scene the player came back for.
+                    watcher.CatchUp();
                 }
                 catch (SaveException ex)
                 {
@@ -456,6 +499,17 @@ namespace TerminalQuest
 
             async Task RunTurnAsync(string prompt)
             {
+                // Scoped to this turn and linked to the session, so the watcher stops when the turn
+                // ends and again if the player leaves mid-turn. Without the link it would go on
+                // reading files and drawing into a window that is being disposed.
+                using var turnLife = CancellationTokenSource.CreateLinkedTokenSource(life.Token);
+
+                // The token is taken here rather than inside the lambda. Reading it there would be a
+                // read of the source itself, which may already have been disposed by the time the
+                // task is scheduled - a turn that fails on its first line would throw on the way out.
+                var watching = turnLife.Token;
+                _ = Task.Run(() => WatchRollsAsync(watching));
+
                 try
                 {
                     var turn = await narrator.SendAsync(prompt, life.Token);
@@ -467,6 +521,10 @@ namespace TerminalQuest
                     {
                         return;
                     }
+
+                    // Before the paragraph is closed, so a roll written in the last few hundred
+                    // milliseconds still lands above the prose rather than under it.
+                    app.Invoke(ShowRolls);
 
                     pump.CompleteBlock();
 
@@ -508,11 +566,95 @@ namespace TerminalQuest
                             return;
                         }
 
+                        // Even a turn that failed may have rolled before it did, and the player was
+                        // promised they would see every die thrown - a promise a bad turn does not
+                        // release the game from.
+                        ShowRolls();
+
                         window.Narration.CommitBlock();
                         window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
                         window.IsBusy = false;
                     });
                 }
+                finally
+                {
+                    turnLife.Cancel();
+                }
+            }
+
+            /// <summary>
+            /// Looks for new rolls for as long as the turn lasts.
+            /// </summary>
+            async Task WatchRollsAsync(CancellationToken token)
+            {
+                try
+                {
+                    while (!token.IsCancellationRequested)
+                    {
+                        await Task.Delay(RollPollInterval, token);
+                        app.Invoke(ShowRolls);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // The turn ended, or the player left. Either way there is nothing left to watch.
+                }
+            }
+
+            /// <summary>
+            /// Draws every roll the narrator has made since this last ran.
+            /// </summary>
+            void ShowRolls()
+            {
+                if (leaving || !rollsAvailable)
+                {
+                    return;
+                }
+
+                IReadOnlyList<DiceRoll> rolls;
+                CharacterFile characters;
+
+                try
+                {
+                    rolls = watcher.Take();
+
+                    if (rolls.Count == 0)
+                    {
+                        return;
+                    }
+
+                    characters = store.ReadCharacters();
+                }
+                catch (SaveException)
+                {
+                    // Silently, and once. This runs several times a second, and a roll log that will
+                    // not parse would otherwise fill the transcript with the same sentence over and
+                    // over. RefreshStatus reports the save's trouble after the turn.
+                    rollsAvailable = false;
+                    return;
+                }
+
+                // The paragraph in flight has to be closed first. NarrationView.AddLine appends to
+                // the committed rows, which draw above the paragraph being streamed - so adding a
+                // roll mid-stream without committing would shove it above prose already on screen.
+                // Closing first is also the honest ordering: a tool call ends a block of text.
+                //
+                // The cost is that CommitBlock resets the markup parser, so a [speech] tag left open
+                // across a tool call loses its colour for the rest of the paragraph. That is a
+                // sentence in the wrong colour rather than broken text, and a tag spanning a tool
+                // call is already a mistake on the narrator's part.
+                pump.CompleteBlockNow();
+
+                foreach (var roll in rolls)
+                {
+                    window.Narration.AddLine(
+                        RollWatcher.Line(roll, SaveStore.FindCharacterById(characters, roll.CharacterId)?.Name));
+                }
+
+                // CommitBlock cleared the placeholder on its way past. The turn is not over, so the
+                // narrator is still thinking and should still be seen to be.
+                window.Narration.IsWaiting = window.IsBusy;
+                window.Narration.ScrollToBottom();
             }
 
             void RefreshStatus()

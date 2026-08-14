@@ -37,6 +37,29 @@ namespace TerminalQuest.Ui
             DrawField(ref row, width, height, "HP", hasPlayer ? $"{_state.Health}/{_state.MaxHealth}" : "-", healthRole);
             DrawField(ref row, width, height, "Turn", _state.Turn.ToString(), TextRole.Normal);
 
+            // Two to a row, so the six take three rows rather than six and leave the pack its space.
+            // Scores without their modifiers: the modifier is derivable, /characters spells it out,
+            // and the roll line already shows the one that actually applied.
+            for (var index = 0; index < _state.Attributes.Count; index += 2)
+            {
+                var line = new StyledLine();
+
+                for (var column = 0; column < 2 && index + column < _state.Attributes.Count; column++)
+                {
+                    var attribute = _state.Attributes[index + column];
+
+                    if (column > 0)
+                    {
+                        line.Append("  ", TextRole.System);
+                    }
+
+                    line.Append($"{attribute.Label} ", TextRole.System);
+                    line.Append($"{attribute.Score,2}", TextRole.Normal);
+                }
+
+                DrawWrapped(ref row, width, height, line);
+            }
+
             DrawSeparator(ref row, width, height);
 
             // Above the item list rather than below it, so a full pack cannot push the purse off

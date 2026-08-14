@@ -34,6 +34,8 @@ namespace TerminalQuest.Mcp
                 text.AppendLine(character.Description);
             }
 
+            text.AppendLine(Attributes(character));
+
             if (character.Memories.Count == 0)
             {
                 text.AppendLine("Memories: none yet.");
@@ -48,6 +50,51 @@ namespace TerminalQuest.Mcp
             }
 
             return text.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// What a character is made of, on one line, each score with the modifier a roll would
+        /// actually apply.
+        /// </summary>
+        /// <remarks>
+        /// The modifier is spelled out beside the score rather than left to be worked out. The
+        /// narrator does not need it - the resolver applies it - but it is what makes the line
+        /// readable as a description of somebody, and a model that can see "Strength 16 (+3)" is far
+        /// less tempted to invent a bonus than one handed a bare 16.
+        /// <para>
+        /// Names in full, not the three-letter forms everyone knows the six by. The saving would be
+        /// some forty tokens on a response that is cached after the first turn, against the narrator
+        /// echoing "DEX" back as an argument - which the lookup forgives, but a shape the model never
+        /// sees is a shape it never guesses wrong.
+        /// </para>
+        /// </remarks>
+        public static string Attributes(Character character)
+        {
+            var parts = CharacterAttributes.All(character)
+                .Select(attribute =>
+                    $"{attribute.Name} {attribute.Score} ({CharacterAttributes.Sign(CharacterAttributes.Modifier(attribute.Score))})");
+
+            return $"Attributes: {string.Join(", ", parts)}";
+        }
+
+        /// <summary>
+        /// One roll, as the narrator reads it back.
+        /// </summary>
+        /// <remarks>
+        /// The total is here whether or not the roll was hidden. Hiding governs what the
+        /// <em>player</em> is told; a narrator that could not see its own dice could not describe
+        /// what they did, which is the one job it has left once the resolver owns the number.
+        /// </remarks>
+        public static string Roll(DiceRoll roll, string? rollerName)
+        {
+            var who = rollerName is { Length: > 0 } ? rollerName : "Something";
+            var faces = roll.Faces.Count > 0 ? $" [{string.Join(", ", roll.Faces)}]" : string.Empty;
+
+            var modifier = roll.Attribute is { Length: > 0 }
+                ? $" {CharacterAttributes.Sign(roll.Modifier)} {roll.Attribute}"
+                : string.Empty;
+
+            return $"{who} rolled {roll.Notation} for {roll.Reason}:{faces}{modifier} = {roll.Total}.";
         }
 
         /// <summary>One memory, resolved, stamped with the turn it was formed on.</summary>

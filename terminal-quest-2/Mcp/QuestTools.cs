@@ -45,7 +45,9 @@ namespace TerminalQuest.Mcp
 
             new("upsert_character",
                 "Create a character or overwrite an existing one. This is how someone enters the "
-              + "world. Creating the player is the first thing to do in an empty save.",
+              + "world. Creating the player is the first thing to do in an empty save. An NPC's "
+              + "attributes are worth setting here, in the same breath as their health: they are "
+              + "what the dice will read when that character acts.",
                 """
                 {"type":"object",
                  "properties":{
@@ -53,7 +55,8 @@ namespace TerminalQuest.Mcp
                    "kind":{"type":"string","enum":["player","npc"],"description":"Defaults to npc. Exactly one character should be the player."},
                    "health":{"type":"integer"},
                    "maxHealth":{"type":"integer"},
-                   "description":{"type":"string","description":"Background and aptitude: who they are, what they are good at."}},
+                   "description":{"type":"string","description":"Background and aptitude: who they are, what they are good at."},
+                   "attributes":{"type":"object","additionalProperties":{"type":"integer"},"description":"Starting scores, e.g. {\"Strength\":15,\"Dexterity\":12}. Any of the six you do not name start at 10, which is unremarkable."}},
                  "required":["name"]}
                 """),
 
@@ -95,6 +98,55 @@ namespace TerminalQuest.Mcp
                    "character":{"type":"string"},
                    "about":{"type":"string","description":"Narrow to memories mentioning this person, place or thing. Optional."}},
                  "required":["character"]}
+                """),
+
+            new("roll",
+                "Settle something with dice rather than deciding it yourself. Reach for this "
+              + "whenever an outcome is genuinely in doubt - a leap, a lie, a lock, a blow struck - "
+              + "and read the total before you write what happened. The number is the world's "
+              + "answer, not a suggestion: narrate it even when it goes against the scene you had "
+              + "in mind. Name who is rolling and which of their attributes applies, and the "
+              + "modifier is added for you; a bonus you add yourself is not a bonus, it is a guess. "
+              + "The player is always shown that you rolled and what for, so do not roll for things "
+              + "nobody is attempting, and do not roll twice for one attempt.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "notation":{"type":"string","description":"Standard dice notation: 2d6+3, d20, 4d6kh3, 2d20kh1 for advantage, 2d20kl1 for disadvantage. Terms may be added or subtracted: 1d8+1d4+2. Leave the modifier out when you name an attribute - it supplies its own."},
+                   "reason":{"type":"string","description":"What is being decided, in a few words: \"leaping the chasm\", \"whether the guard believes her\". The player is shown this."},
+                   "character":{"type":"string","description":"Who is rolling, by name. Omit for a roll nobody makes - a trap, the weather, the world."},
+                   "attribute":{"type":"string","description":"An attribute of theirs whose modifier is added to the total, e.g. Dexterity. Omit when nothing about them applies."},
+                   "hidden":{"type":"boolean","description":"Defaults to false. True keeps the result from the player; they still see that a roll was made and what for. Use it when knowing the number would tell them something their character does not know."}},
+                 "required":["notation","reason"]}
+                """),
+
+            new("reveal_roll",
+                "Show the player the result of a roll you kept from them, once it no longer matters "
+              + "- the trap is sprung, the lie is found out, the search is over. The roll reappears "
+              + "in front of them with its number. Only reach for this when the concealment has "
+              + "served its purpose.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "character":{"type":"string","description":"Narrow to rolls this character made. Optional."},
+                   "reason":{"type":"string","description":"Narrow to the roll whose reason contains this. Optional."}}}
+                """),
+
+            new("set_attribute",
+                "Raise or lower what a character is made of, when the story has earned it - a season "
+              + "of hard training, a curse, a wound that healed wrong, a reputation won or lost. Not "
+              + "a reward for a good roll: this is a lasting change to who somebody is, and it "
+              + "should be rare. It is also how you invent an attribute the core six cannot carry - "
+              + "standing in a guild, a god's favour - which then works exactly like the rest, "
+              + "modifier and all.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "character":{"type":"string"},
+                   "attribute":{"type":"string","description":"Strength, Dexterity, Constitution, Intelligence, Wisdom or Charisma - or any name you like for something the story has grown, e.g. \"Guild standing\"."},
+                   "score":{"type":"integer","description":"The new score, 1 to 30. Ten is unremarkable; every two points above or below is one point of bonus or penalty."},
+                   "change":{"type":"integer","description":"How much to add or subtract instead, e.g. 1 or -2. Give this or score, not both."}},
+                 "required":["character","attribute"]}
                 """),
 
             new("list_locations",
@@ -240,6 +292,9 @@ namespace TerminalQuest.Mcp
             "update_character" => UpdateCharacter(store, arguments),
             "add_memory" => AddMemory(store, arguments),
             "get_memories" => GetMemories(store, arguments),
+            "roll" => Roll(store, arguments),
+            "reveal_roll" => RevealRoll(store, arguments),
+            "set_attribute" => SetAttribute(store, arguments),
             "list_locations" => ListLocations(store),
             "get_location" => GetLocation(store, arguments),
             "upsert_location" => UpsertLocation(store, arguments),
@@ -437,6 +492,20 @@ namespace TerminalQuest.Mcp
                 character.Description = description;
             }
 
+            // Seeded before the named scores are applied, so a new character always leaves here with
+            // all six however few the narrator troubled to state - the dice have to have something
+            // to read when this NPC acts, and a missing attribute would otherwise be an argument
+            // about what it should have been.
+            if (isNew)
+            {
+                CharacterAttributes.Seed(character, null);
+            }
+
+            foreach (var (attribute, score) in Scores(arguments, "attributes"))
+            {
+                CharacterAttributes.Set(character, attribute, score);
+            }
+
             store.WriteCharacters(file);
 
             return ToolOutcome.Ok(
@@ -534,9 +603,15 @@ namespace TerminalQuest.Mcp
                       + $"out '{former}' in their prose - they are not rewritten.");
                 }
 
+                // Attributes are deliberately not on this list. This tool is one property and one
+                // value; an attribute needs a name and a value, which would have to be smuggled in
+                // as "Strength=14" - a second grammar inside the tool whose whole shape is the
+                // first. The model will still try it, so the way out is named here.
                 default:
                     return ToolOutcome.Fail(
-                        $"'{property}' is not a character property. Use name, health, maxHealth, description or kind.");
+                        $"'{property}' is not a character property. Use name, health, maxHealth, "
+                      + "description or kind. Attributes like Strength or Guild standing are changed "
+                      + "with set_attribute.");
             }
 
             store.WriteCharacters(file);
@@ -680,6 +755,291 @@ namespace TerminalQuest.Mcp
             }
 
             return ToolOutcome.Ok(text.ToString().TrimEnd());
+        }
+
+        /// <summary>
+        /// Throws dice and writes down what they said.
+        /// </summary>
+        /// <remarks>
+        /// The one handler that refuses things the fiction would allow. Everywhere else this class
+        /// validates structure and never second-guesses the story - but a roll is the one place the
+        /// model is not trusted, because the whole point of it is to take a decision away from the
+        /// model. So an expression that would let it choose its own bonus is turned back, with the
+        /// expression that would not.
+        /// </remarks>
+        private static ToolOutcome Roll(SaveStore store, JsonElement arguments)
+        {
+            if (Text(arguments, "notation") is not { Length: > 0 } notation)
+            {
+                return ToolOutcome.Fail("roll needs a notation, like 2d6+3 or d20.");
+            }
+
+            if (Text(arguments, "reason") is not { Length: > 0 } reason)
+            {
+                return ToolOutcome.Fail(
+                    "roll needs a reason - the player is shown what the roll was for, and a roll "
+                  + "they cannot account for is worse than one they never saw.");
+            }
+
+            var characters = store.ReadCharacters();
+            Character? roller = null;
+
+            if (Text(arguments, "character") is { Length: > 0 } name)
+            {
+                roller = SaveStore.FindCharacter(characters, name);
+
+                if (roller is null)
+                {
+                    return ToolOutcome.Fail(
+                        $"There is no character named '{name}'. Use list_characters to see who exists.");
+                }
+            }
+
+            var modifier = 0;
+            var attributeName = string.Empty;
+
+            if (Text(arguments, "attribute") is { Length: > 0 } attribute)
+            {
+                if (roller is null)
+                {
+                    return ToolOutcome.Fail(
+                        "An attribute belongs to somebody. Name the character rolling, or drop the attribute.");
+                }
+
+                // A roll must not change the world, so an attribute nobody has is refused rather
+                // than created. Rolling and gaining a trait in one call would also mean the narrator
+                // could invent whatever bonus it wanted at the moment it needed one.
+                var found = CharacterAttributes.Find(roller, attribute)
+                    ?? (CharacterAttributes.IsCore(attribute)
+                        ? new CharacterAttribute
+                        {
+                            Name = CharacterAttributes.CanonicalName(attribute)!,
+                            Score = CharacterAttributes.Neutral,
+                        }
+                        : null);
+
+                if (found is null)
+                {
+                    var has = string.Join(", ", CharacterAttributes.All(roller).Select(entry => entry.Name));
+
+                    return ToolOutcome.Fail(
+                        $"{roller.Name} has no attribute called '{attribute}'. They have {has}. Use one "
+                      + "of those, or create it with set_attribute first.");
+                }
+
+                // Two sources for one number is the ambiguity the resolver exists to remove, and the
+                // line the player is shown has one modifier slot precisely so they can see where the
+                // number came from.
+                if (CarriesFlatTerm(notation))
+                {
+                    return ToolOutcome.Fail(
+                        $"{notation} already carries a flat bonus and you also named {found.Name}. Roll "
+                      + "the dice alone and let the attribute supply the modifier, or drop the "
+                      + "attribute and keep the flat bonus.");
+                }
+
+                attributeName = found.Name;
+                modifier = CharacterAttributes.Modifier(found.Score);
+            }
+
+            // Random.Shared rather than an instance of our own: this process rolls for one session
+            // and shares the sequence with nobody, so there is nothing to own. Dice.TryRoll takes it
+            // as a parameter, which is the seam if a seeded sequence is ever wanted.
+            var outcome = Dice.TryRoll(notation, Random.Shared, out var error);
+
+            if (outcome is null)
+            {
+                return ToolOutcome.Fail(error);
+            }
+
+            var file = store.ReadRolls();
+
+            var roll = new DiceRoll
+            {
+                Id = SaveStore.NextId(file.Rolls, static existing => existing.Id),
+                Turn = store.CurrentTurn(),
+                CharacterId = roller?.Id ?? string.Empty,
+                Reason = reason.Trim(),
+                Attribute = attributeName,
+                Modifier = modifier,
+                Notation = outcome.Notation,
+                Faces = [.. outcome.Faces],
+                Total = outcome.Total + modifier,
+                Hidden = Bool(arguments, "hidden") ?? false,
+            };
+
+            file.Rolls.Add(roll);
+            store.WriteRolls(file);
+
+            var text = QuestRender.Roll(roll, roller?.Name);
+
+            return ToolOutcome.Ok(roll.Hidden
+                ? text
+                + Environment.NewLine
+                + "Hidden: the player has been shown the notation and what it was for, but not the "
+                + "number. Narrate the consequence and never the total. Call reveal_roll later if "
+                + "the moment comes when they should know."
+                : text);
+        }
+
+        /// <summary>
+        /// Un-hides a roll, so the player finally sees what it came to.
+        /// </summary>
+        /// <remarks>
+        /// Chosen by description rather than by id. Ids never leave the save layer - see
+        /// <see cref="EntityIds"/> - and the narrator has no handle on a past roll anyway, so it
+        /// names the one it means the way it would in prose: whose it was, what it was for, or
+        /// simply the last one still hidden.
+        /// </remarks>
+        private static ToolOutcome RevealRoll(SaveStore store, JsonElement arguments)
+        {
+            var file = store.ReadRolls();
+            var characters = store.ReadCharacters();
+
+            var wanted = Text(arguments, "character");
+            var roller = wanted is { Length: > 0 } ? SaveStore.FindCharacter(characters, wanted) : null;
+
+            if (wanted is { Length: > 0 } && roller is null)
+            {
+                return ToolOutcome.Fail($"There is no character named '{wanted}'.");
+            }
+
+            var reason = Text(arguments, "reason");
+
+            // Backwards: the most recent match is the one a narrator saying "reveal it now" means.
+            for (var index = file.Rolls.Count - 1; index >= 0; index--)
+            {
+                var roll = file.Rolls[index];
+
+                if (!roll.Hidden || roll.Revealed)
+                {
+                    continue;
+                }
+
+                if (roller is not null && !string.Equals(roll.CharacterId, roller.Id, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (reason is { Length: > 0 }
+                    && !roll.Reason.Contains(reason, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                roll.Revealed = true;
+                store.WriteRolls(file);
+
+                var name = SaveStore.FindCharacterById(characters, roll.CharacterId)?.Name;
+
+                return ToolOutcome.Ok(
+                    $"Revealed. The player has now been shown it.{Environment.NewLine}{QuestRender.Roll(roll, name)}");
+            }
+
+            return ToolOutcome.Fail("There is no hidden roll left to reveal that matches that.");
+        }
+
+        /// <summary>Changes what a character is made of, or gives them something new to be made of.</summary>
+        private static ToolOutcome SetAttribute(SaveStore store, JsonElement arguments)
+        {
+            if (Text(arguments, "character") is not { Length: > 0 } name)
+            {
+                return ToolOutcome.Fail("set_attribute needs a character.");
+            }
+
+            if (Text(arguments, "attribute") is not { Length: > 0 } attribute)
+            {
+                return ToolOutcome.Fail("set_attribute needs an attribute.");
+            }
+
+            var score = Number(arguments, "score");
+            var change = Number(arguments, "change");
+
+            if (score is not null && change is not null)
+            {
+                return ToolOutcome.Fail(
+                    "set_attribute takes score or change, not both. Give the new score, or how much to move it by.");
+            }
+
+            if (score is null && change is null)
+            {
+                return ToolOutcome.Fail(
+                    "set_attribute needs a score or a change. Give the new score, or how much to move it by.");
+            }
+
+            var file = store.ReadCharacters();
+            var character = SaveStore.FindCharacter(file, name);
+
+            if (character is null)
+            {
+                return ToolOutcome.Fail(
+                    $"There is no character named '{name}'. Use list_characters to see who exists.");
+            }
+
+            var canonical = CharacterAttributes.CanonicalName(attribute)!;
+            var existing = CharacterAttributes.Find(character, canonical);
+
+            // An attribute nobody has yet starts at neutral before a change is applied, so "+1 Guild
+            // standing" on somebody who never had any lands just above nothing - which is what
+            // gaining a little standing should mean - rather than at 1.
+            var current = existing?.Score ?? CharacterAttributes.Neutral;
+            var wanted = score ?? current + change!.Value;
+
+            var written = CharacterAttributes.Set(character, canonical, wanted);
+            store.WriteCharacters(file);
+
+            var clamped = written.Score != wanted
+                ? $" (asked for {wanted}, which is outside {CharacterAttributes.MinScore}-{CharacterAttributes.MaxScore})"
+                : string.Empty;
+
+            return ToolOutcome.Ok(
+                $"{character.Name}: {written.Name} is now {written.Score} "
+              + $"({CharacterAttributes.Sign(CharacterAttributes.Modifier(written.Score))}){clamped}."
+              + $"{Environment.NewLine}{QuestRender.Attributes(character)}");
+        }
+
+        /// <summary>
+        /// Whether an expression adds or subtracts a flat number - the thing an attribute must not
+        /// be doubled up with. Dice terms are stepped over rather than parsed; this only has to know
+        /// whether a bare number stands anywhere in the sum.
+        /// </summary>
+        private static bool CarriesFlatTerm(string notation)
+        {
+            var hasDigit = false;
+            var hasLetter = false;
+
+            foreach (var c in notation)
+            {
+                if (char.IsWhiteSpace(c))
+                {
+                    continue;
+                }
+
+                if (c is '+' or '-')
+                {
+                    // A term has ended. Digits and no letter means it was a bare number - the '6' in
+                    // "2d6" does not count, because the 'd' beside it makes that term dice.
+                    if (hasDigit && !hasLetter)
+                    {
+                        return true;
+                    }
+
+                    hasDigit = false;
+                    hasLetter = false;
+                    continue;
+                }
+
+                if (char.IsAsciiDigit(c))
+                {
+                    hasDigit = true;
+                }
+                else
+                {
+                    hasLetter = true;
+                }
+            }
+
+            return hasDigit && !hasLetter;
         }
 
         private static ToolOutcome ListLocations(SaveStore store)
@@ -1135,6 +1495,65 @@ namespace TerminalQuest.Mcp
                 JsonValueKind.String when int.TryParse(value.GetString(), out var parsed) => parsed,
                 _ => null,
             };
+        }
+
+        /// <summary>
+        /// A boolean argument, tolerating the string form for the same reason <see cref="Number"/>
+        /// does: models send <c>"true"</c> where the schema asks for <c>true</c>, and refusing that
+        /// would cost a turn to no purpose.
+        /// </summary>
+        private static bool? Bool(JsonElement arguments, string propertyName)
+        {
+            if (arguments.ValueKind != JsonValueKind.Object
+                || !arguments.TryGetProperty(propertyName, out var value))
+            {
+                return null;
+            }
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.String when bool.TryParse(value.GetString(), out var parsed) => parsed,
+                _ => null,
+            };
+        }
+
+        /// <summary>
+        /// A name-to-number map argument, as <c>{"Strength":15}</c>. Values may arrive as strings.
+        /// </summary>
+        /// <remarks>
+        /// An entry whose value is not a number is skipped rather than refused. One unreadable score
+        /// should not cost the narrator the whole character it was creating - the rest of the call
+        /// is still good, and a missing attribute reads as neutral.
+        /// </remarks>
+        private static List<(string Name, int Score)> Scores(JsonElement arguments, string propertyName)
+        {
+            var scores = new List<(string, int)>();
+
+            if (arguments.ValueKind != JsonValueKind.Object
+                || !arguments.TryGetProperty(propertyName, out var value)
+                || value.ValueKind != JsonValueKind.Object)
+            {
+                return scores;
+            }
+
+            foreach (var property in value.EnumerateObject())
+            {
+                var score = property.Value.ValueKind switch
+                {
+                    JsonValueKind.Number when property.Value.TryGetInt32(out var number) => number,
+                    JsonValueKind.String when int.TryParse(property.Value.GetString(), out var parsed) => parsed,
+                    _ => (int?)null,
+                };
+
+                if (score is { } found && property.Name.Length > 0)
+                {
+                    scores.Add((property.Name, found));
+                }
+            }
+
+            return scores;
         }
 
         /// <summary>The raw JSON text of an argument, for reporting a value that was not a string.</summary>

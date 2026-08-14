@@ -25,6 +25,7 @@ namespace TerminalQuest.Saves
         private const string LocationsFileName = "locations.json";
         private const string InventoryFileName = "inventory.json";
         private const string StoryFileName = "story.json";
+        private const string RollsFileName = "rolls.json";
         private const string MetadataFileName = "save.json";
 
         private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
@@ -66,6 +67,10 @@ namespace TerminalQuest.Saves
         public StoryFile ReadStory() => Read(StoryFileName, SaveJsonContext.Readable.StoryFile);
 
         public void WriteStory(StoryFile file) => Write(StoryFileName, file, SaveJsonContext.Readable.StoryFile);
+
+        public RollFile ReadRolls() => Read(RollsFileName, SaveJsonContext.Readable.RollFile);
+
+        public void WriteRolls(RollFile file) => Write(RollsFileName, file, SaveJsonContext.Readable.RollFile);
 
         public SaveMetadata ReadMetadata() => Read(MetadataFileName, SaveJsonContext.Readable.SaveMetadata);
 
@@ -250,7 +255,7 @@ namespace TerminalQuest.Saves
             string text;
             try
             {
-                text = File.ReadAllText(path, Utf8NoBom);
+                text = ReadShared(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -271,6 +276,55 @@ namespace TerminalQuest.Saves
             catch (JsonException ex)
             {
                 throw new SaveException($"{fileName} is not valid JSON: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Reads a document in a way that does not stop the other process replacing it.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="File.ReadAllText(string)"/> would be the obvious call and is the wrong one.
+        /// It opens with <c>FileShare.Read</c>, which permits other readers and forbids everything
+        /// else - including the delete that Windows performs as the first half of replacing a file.
+        /// <see cref="Write{T}"/> ends with exactly that replacement, so a reader holding such a
+        /// handle does not protect itself: it makes the <em>narrator's write fail</em>, in the other
+        /// process, and the model is told its tool refused.
+        /// <para>
+        /// That was a race measured in microseconds while the only reader was the once-a-turn status
+        /// refresh. The transcript now watches for rolls several times a second for the whole of a
+        /// turn, which is what turns a theoretical race into one that happens.
+        /// </para>
+        /// <para>
+        /// Sharing the file is most of the fix; the retry covers the rest. There is still an instant
+        /// after the destination has been deleted and before the replacement is in place where there
+        /// is no file to open at all, and losing that race should cost a few milliseconds rather than
+        /// a turn.
+        /// </para>
+        /// </remarks>
+        private static string ReadShared(string path)
+        {
+            const int attempts = 3;
+
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    using var stream = new FileStream(
+                        path,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+
+                    using var reader = new StreamReader(stream, Utf8NoBom);
+                    return reader.ReadToEnd();
+                }
+                catch (Exception ex) when (attempt < attempts && ex is IOException or UnauthorizedAccessException)
+                {
+                    // Deliberately blocking. Every caller of this is either a tool call the model is
+                    // already waiting on or a redraw, and neither has anything useful to do in the
+                    // twenty milliseconds it takes the other process to finish its rename.
+                    Thread.Sleep(20);
+                }
             }
         }
 
