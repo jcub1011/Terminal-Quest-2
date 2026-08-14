@@ -20,6 +20,16 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class NarrationView : ThemedView
     {
+        /// <summary>Rows the wheel moves per notch.</summary>
+        private const int WheelRows = 4;
+
+        /// <summary>
+        /// Stands in for the narration until the first token of it arrives, in the place that
+        /// narration will occupy. It belongs here rather than in the status pane: the player is
+        /// waiting on prose, and this is where the prose appears.
+        /// </summary>
+        private static readonly StyledLine WaitingRow = StyledLine.FromText("...thinking", TextRole.Speech);
+
         private readonly List<StyledLine> _committed = [];
         private readonly MarkupParser _parser = new();
 
@@ -34,7 +44,36 @@ namespace TerminalQuest.Ui
         private int _scroll;
         private bool _stickToBottom = true;
 
-        private int TotalRows => _committedRows.Count + _currentRows.Count;
+        private bool _isWaiting;
+
+        /// <summary>
+        /// Whether a narrator turn is in flight with nothing streamed back yet. While it is, a
+        /// placeholder row sits at the end of the transcript; the first delta replaces it in the
+        /// same spot, because by then <see cref="_currentRows"/> is no longer empty.
+        /// </summary>
+        public bool IsWaiting
+        {
+            get => _isWaiting;
+            set
+            {
+                if (_isWaiting == value)
+                {
+                    return;
+                }
+
+                _isWaiting = value;
+                AfterContentChanged();
+            }
+        }
+
+        /// <summary>Whether the placeholder is currently one of the rows.</summary>
+        private bool ShowWaiting => _isWaiting && _currentRows.Count == 0;
+
+        /// <summary>
+        /// Every row the view can scroll through, the placeholder included, so scrolling and
+        /// clamping need no special case for it.
+        /// </summary>
+        private int TotalRows => _committedRows.Count + _currentRows.Count + (ShowWaiting ? 1 : 0);
 
         /// <summary>Appends streamed narration. Safe to call with partial markup tags.</summary>
         public void AppendDelta(string text)
@@ -47,7 +86,10 @@ namespace TerminalQuest.Ui
             _current ??= new StyledLine();
             _parser.Append(text, _current);
 
-            _currentRows = Wrap(_current.Spans, _wrapWidth);
+            // A delta that was nothing but the start of a markup tag has produced no visible text
+            // yet, and must not yield a blank row - that row would replace the waiting placeholder
+            // with nothing at all.
+            _currentRows = _current.Length > 0 ? Wrap(_current.Spans, _wrapWidth) : [];
             AfterContentChanged();
         }
 
@@ -63,6 +105,13 @@ namespace TerminalQuest.Ui
             _current = null;
             _currentRows = [];
             _parser.Reset();
+
+            // The paragraph being waited for has arrived, so the placeholder is spent. Cleared here
+            // rather than left to the host, which flips IsBusy back a moment later on another
+            // marshalled call - long enough for the placeholder to be drawn again under the finished
+            // prose in between.
+            _isWaiting = false;
+
             AfterContentChanged();
         }
 
@@ -123,6 +172,30 @@ namespace TerminalQuest.Ui
             return false;
         }
 
+        /// <summary>
+        /// Scrolls on the wheel. <see cref="ScrollBy"/> already clamps and maintains the
+        /// stick-to-bottom flag, so wheeling up during a turn detaches from the stream and wheeling
+        /// back down rejoins it.
+        /// </summary>
+        protected override bool OnMouseEvent(Mouse mouse)
+        {
+            ArgumentNullException.ThrowIfNull(mouse);
+
+            if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))
+            {
+                ScrollBy(-WheelRows);
+                return true;
+            }
+
+            if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+            {
+                ScrollBy(WheelRows);
+                return true;
+            }
+
+            return false;
+        }
+
         protected override bool OnDrawingContent(DrawContext? context)
         {
             var width = Viewport.Width;
@@ -153,9 +226,7 @@ namespace TerminalQuest.Ui
                     break;
                 }
 
-                var row = index < _committedRows.Count
-                    ? _committedRows[index]
-                    : _currentRows[index - _committedRows.Count];
+                var row = RowAt(index);
 
                 if (row.Spans.Count == 0)
                 {
@@ -173,6 +244,21 @@ namespace TerminalQuest.Ui
             return true;
         }
 
+        /// <summary>
+        /// The row at a scroll index: committed paragraphs, then the paragraph being streamed, then
+        /// the waiting placeholder if it is showing.
+        /// </summary>
+        private StyledLine RowAt(int index)
+        {
+            if (index < _committedRows.Count)
+            {
+                return _committedRows[index];
+            }
+
+            var offset = index - _committedRows.Count;
+            return offset < _currentRows.Count ? _currentRows[offset] : WaitingRow;
+        }
+
         private void RebuildAllRows()
         {
             _committedRows = [];
@@ -181,7 +267,7 @@ namespace TerminalQuest.Ui
                 _committedRows.AddRange(Wrap(line.Spans, _wrapWidth));
             }
 
-            _currentRows = _current is null ? [] : Wrap(_current.Spans, _wrapWidth);
+            _currentRows = _current is { Length: > 0 } ? Wrap(_current.Spans, _wrapWidth) : [];
 
             if (_stickToBottom)
             {

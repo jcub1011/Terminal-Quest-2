@@ -2,6 +2,9 @@ using TerminalQuest.Saves;
 
 namespace TerminalQuest.Ui
 {
+    /// <summary>One line of the status pane's inventory list.</summary>
+    internal readonly record struct InventoryEntry(int Quantity, string Name);
+
     /// <summary>
     /// The player-visible state shown in the status pane.
     /// <para>
@@ -25,8 +28,15 @@ namespace TerminalQuest.Ui
 
         public int Turn { get; set; }
 
-        /// <summary>Item names with quantities, already formatted for the pane.</summary>
-        public List<string> Inventory { get; } = [];
+        /// <summary>
+        /// What the player carries, unformatted. The quantity and the name are kept apart because
+        /// the pane colours them differently and wraps them as one line - neither is possible once
+        /// they have been flattened into a single string.
+        /// </summary>
+        public List<InventoryEntry> Inventory { get; } = [];
+
+        /// <summary>Coin in hand, shown on its own line however long the item list gets.</summary>
+        public int Money { get; set; }
 
         /// <summary>Running total for the session, accumulated from each turn's reported cost.</summary>
         public double CostUsd { get; set; }
@@ -59,10 +69,13 @@ namespace TerminalQuest.Ui
             MaxHealth = player?.MaxHealth ?? 0;
             Location = SaveStore.LocationOf(store.ReadLocations(), playerName)?.Name ?? string.Empty;
 
+            var inventory = store.ReadInventory();
+            Money = inventory.Money;
+
             Inventory.Clear();
-            foreach (var item in store.ReadInventory().Items)
+            foreach (var item in inventory.Items)
             {
-                Inventory.Add(item.Quantity > 1 ? $"{item.Name} x{item.Quantity}" : item.Name);
+                Inventory.Add(new InventoryEntry(item.Quantity, item.Name));
             }
         }
     }

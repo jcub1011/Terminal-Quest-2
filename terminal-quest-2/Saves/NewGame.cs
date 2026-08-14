@@ -19,7 +19,7 @@ namespace TerminalQuest.Saves
         /// <param name="store">The save to seed. Expected to hold no characters yet.</param>
         /// <param name="name">The player's name. Permanent: the narrator cannot rename anyone.</param>
         /// <param name="description">Free prose about who they are. May be empty.</param>
-        /// <param name="template">The archetype chosen, which decides health and the kit.</param>
+        /// <param name="template">The archetype chosen, which decides health, coin and the kit.</param>
         /// <param name="startLocation">
         /// Where they begin, or null/blank to leave it to the narrator.
         /// </param>
@@ -49,6 +49,8 @@ namespace TerminalQuest.Saves
             store.WriteCharacters(characters);
 
             var inventory = store.ReadInventory();
+            inventory.Money = template.StartingMoney;
+
             foreach (var item in template.StartingItems)
             {
                 // Copied, not shared: the templates are static and the narrator edits items in

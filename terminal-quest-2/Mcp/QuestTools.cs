@@ -140,7 +140,7 @@ namespace TerminalQuest.Mcp
                 """),
 
             new("get_inventory",
-                "What the player is carrying. Never guess at this.",
+                "What the player is carrying, and how much coin they have. Never guess at this.",
                 """{"type":"object","properties":{}}"""),
 
             new("add_item",
@@ -162,6 +162,26 @@ namespace TerminalQuest.Mcp
                    "name":{"type":"string"},
                    "quantity":{"type":"integer","description":"Defaults to 1."}},
                  "required":["name"]}
+                """),
+
+            new("add_money",
+                "Give the player coin - a reward, a sale, a purse found. Money is counted, not "
+              + "carried: never add it with add_item.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "amount":{"type":"integer","description":"How much to add. Must be positive."}},
+                 "required":["amount"]}
+                """),
+
+            new("remove_money",
+                "Take coin from the player - a price paid, a toll, a theft. Refused when they "
+              + "cannot afford it, so check the answer before narrating the purchase.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "amount":{"type":"integer","description":"How much to take. Must be positive."}},
+                 "required":["amount"]}
                 """),
 
             new("record_event",
@@ -211,6 +231,8 @@ namespace TerminalQuest.Mcp
             "get_inventory" => GetInventory(store),
             "add_item" => AddItem(store, arguments),
             "remove_item" => RemoveItem(store, arguments),
+            "add_money" => AddMoney(store, arguments),
+            "remove_money" => RemoveMoney(store, arguments),
             "record_event" => RecordEvent(store, arguments),
             "get_story" => GetStory(store, arguments),
             _ => ToolOutcome.Fail($"There is no tool called '{name}'."),
@@ -253,14 +275,16 @@ namespace TerminalQuest.Mcp
             text.AppendLine();
 
             text.AppendLine("INVENTORY");
-            var items = store.ReadInventory().Items;
-            if (items.Count == 0)
+            var inventory = store.ReadInventory();
+            text.AppendLine($"  {QuestRender.Money(inventory.Money)}");
+
+            if (inventory.Items.Count == 0)
             {
-                text.AppendLine("  (empty)");
+                text.AppendLine("  (nothing else)");
             }
             else
             {
-                foreach (var item in items)
+                foreach (var item in inventory.Items)
                 {
                     text.AppendLine(QuestRender.Item(item));
                 }
@@ -672,16 +696,19 @@ namespace TerminalQuest.Mcp
 
         private static ToolOutcome GetInventory(SaveStore store)
         {
-            var items = store.ReadInventory().Items;
-
-            if (items.Count == 0)
-            {
-                return ToolOutcome.Ok("The player is carrying nothing.");
-            }
+            var file = store.ReadInventory();
 
             var text = new StringBuilder();
+            text.AppendLine(QuestRender.Money(file.Money));
+
+            if (file.Items.Count == 0)
+            {
+                text.AppendLine("Carrying nothing else.");
+                return ToolOutcome.Ok(text.ToString().TrimEnd());
+            }
+
             text.AppendLine("Carrying:");
-            foreach (var item in items)
+            foreach (var item in file.Items)
             {
                 text.AppendLine(QuestRender.Item(item));
             }
@@ -756,6 +783,53 @@ namespace TerminalQuest.Mcp
 
             store.WriteInventory(file);
             return ToolOutcome.Ok($"Removed.{Environment.NewLine}{QuestRender.Item(item)}");
+        }
+
+        private static ToolOutcome AddMoney(SaveStore store, JsonElement arguments)
+        {
+            if (Number(arguments, "amount") is not { } amount)
+            {
+                return ToolOutcome.Fail("add_money needs an amount.");
+            }
+
+            if (amount <= 0)
+            {
+                return ToolOutcome.Fail("add_money needs a positive amount. Use remove_money to take coin away.");
+            }
+
+            var file = store.ReadInventory();
+            file.Money += amount;
+            store.WriteInventory(file);
+
+            return ToolOutcome.Ok($"Paid in. {QuestRender.Money(file.Money)}");
+        }
+
+        private static ToolOutcome RemoveMoney(SaveStore store, JsonElement arguments)
+        {
+            if (Number(arguments, "amount") is not { } amount)
+            {
+                return ToolOutcome.Fail("remove_money needs an amount.");
+            }
+
+            if (amount <= 0)
+            {
+                return ToolOutcome.Fail("remove_money needs a positive amount.");
+            }
+
+            var file = store.ReadInventory();
+
+            // Refused rather than clamped: the narrator is about to describe a purchase, and it
+            // needs to know the player cannot afford it before it writes that they bought it.
+            if (file.Money < amount)
+            {
+                return ToolOutcome.Fail(
+                    $"The player cannot afford that. {QuestRender.Money(file.Money)}");
+            }
+
+            file.Money -= amount;
+            store.WriteInventory(file);
+
+            return ToolOutcome.Ok($"Paid out. {QuestRender.Money(file.Money)}");
         }
 
         private static ToolOutcome RecordEvent(SaveStore store, JsonElement arguments)

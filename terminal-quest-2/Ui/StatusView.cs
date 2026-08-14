@@ -4,7 +4,8 @@ namespace TerminalQuest.Ui
 {
     /// <summary>
     /// The fixed status pane. Like <see cref="NarrationView"/> it draws itself so that each field
-    /// can carry its own colour, but it needs no wrapping or scrolling - it is a short fixed list.
+    /// can carry its own colour, and it borrows that view's word wrap so an item name wider than
+    /// the pane runs onto a second row instead of being cut off at the margin.
     /// </summary>
     internal sealed class StatusView : ThemedView
     {
@@ -38,36 +39,34 @@ namespace TerminalQuest.Ui
 
             DrawSeparator(ref row, width, height);
 
-            // The place name gets the full width: it is prose, not a short value, and pushing it
-            // to the right margin as a field would truncate almost every one of them.
-            DrawText(ref row, width, height, _state.Location.Length > 0 ? _state.Location : "nowhere", TextRole.Place);
-
-            DrawSeparator(ref row, width, height);
+            // Above the item list rather than below it, so a full pack cannot push the purse off
+            // the bottom of the pane. Shown at nought too - "no money" is worth knowing.
+            DrawField(ref row, width, height, "Money", _state.Money.ToString(), TextRole.Item);
 
             if (_state.Inventory.Count == 0)
             {
-                DrawText(ref row, width, height, "(empty)", TextRole.System);
+                DrawWrapped(ref row, width, height, StyledLine.FromText("(empty)", TextRole.System));
             }
             else
             {
-                foreach (var item in _state.Inventory)
+                foreach (var entry in _state.Inventory)
                 {
-                    DrawText(ref row, width, height, item, TextRole.Item);
+                    // Quantity first: it reads as a tally of what is carried, and it lines the
+                    // names up down the left of the pane whatever the counts are.
+                    var line = new StyledLine();
+                    line.Append($"{entry.Quantity}x ", TextRole.System);
+                    line.Append(entry.Name, TextRole.Item);
+                    DrawWrapped(ref row, width, height, line);
                 }
             }
 
             DrawSeparator(ref row, width, height);
 
-            if (_state.IsBusy)
-            {
-                DrawText(ref row, width, height, "...thinking", TextRole.Speech);
-            }
-
-            DrawText(ref row, width, height, $"${_state.CostUsd:F4}", TextRole.System);
+            DrawWrapped(ref row, width, height, StyledLine.FromText($"${_state.CostUsd:F4}", TextRole.System));
 
             if (_state.LastDurationMs > 0)
             {
-                DrawText(ref row, width, height, $"{_state.LastDurationMs}ms", TextRole.System);
+                DrawWrapped(ref row, width, height, StyledLine.FromText($"{_state.LastDurationMs}ms", TextRole.System));
             }
 
             return true;
@@ -97,17 +96,29 @@ namespace TerminalQuest.Ui
             row++;
         }
 
-        private void DrawText(ref int row, int width, int height, string text, TextRole role)
+        /// <summary>
+        /// Draws one logical line, wrapped to the pane width. Continuation rows are not indented:
+        /// the wrap is there so nothing is lost, and a hanging indent would cost the columns that
+        /// made the wrap unnecessary.
+        /// </summary>
+        private void DrawWrapped(ref int row, int width, int height, StyledLine line)
         {
-            if (row >= height)
+            foreach (var wrapped in NarrationView.Wrap(line.Spans, width))
             {
-                return;
-            }
+                if (row >= height)
+                {
+                    return;
+                }
 
-            Move(0, row);
-            SetRole(role);
-            AddStr(Fit(text, width));
-            row++;
+                Move(0, row);
+                foreach (var span in wrapped.Spans)
+                {
+                    SetRole(span.Role);
+                    AddStr(span.Text);
+                }
+
+                row++;
+            }
         }
 
         private void DrawSeparator(ref int row, int width, int height)
@@ -123,7 +134,10 @@ namespace TerminalQuest.Ui
             row++;
         }
 
-        /// <summary>Truncates to the pane width so a long item name cannot overflow the viewport.</summary>
+        /// <summary>
+        /// Truncates to the pane width. Only the right-aligned fields need this - they are short
+        /// values with nowhere to wrap to, and a two-row "HP" would read worse than a clipped one.
+        /// </summary>
         private static string Fit(string text, int width) =>
             text.Length <= width ? text : text[..Math.Max(0, width)];
     }

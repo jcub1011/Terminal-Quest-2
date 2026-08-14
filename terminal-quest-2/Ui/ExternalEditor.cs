@@ -352,7 +352,8 @@ namespace TerminalQuest.Ui
         /// own, so it never had ours - can still have asked this terminal for things on its way past.
         /// Clearing first means every cell is written again rather than patched, which is what undoes
         /// anything left behind; and mouse reporting is re-asserted because
-        /// <see cref="MouseReporting"/> only does that as a session begins, and no session began here.
+        /// <see cref="MouseReporting"/> only does that as a session begins, and no session began here -
+        /// which would leave the wheel dead in the transcript for the rest of the save.
         /// </remarks>
         private void Repair()
         {

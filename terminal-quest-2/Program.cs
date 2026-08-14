@@ -38,7 +38,8 @@ namespace TerminalQuest
           + "begin with upsert_location and move_character them into it.\n\n"
 
           + "Record what happens as it happens: damage or healing with update_character; items "
-          + "gained or lost with add_item and remove_item; travel with move_character, after "
+          + "gained or lost with add_item and remove_item; coin earned or spent with add_money and "
+          + "remove_money, never as an item; travel with move_character, after "
           + "upsert_location when the place is new; a lasting change to a place with "
           + "add_location_event; and each beat of the story - arriving somewhere, meeting someone, "
           + "a bargain struck - with record_event.\n\n"
@@ -121,9 +122,9 @@ namespace TerminalQuest
 
             using var app = Application.Create().Init(driver);
 
-            // Before any screen opens: the game is keyboard-only, so the terminal keeps the mouse
-            // and with it text selection, right-click copy and right-click paste.
-            MouseReporting.Disable(app);
+            // Before any screen opens: the transcript scrolls on the wheel, so the application wants
+            // the mouse. The cost is the terminal's own selection, which moves onto Shift+drag.
+            MouseReporting.Enable(app);
 
             // And so that a keystroke is drawn on the next tick rather than up to 25ms later.
             Responsiveness.Apply(app);
@@ -242,9 +243,10 @@ namespace TerminalQuest
 
             await using var narrator = AgentSessionFactory.Create(settings, store, SystemPrompt);
 
+            // No Title: the window draws its own title row from the state, which already knows the
+            // save name, so that the place name in it can be green on its own.
             using var window = new GameWindow(state)
             {
-                Title = $"Terminal Quest - {store.Name}",
                 Editor = editor,
             };
             var pump = new NarrationPump(app, window.Narration);
@@ -257,7 +259,7 @@ namespace TerminalQuest
 
             window.Narration.AddLine($"Terminal Quest - {store.Name}", TextRole.System);
             window.Narration.AddLine(
-                "Type a command and press Enter. /help lists yours. PgUp/PgDn scrolls. Esc returns to the menu.",
+                "Type a command and press Enter. /help lists yours. The wheel and PgUp/PgDn scroll. Esc returns to the menu.",
                 TextRole.System);
             window.Narration.AddBlankLine();
 
@@ -499,7 +501,7 @@ namespace TerminalQuest
                     window.Narration.AddLine(ex.Message, TextRole.Danger);
                 }
 
-                window.Status.SetNeedsDraw();
+                window.RefreshState();
             }
 
             bool TryTouch(SaveStore target, int turn)

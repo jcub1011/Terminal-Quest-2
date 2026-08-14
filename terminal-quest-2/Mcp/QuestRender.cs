@@ -99,6 +99,10 @@ namespace TerminalQuest.Mcp
         public static string LocationEvent(LocationEvent entry, string owner, string? playerName) =>
             $"  [turn {entry.Turn}] {Placeholders.Resolve(entry.Text, owner, playerName)}";
 
+        /// <summary>The purse, worded so that nought reads as a fact rather than a missing value.</summary>
+        public static string Money(int amount) =>
+            amount == 0 ? "Money: none." : $"Money: {amount} coin.";
+
         public static string Item(Item item) =>
             item.Description.Length > 0
                 ? $"  {item.Name} x{item.Quantity} - {item.Description}"

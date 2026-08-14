@@ -4,32 +4,31 @@ using Terminal.Gui.Drivers;
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// Hands the mouse back to the terminal.
+    /// Keeps the mouse reported to the application.
     /// <para>
-    /// Terminal.Gui turns on full mouse reporting as it starts, which tells the terminal to send
-    /// every click and drag to the application instead of acting on them itself. In Windows
-    /// Terminal that costs the two things a player actually wants from the mouse here: dragging to
-    /// select text, and right-clicking to copy or paste. Nothing in this game reads a mouse event -
-    /// every view is <c>CanFocus = false</c> and driven by the keyboard - so the reporting is paid
-    /// for and never used.
+    /// This class used to do the opposite. The game was keyboard-only, so reporting was turned off
+    /// and the terminal kept the mouse - which in Windows Terminal meant dragging to select text and
+    /// right-clicking to copy or paste went on working as they do everywhere else.
     /// </para>
     /// <para>
-    /// Turning it off restores the terminal's own selection and clipboard, which is a better
-    /// clipboard than the game could offer: it copies what is on screen, including the narration,
-    /// which is hand-drawn and has no selection model of its own.
+    /// The wheel changed that. Scrolling the transcript needs wheel events, and no terminal reports
+    /// the wheel without also reporting the buttons, so the application has to take the whole mouse
+    /// or none of it. What it costs is the terminal's own selection and clipboard: in Windows
+    /// Terminal those move onto Shift+drag and Shift+right-click, and Ctrl+Shift+C/V are unaffected.
     /// </para>
     /// </summary>
     internal static class MouseReporting
     {
         /// <summary>
-        /// Stops mouse reporting, and keeps it stopped for the life of the application.
+        /// Turns mouse reporting on, and keeps it on for the life of the application.
         /// <para>
-        /// Re-asserted as each screen opens because the driver enables reporting when it starts a
-        /// session, and this game runs three of them in turn - the save menu, the character screen
-        /// and the game itself.
+        /// Terminal.Gui asks for reporting itself as each session starts, so this mostly matters for
+        /// what happens between sessions - and for saying out loud, in one place, that the game wants
+        /// the mouse. This game runs several sessions in turn: the save menu, the character screen,
+        /// the settings and the game itself.
         /// </para>
         /// </summary>
-        public static void Disable(IApplication app)
+        public static void Enable(IApplication app)
         {
             ArgumentNullException.ThrowIfNull(app);
 
@@ -42,8 +41,8 @@ namespace TerminalQuest.Ui
         /// driver's back.
         /// <para>
         /// <see cref="ExternalEditor"/> is that caller: a terminal editor run through Ctrl+G writes
-        /// its own escape sequences to this console, and re-enabling mouse reporting is one of the
-        /// things it can leave behind.
+        /// its own escape sequences to this console, and disabling mouse reporting on its way out is
+        /// one of the things it can leave behind.
         /// </para>
         /// </summary>
         public static void Reapply(IApplication app)
@@ -54,12 +53,12 @@ namespace TerminalQuest.Ui
 
         private static void Apply(IApplication app)
         {
-            // Stops Terminal.Gui dispatching mouse events internally...
-            app.Mouse.IsMouseDisabled = true;
+            // Lets Terminal.Gui dispatch mouse events internally...
+            app.Mouse.IsMouseDisabled = false;
 
-            // ...and this tells the terminal to stop sending them, which is the half that gives
-            // selection and right-click back.
-            app.Driver?.WriteRaw(EscSeqUtils.CSI_DisableMouseEvents);
+            // ...and this asks the terminal to send them, which is the half an outside program can
+            // have undone.
+            app.Driver?.WriteRaw(EscSeqUtils.CSI_EnableMouseEvents);
         }
     }
 }

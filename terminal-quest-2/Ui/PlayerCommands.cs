@@ -205,17 +205,24 @@ namespace TerminalQuest.Ui
 
         private static void Inventory(List<StyledLine> lines, SaveStore store)
         {
-            var items = store.ReadInventory().Items;
+            var file = store.ReadInventory();
 
-            if (items.Count == 0)
+            // Money first, and always: it is spent rather than carried, and an empty purse is worth
+            // reading before the player goes looking for something to buy.
+            var purse = new StyledLine();
+            purse.Append("Money  ", TextRole.System);
+            purse.Append(file.Money.ToString(), TextRole.Item);
+            lines.Add(purse);
+
+            if (file.Items.Count == 0)
             {
-                lines.Add(StyledLine.FromText("You are carrying nothing.", TextRole.System));
+                lines.Add(StyledLine.FromText("You are carrying nothing else.", TextRole.System));
                 return;
             }
 
             lines.Add(StyledLine.FromText("Carrying", TextRole.System));
 
-            foreach (var item in items)
+            foreach (var item in file.Items)
             {
                 var line = new StyledLine();
                 line.Append("  ", TextRole.System);

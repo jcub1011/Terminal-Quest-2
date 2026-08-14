@@ -15,6 +15,10 @@ namespace TerminalQuest.Saves
     /// <param name="Summary">One line describing the archetype, shown beside the name.</param>
     /// <param name="Aptitude">Appended to whatever the player typed about themselves.</param>
     /// <param name="MaxHealth">Both the cap and the starting health.</param>
+    /// <param name="StartingMoney">
+    /// The purse. Small enough that the first real purchase is still a decision, and varied by
+    /// class because a rogue's takings and a ranger's are not the same story.
+    /// </param>
     /// <param name="StartingItems">
     /// The kit. These are templates shared by every save, so <see cref="NewGame"/> copies them
     /// rather than handing them out - <see cref="Item"/> is mutable and the narrator will edit
@@ -25,6 +29,7 @@ namespace TerminalQuest.Saves
         string Summary,
         string Aptitude,
         int MaxHealth,
+        int StartingMoney,
         IReadOnlyList<Item> StartingItems);
 
     /// <summary>The archetypes offered on the character screen, in the order they are listed.</summary>
@@ -37,6 +42,7 @@ namespace TerminalQuest.Saves
                 "Arms and armour. Hardy.",
                 "A warrior, trained to arms and armour, at home in a shield wall and slow to yield.",
                 30,
+                15,
                 [
                     Make("iron longsword", 1, "Notched along one edge and sharp along the rest."),
                     Make("battered shield", 1, "Oak faced with hide, and dented past straightening."),
@@ -50,6 +56,7 @@ namespace TerminalQuest.Saves
                 "Old syllables and wards. Frail.",
                 "A mage, schooled in the old syllables, quick to read a ward and quicker to raise one.",
                 18,
+                25,
                 [
                     Make("ashwood staff", 1, "Worn pale where a hand has always held it."),
                     Make("spellbook", 1, "Half its pages are still blank."),
@@ -63,6 +70,7 @@ namespace TerminalQuest.Saves
                 "Locks, shadows and quick hands.",
                 "A rogue, light-fingered and lighter-footed, who reads a room before entering it.",
                 22,
+                30,
                 [
                     Make("dagger", 2, "Plain, balanced, and easy to lose without regret."),
                     Make("lockpicks", 1, "A wrap of oiled leather holding six picks and a tension wrench."),
@@ -76,6 +84,7 @@ namespace TerminalQuest.Saves
                 "Bow, trail and wild country.",
                 "A ranger, at ease in wild country, who can follow a day-old trail and put an arrow where they look.",
                 24,
+                12,
                 [
                     Make("yew shortbow", 1, "Strung with waxed sinew, and a spare string in the grip."),
                     Make("arrows", 20, "Goose-fletched, in a stiffened leather quiver."),
@@ -89,6 +98,7 @@ namespace TerminalQuest.Saves
                 "A quiet god, and mending hands.",
                 "A cleric, sworn to a quiet god, whose hands mend more often than they harm.",
                 24,
+                18,
                 [
                     Make("oak mace", 1, "Banded in iron. It breaks bones without breaking an oath."),
                     Make("holy symbol", 1, "Worn smooth by a thumb that returns to it when afraid."),

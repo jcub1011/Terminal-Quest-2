@@ -310,7 +310,7 @@ namespace TerminalQuest.Ui
         private void ShowKit()
         {
             _kit.Text = _classes.Selected is { } template
-                ? "Starts with: " + string.Join(
+                ? $"Starts with: {template.StartingMoney} coin, " + string.Join(
                     ", ",
                     template.StartingItems.Select(item =>
                         item.Quantity > 1 ? $"{item.Name} x{item.Quantity}" : item.Name))

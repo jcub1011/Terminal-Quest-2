@@ -6,14 +6,21 @@ using Terminal.Gui.Views;
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The full-screen layout: narration on the left, status on the right, input pinned to the
-    /// bottom. Owns no game logic - it raises <see cref="CommandEntered"/> and lets the host
-    /// decide what a command means.
+    /// The full-screen layout: a title row across the top, narration on the left, status on the
+    /// right, input pinned to the bottom. Owns no game logic - it raises
+    /// <see cref="CommandEntered"/> and lets the host decide what a command means.
     /// </summary>
     internal sealed class GameWindow : Window
     {
-        private const int StatusWidth = 16;
+        /// <summary>
+        /// Columns given to the status pane, one of which is the gutter between it and the
+        /// narration. Wide enough that most item lines fit on a single row now that the pane wraps
+        /// rather than truncates.
+        /// </summary>
+        private const int StatusWidth = 28;
+
         private const int InputHeight = 3;
+        private const int TitleHeight = 1;
 
         private const string IdleTitle = "command";
         private const string BusyTitle = "command - narrator speaking";
@@ -33,17 +40,30 @@ namespace TerminalQuest.Ui
         {
             State = state;
 
-            Title = "Terminal Quest";
+            // No border title: the title row below draws it, because a border title takes a single
+            // colour and the place name has to stay green while the rest of the row does not.
             BorderStyle = LineStyle.Rounded;
+
+            // Said out loud now that the mouse is reported to the application: this screen fills the
+            // terminal, and dragging its border about would only ever be an accident.
+            Arrangement = ViewArrangement.Fixed;
 
             // Applied to the window so every stock control inside it (the input field, its frame,
             // the borders) inherits a transparent background instead of Terminal.Gui's defaults.
             SetScheme(Theme.CreateScheme());
 
-            Narration = new NarrationView
+            TitleBar = new TitleBarView(state)
             {
                 X = 0,
                 Y = 0,
+                Width = Dim.Fill(),
+                Height = TitleHeight,
+            };
+
+            Narration = new NarrationView
+            {
+                X = 0,
+                Y = Pos.Bottom(TitleBar),
                 Width = Dim.Fill() - StatusWidth,
                 Height = Dim.Fill() - InputHeight,
             };
@@ -51,7 +71,7 @@ namespace TerminalQuest.Ui
             Status = new StatusView(state)
             {
                 X = Pos.Right(Narration) + 1,
-                Y = 0,
+                Y = Pos.Bottom(TitleBar),
                 Width = StatusWidth - 1,
                 Height = Dim.Fill() - InputHeight,
             };
@@ -89,8 +109,10 @@ namespace TerminalQuest.Ui
 
             // The suggestions are added last so they draw over the foot of the transcript, the
             // same layering the settings screen uses to drop its editor onto a drawn row.
-            Add(Narration, Status, _inputFrame, _suggestions);
+            Add(TitleBar, Narration, Status, _inputFrame, _suggestions);
         }
+
+        public TitleBarView TitleBar { get; }
 
         public NarrationView Narration { get; }
 
@@ -133,7 +155,10 @@ namespace TerminalQuest.Ui
             set
             {
                 State.IsBusy = value;
-                Status.SetNeedsDraw();
+
+                // The wait is shown in the transcript, where the narration will land, rather than
+                // off to the side in the status pane.
+                Narration.IsWaiting = value;
 
                 _inputFrame.Title = value ? BusyTitle : IdleTitle;
                 _inputFrame.SetNeedsDraw();
@@ -151,6 +176,17 @@ namespace TerminalQuest.Ui
         public event Action? LeaveRequested;
 
         public void FocusInput() => _input.SetFocus();
+
+        /// <summary>
+        /// Redraws everything fed by <see cref="GameState"/>, after the host has re-read the save.
+        /// One call rather than two, so a new field cannot be added to the state and then quietly
+        /// left stale on screen.
+        /// </summary>
+        public void RefreshState()
+        {
+            TitleBar.SetNeedsDraw();
+            Status.SetNeedsDraw();
+        }
 
         /// <summary>
         /// Lets go of an edit still open, so its answer is not written into a field that has gone.
@@ -257,6 +293,29 @@ namespace TerminalQuest.Ui
             }
 
             return base.OnKeyDown(key);
+        }
+
+        /// <summary>
+        /// Sends the wheel to the transcript wherever the pointer happens to be.
+        /// <para>
+        /// Terminal.Gui offers a mouse event to the view under the pointer first, so the transcript
+        /// already handles its own wheel. This catches the rest of the window - the status pane, the
+        /// command box, the border - because the transcript is the only thing here that scrolls and
+        /// the pointer is not what the player is aiming with.
+        /// </para>
+        /// </summary>
+        protected override bool OnMouseEvent(Mouse mouse)
+        {
+            ArgumentNullException.ThrowIfNull(mouse);
+
+            if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) || mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+            {
+                // Null means the transcript did not claim it, which for the wheel means there was
+                // nowhere left to scroll. Either way the event is spent - nothing else here wants it.
+                return Narration.NewMouseEvent(mouse) ?? false;
+            }
+
+            return base.OnMouseEvent(mouse);
         }
 
         private void OnInputAccepting(object? sender, CommandEventArgs e)
