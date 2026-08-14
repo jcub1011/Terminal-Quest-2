@@ -98,6 +98,11 @@ namespace TerminalQuest.Ui
 
         public GameState State { get; }
 
+        /// <summary>
+        /// What Ctrl+G hands the command line to, or null where there is nothing to hand it to.
+        /// </summary>
+        public ExternalEditor? Editor { get; init; }
+
         /// <summary>Raised on the UI thread when the player submits a non-empty command.</summary>
         public event Action<string>? CommandEntered;
 
@@ -148,6 +153,33 @@ namespace TerminalQuest.Ui
         public void FocusInput() => _input.SetFocus();
 
         /// <summary>
+        /// Lets go of an edit still open, so its answer is not written into a field that has gone.
+        /// </summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Editor?.Abandon();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        /// <summary>
+        /// Says where the command has gone while an external editor holds it.
+        /// <para>
+        /// The title of the box the text would be in, because that is the only place this screen has
+        /// to say anything - there is no hint line here, and the transcript belongs to the narrator.
+        /// Null puts the ordinary title back, whichever of the two it is by then.
+        /// </para>
+        /// </summary>
+        private void ShowEditingNotice(string? notice)
+        {
+            _inputFrame.Title = notice ?? (IsBusy ? BusyTitle : IdleTitle);
+            _inputFrame.SetNeedsDraw();
+        }
+
+        /// <summary>
         /// Keys the input field had no use for.
         /// <para>
         /// Terminal.Gui offers a key to the focused subview first, and focus lives in the input
@@ -158,6 +190,21 @@ namespace TerminalQuest.Ui
         /// </summary>
         protected override bool OnKeyDown(Key key)
         {
+            // Nothing else happens while the line is in another program. Esc and Ctrl+Q would leave
+            // the save, taking a command the player is still writing with them.
+            if (Editor is { IsBusy: true })
+            {
+                return true;
+            }
+
+            if (key == ExternalEditor.RequestKey && Editor is { } editor)
+            {
+                // The suggestions are for a command being typed, and it is not being typed here any
+                // more. They would also be drawing over the notice.
+                HideSuggestions();
+                return editor.TryBegin(_input, ShowEditingNotice);
+            }
+
             if (_suggestions.Visible)
             {
                 // Esc closes the list and stops, so one press cannot dismiss the suggestions and
@@ -218,7 +265,9 @@ namespace TerminalQuest.Ui
             // "accept" on the window itself.
             e.Handled = true;
 
-            var text = _input.Text?.Trim() ?? string.Empty;
+            // Through the editor rather than off the field, so a command written in Notepad reaches
+            // the narrator with its line breaks intact rather than as the one line shown here.
+            var text = (Editor?.Resolve(_input) ?? _input.Text ?? string.Empty).Trim();
             if (text.Length == 0)
             {
                 return;
@@ -249,6 +298,12 @@ namespace TerminalQuest.Ui
             }
 
             _input.Text = string.Empty;
+
+            // The line has been taken, so anything an external edit left standing for it is spent.
+            // Left in place it would come back to life the moment the player typed that same line
+            // out by hand, and be submitted as the longer text it once stood for.
+            Editor?.Forget(_input);
+
             HideSuggestions();
 
             Narration.AddBlankLine();

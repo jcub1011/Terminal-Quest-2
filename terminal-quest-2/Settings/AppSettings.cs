@@ -32,6 +32,18 @@ namespace TerminalQuest.Settings
         /// </summary>
         public string LmStudioApiKey { get; set; } = DefaultLmStudioApiKey;
 
+        /// <summary>
+        /// The program Ctrl+G hands a text field's contents to. May carry fixed arguments, as in
+        /// <c>code -w</c>.
+        /// </summary>
+        /// <remarks>
+        /// A windowed editor is what this is for: it opens beside the game and cannot disturb the
+        /// screen. A terminal editor - <c>vim</c>, <c>nano</c> - inherits this console and draws over
+        /// the game while it runs; the screen is repainted when it exits, but that repair is the most
+        /// that is promised.
+        /// </remarks>
+        public string EditorCommand { get; set; } = DefaultEditorCommand;
+
         /// <summary>Small and fast, which is what a turn of narration wants.</summary>
         /// <remarks>
         /// The undated alias rather than a pinned snapshot, so the settings screen can offer it as
@@ -48,6 +60,13 @@ namespace TerminalQuest.Settings
         /// been told to check. One that has needs the real token pasted in.
         /// </summary>
         public const string DefaultLmStudioApiKey = "lm-studio";
+
+        /// <summary>
+        /// Present on every Windows install, so Ctrl+G works without anyone having to configure
+        /// anything first, and windowed rather than terminal-based, which is the kind that leaves the
+        /// game's own screen alone.
+        /// </summary>
+        public const string DefaultEditorCommand = "notepad.exe";
 
         /// <summary>
         /// Whether a string is somewhere the game could actually send a request.
@@ -77,6 +96,7 @@ namespace TerminalQuest.Settings
             LmStudioBaseUrl = other.LmStudioBaseUrl;
             LmStudioModel = other.LmStudioModel;
             LmStudioApiKey = other.LmStudioApiKey;
+            EditorCommand = other.EditorCommand;
         }
     }
 }

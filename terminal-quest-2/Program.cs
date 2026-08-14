@@ -133,6 +133,11 @@ namespace TerminalQuest
             // since the narrator is built per session.
             var settings = SettingsStore.Read();
 
+            // One for the whole program, reading the command through a lambda rather than taking a
+            // copy of it: the settings screen mutates the object above in place, so an editor chosen
+            // there is in force on the very next Ctrl+G with nothing to re-wire.
+            var editor = new ExternalEditor(app, () => settings.EditorCommand);
+
             // The menu and a session alternate for as long as the player keeps choosing saves.
             // Leaving a session comes back here rather than ending the program; the only way out
             // is Quit on the menu, which is the one screen where there is nothing left to back
@@ -144,13 +149,13 @@ namespace TerminalQuest
                 // The same screen is where the provider is chosen, for the same reason - both are
                 // settled before anything is built, and neither can be changed once a session is
                 // open.
-                var store = ChooseSave(app, settings);
+                var store = ChooseSave(app, settings, editor);
                 if (store is null)
                 {
                     return 0;
                 }
 
-                await RunSessionAsync(app, settings, store);
+                await RunSessionAsync(app, settings, store, editor);
             }
         }
 
@@ -163,7 +168,11 @@ namespace TerminalQuest
         /// processes above all - so that by the time the save menu is drawn again there is nothing
         /// of the last save still running.
         /// </remarks>
-        private static async Task RunSessionAsync(IApplication app, AppSettings settings, SaveStore store)
+        private static async Task RunSessionAsync(
+            IApplication app,
+            AppSettings settings,
+            SaveStore store,
+            ExternalEditor editor)
         {
             // A save that will not load must not start a turn: the narrator would see an empty
             // world through get_state and cheerfully build a new one on top of the broken files.
@@ -190,7 +199,7 @@ namespace TerminalQuest
 
             if (needsCharacter && startupError is null)
             {
-                var created = CreateCharacter(app, store);
+                var created = CreateCharacter(app, store, editor);
 
                 // Backing out of the character screen means backing out of the save. The folder is
                 // left as the menu made it - empty, and offered again on the menu this returns to.
@@ -233,7 +242,11 @@ namespace TerminalQuest
 
             await using var narrator = AgentSessionFactory.Create(settings, store, SystemPrompt);
 
-            using var window = new GameWindow(state) { Title = $"Terminal Quest - {store.Name}" };
+            using var window = new GameWindow(state)
+            {
+                Title = $"Terminal Quest - {store.Name}",
+                Editor = editor,
+            };
             var pump = new NarrationPump(app, window.Narration);
 
             narrator.OnTextDelta += pump.Enqueue;
@@ -512,11 +525,11 @@ namespace TerminalQuest
         /// meantime is not missing from the list. <paramref name="settings"/> is mutated in place
         /// when the player changes anything, so the caller sees what they chose.
         /// </remarks>
-        private static SaveStore? ChooseSave(IApplication app, AppSettings settings)
+        private static SaveStore? ChooseSave(IApplication app, AppSettings settings, ExternalEditor editor)
         {
             while (true)
             {
-                using var menu = new SaveMenuWindow(Describe(settings));
+                using var menu = new SaveMenuWindow(Describe(settings)) { Editor = editor };
 
                 var settingsRequested = false;
 
@@ -584,9 +597,9 @@ namespace TerminalQuest
         /// answers have to exist before the narrator is started, because the whole point is that it
         /// reads the character rather than inventing one.
         /// </remarks>
-        private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store)
+        private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store, ExternalEditor editor)
         {
-            using var window = new NewCharacterWindow(store.Name);
+            using var window = new NewCharacterWindow(store.Name) { Editor = editor };
 
             window.Done += () => app.RequestStop(window);
             window.Cancelled += () => app.RequestStop(window);

@@ -28,7 +28,7 @@ namespace TerminalQuest.Ui
         private const int MaxNameLength = 40;
 
         private const string Hint =
-            "Up/Down picks a class.  Enter moves down the form.  Ctrl+Enter begins from anywhere.  Esc quits.";
+            "Up/Down picks a class.  Enter moves down the form.  Ctrl+G opens an editor.  Ctrl+Enter begins.  Esc quits.";
 
         private readonly ClassListView _classes;
         private readonly Label _kit;
@@ -96,6 +96,15 @@ namespace TerminalQuest.Ui
         /// <summary>True once the player has settled on a character; false when they quit instead.</summary>
         public bool Confirmed { get; private set; }
 
+        /// <summary>
+        /// What Ctrl+G hands the focused field to, or null where there is nothing to hand it to.
+        /// </summary>
+        /// <remarks>
+        /// The description is what this is really for: a sentence or two about who someone is, written
+        /// somewhere it can be read back, rather than typed blind into a box one line high.
+        /// </remarks>
+        public ExternalEditor? Editor { get; init; }
+
         /// <summary>The name typed, trimmed.</summary>
         public string PlayerName { get; private set; } = string.Empty;
 
@@ -114,8 +123,41 @@ namespace TerminalQuest.Ui
         /// <summary>Raised when the player leaves without making anyone.</summary>
         public event Action? Cancelled;
 
+        /// <summary>
+        /// Lets go of an edit still open, so its answer is not written into a field that has gone.
+        /// </summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Editor?.Abandon();
+            }
+
+            base.Dispose(disposing);
+        }
+
         protected override bool OnKeyDown(Key key)
         {
+            // Nothing else happens while a field is in another program. Esc would quit the character
+            // screen outright, taking a description still being written with it.
+            if (Editor is { IsBusy: true })
+            {
+                return true;
+            }
+
+            if (key == ExternalEditor.RequestKey && Editor is { } external)
+            {
+                // MostFocused rather than Focused: Labelled wraps every field in a frame, so Focused
+                // is the frame. Nothing to do when the class list has the focus - there is no text on
+                // it to edit - and the key is left unhandled to say so.
+                if (MostFocused is not TextField field)
+                {
+                    return false;
+                }
+
+                return external.TryBegin(field, SetEditingNotice);
+            }
+
             if (key == Key.Esc || key == Key.Q.WithCtrl)
             {
                 Cancelled?.Invoke();
@@ -221,10 +263,13 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            var typedPlace = _place.Text?.Trim() ?? string.Empty;
+            var typedPlace = Read(_place);
 
             PlayerName = typedName;
-            Description = _description.Text?.Trim() ?? string.Empty;
+
+            // Read through the editor, so a description written in one reaches the save with its
+            // paragraphs rather than as the single line the field could show.
+            Description = Read(_description);
             Template = template;
             StartLocation = typedPlace.Length > 0 ? typedPlace : null;
             Confirmed = true;
@@ -232,10 +277,17 @@ namespace TerminalQuest.Ui
             Done?.Invoke();
         }
 
+        /// <summary>
+        /// What a field really holds: whatever an external edit put there when that is more than the
+        /// one line on screen, and what was typed otherwise.
+        /// </summary>
+        private string Read(TextField field) =>
+            (Editor?.Resolve(field) ?? field.Text ?? string.Empty).Trim();
+
         /// <summary>The one field that must be filled in, checked in one place.</summary>
         private bool ValidateName(out string typedName)
         {
-            typedName = _name.Text?.Trim() ?? string.Empty;
+            typedName = Read(_name);
 
             if (typedName.Length == 0)
             {
@@ -283,6 +335,21 @@ namespace TerminalQuest.Ui
         {
             _hint.Text = message;
             _hint.SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// Says where a field has gone while an external editor holds it, and puts the hint back once
+        /// it is done.
+        /// </summary>
+        private void SetEditingNotice(string? notice)
+        {
+            if (notice is null)
+            {
+                ShowHint();
+                return;
+            }
+
+            Fail(notice);
         }
     }
 }

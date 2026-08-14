@@ -5,8 +5,8 @@ namespace TerminalQuest.Ui
     /// <summary>
     /// The top of the settings screen: the categories there are.
     /// <para>
-    /// One row today. It exists anyway so that the second category - whenever there is one - is a
-    /// row added here rather than a screen rebuilt around it.
+    /// Who narrates, and what Ctrl+G opens. Both are rows added here rather than screens built
+    /// around them, which is what this level exists for.
     /// </para>
     /// </summary>
     internal sealed class SettingsTabsPage : SettingsPage
@@ -24,10 +24,15 @@ namespace TerminalQuest.Ui
         public override IReadOnlyList<MenuRow> Rows =>
         [
             new("Model Selection", Summary(), HasSubmenu: true),
+            new("Editor", Draft.EditorCommand, HasSubmenu: true),
         ];
 
-        public override SettingsPage? Enter(int index) =>
-            index == 0 ? new SettingsAdaptersPage(Draft) : null;
+        public override SettingsPage? Enter(int index) => index switch
+        {
+            0 => new SettingsAdaptersPage(Draft),
+            1 => new SettingsEditorPage(Draft),
+            _ => null,
+        };
 
         /// <summary>
         /// Who would narrate, so the choice made two levels down is legible from the top without

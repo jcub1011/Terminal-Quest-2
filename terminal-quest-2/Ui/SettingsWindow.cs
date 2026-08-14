@@ -38,7 +38,7 @@ namespace TerminalQuest.Ui
         /// </remarks>
         private const int ListTop = 1;
 
-        private const string EditHint = "Enter commits.  Esc discards the edit.";
+        private const string EditHint = "Enter commits.  Ctrl+G opens an editor.  Esc discards the edit.";
 
         /// <summary>How long the model list may take before the screen gives up on it.</summary>
         private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
@@ -83,6 +83,8 @@ namespace TerminalQuest.Ui
             // "discard" needs nothing more than dropping this.
             _draft = new AppSettings();
             _draft.CopyFrom(settings);
+
+            Editor = new ExternalEditor(app, () => _draft.EditorCommand);
 
             Title = "Settings";
             BorderStyle = LineStyle.Rounded;
@@ -142,6 +144,16 @@ namespace TerminalQuest.Ui
         /// <summary>What the player settled on and this screen saved, or null when they left.</summary>
         public AppSettings? Chosen { get; private set; }
 
+        /// <summary>
+        /// What Ctrl+G hands a row being typed into.
+        /// </summary>
+        /// <remarks>
+        /// This screen's own, reading the draft rather than the saved settings, so an editor named on
+        /// the Editor page is in force for the very next Ctrl+G - before it has been saved, and even
+        /// on the row that named it.
+        /// </remarks>
+        private ExternalEditor Editor { get; }
+
         /// <summary>Raised once the settings are saved.</summary>
         public event Action? Done;
 
@@ -149,6 +161,19 @@ namespace TerminalQuest.Ui
         public event Action? Cancelled;
 
         private SettingsPage Page => _trail[^1].Page;
+
+        /// <summary>
+        /// Lets go of an edit still open, so its answer is not written into a field that has gone.
+        /// </summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Editor.Abandon();
+            }
+
+            base.Dispose(disposing);
+        }
 
         protected override bool OnKeyDown(Key key)
         {
@@ -174,6 +199,27 @@ namespace TerminalQuest.Ui
         /// </summary>
         private bool OnKeyDownEditing(Key key)
         {
+            // Nothing else happens while the value is in another program - least of all Esc, which
+            // would discard the edit that is still being made.
+            if (Editor.IsBusy)
+            {
+                return true;
+            }
+
+            if (key == ExternalEditor.RequestKey)
+            {
+                // A masked row is masked so that its value is not lying about in the open, and handing
+                // it to an editor means writing it to a plain file for another program to read. The
+                // API key is short enough to type into the box it belongs in.
+                if (Page.IsSecret(_editIndex))
+                {
+                    Fail("A hidden value is not written out to a file for another program to open.");
+                    return true;
+                }
+
+                return Editor.TryBegin(_editor, SetEditingNotice);
+            }
+
             if (key == Key.Esc)
             {
                 CancelEdit();
@@ -378,11 +424,17 @@ namespace TerminalQuest.Ui
             || !string.Equals(_draft.ClaudeModel, _original.ClaudeModel, StringComparison.Ordinal)
             || !string.Equals(_draft.LmStudioBaseUrl, _original.LmStudioBaseUrl, StringComparison.Ordinal)
             || !string.Equals(_draft.LmStudioModel, _original.LmStudioModel, StringComparison.Ordinal)
-            || !string.Equals(_draft.LmStudioApiKey, _original.LmStudioApiKey, StringComparison.Ordinal);
+            || !string.Equals(_draft.LmStudioApiKey, _original.LmStudioApiKey, StringComparison.Ordinal)
+            || !string.Equals(_draft.EditorCommand, _original.EditorCommand, StringComparison.Ordinal);
 
         private void BeginEdit(int index, string text)
         {
             _editIndex = index;
+
+            // One field serves every row, so anything a previous row's external edit left behind has
+            // to go - otherwise a row whose value happens to match that one line would be committed
+            // as the other row's text.
+            Editor.Forget(_editor);
 
             _editor.Secret = Page.IsSecret(index);
             _editor.Text = text;
@@ -412,6 +464,12 @@ namespace TerminalQuest.Ui
             ShowHint();
         }
 
+        /// <summary>
+        /// Says where the value has gone while an external editor holds it, and puts the editing hint
+        /// back once it is done.
+        /// </summary>
+        private void SetEditingNotice(string? notice) => SetHint(notice ?? EditHint);
+
         /// <summary>Takes what was typed. False when the page refused it and the editor stays open.</summary>
         private bool CommitEdit()
         {
@@ -422,7 +480,12 @@ namespace TerminalQuest.Ui
 
             var index = _editIndex;
 
-            if (Page.Commit(index, _editor.Text?.Trim() ?? string.Empty) is { } error)
+            // Read through the external editor, so a value written in one arrives whole. Nothing on
+            // these pages wants more than a line, but a value that came back with newlines in it is
+            // better refused by the page's own validation than silently flattened here.
+            var typed = Editor.Resolve(_editor).Trim();
+
+            if (Page.Commit(index, typed) is { } error)
             {
                 Fail(error);
                 return false;

@@ -37,6 +37,21 @@ namespace TerminalQuest.Ui
             app.SessionBegun += (_, _) => Apply(app);
         }
 
+        /// <summary>
+        /// Says it again, for a caller that has reason to think the terminal was talked to behind the
+        /// driver's back.
+        /// <para>
+        /// <see cref="ExternalEditor"/> is that caller: a terminal editor run through Ctrl+G writes
+        /// its own escape sequences to this console, and re-enabling mouse reporting is one of the
+        /// things it can leave behind.
+        /// </para>
+        /// </summary>
+        public static void Reapply(IApplication app)
+        {
+            ArgumentNullException.ThrowIfNull(app);
+            Apply(app);
+        }
+
         private static void Apply(IApplication app)
         {
             // Stops Terminal.Gui dispatching mouse events internally...

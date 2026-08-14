@@ -54,6 +54,9 @@ namespace TerminalQuest.Ui
         private Level _level = Level.Options;
         private Editing _editing = Editing.None;
 
+        /// <summary>What the keys do while the open edit lasts, so a notice can be taken back off.</summary>
+        private string _editHint = string.Empty;
+
         /// <summary>
         /// The save the next X keypress will destroy, or null when nothing is half-confirmed.
         /// <para>
@@ -160,11 +163,29 @@ namespace TerminalQuest.Ui
         /// <summary>The save the player settled on, or null when they quit instead.</summary>
         public SaveStore? Chosen { get; private set; }
 
+        /// <summary>
+        /// What Ctrl+G hands a name being typed to, or null where there is nothing to hand it to.
+        /// </summary>
+        public ExternalEditor? Editor { get; init; }
+
         /// <summary>Raised once a save is open and the game should start.</summary>
         public event Action? Done;
 
         /// <summary>Raised when the player leaves without starting anything.</summary>
         public event Action? Cancelled;
+
+        /// <summary>
+        /// Lets go of an edit still open, so its answer is not written into a field that has gone.
+        /// </summary>
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                Editor?.Abandon();
+            }
+
+            base.Dispose(disposing);
+        }
 
         /// <summary>
         /// Raised when the player wants the settings screen. The host runs it and comes back here,
@@ -190,6 +211,18 @@ namespace TerminalQuest.Ui
         /// </summary>
         private bool OnKeyDownEditing(Key key)
         {
+            // Nothing else happens while the name is in another program - least of all Esc, which
+            // would put the editor away and drop the edit still being made.
+            if (Editor is { IsBusy: true })
+            {
+                return true;
+            }
+
+            if (key == ExternalEditor.RequestKey && Editor is { } external)
+            {
+                return external.TryBegin(_editor, SetEditingNotice);
+            }
+
             if (key == Key.Esc)
             {
                 EndEdit();
@@ -412,8 +445,7 @@ namespace TerminalQuest.Ui
         private void BeginNewSave()
         {
             _editing = Editing.NewSave;
-            BeginEdit("new save name: ", string.Empty);
-            SetHint("Enter creates it.  Esc goes back.");
+            BeginEdit("new save name: ", string.Empty, "Enter creates it.  Ctrl+G opens an editor.  Esc goes back.");
         }
 
         private void BeginRename()
@@ -425,14 +457,19 @@ namespace TerminalQuest.Ui
 
             _renaming = selected.Name;
             _editing = Editing.Rename;
-            BeginEdit($"rename '{selected.Name}' to: ", selected.Name);
-            SetHint("Enter renames it.  Esc leaves it alone.");
+            BeginEdit(
+                $"rename '{selected.Name}' to: ",
+                selected.Name,
+                "Enter renames it.  Ctrl+G opens an editor.  Esc leaves it alone.");
         }
 
         /// <summary>Takes what was typed. The editor stays open when the name will not do.</summary>
         private void Commit()
         {
-            var typed = _editor.Text?.Trim() ?? string.Empty;
+            // Through the editor rather than off the field, for consistency with every other commit
+            // path. A name written in Notepad across two lines arrives with the break in it and is
+            // refused by SavePaths.IsValidName below, which is the honest answer.
+            var typed = (Editor?.Resolve(_editor) ?? _editor.Text ?? string.Empty).Trim();
             var editing = _editing;
 
             if (typed.Length == 0)
@@ -586,16 +623,34 @@ namespace TerminalQuest.Ui
             ShowHint();
         }
 
-        private void BeginEdit(string prompt, string text)
+        /// <param name="hint">
+        /// What the keys do while this edit is open. Kept, so that a notice shown over it - an
+        /// external editor's, above all - has something to put back afterwards.
+        /// </param>
+        private void BeginEdit(string prompt, string text, string hint)
         {
             _prompt.Text = prompt;
             _prompt.Visible = true;
+
+            // One field serves both kinds of edit, so anything a previous external edit left against
+            // it has to go, or a name that happens to match that one line would be committed as the
+            // other edit's text.
+            Editor?.Forget(_editor);
 
             _editor.Text = text;
             _editor.CanFocus = true;
             _editor.Visible = true;
             _editor.SetFocus();
+
+            _editHint = hint;
+            SetHint(hint);
         }
+
+        /// <summary>
+        /// Says where the name has gone while an external editor holds it, and puts the hint for the
+        /// edit still in progress back once it is done.
+        /// </summary>
+        private void SetEditingNotice(string? notice) => SetHint(notice ?? _editHint);
 
         /// <summary>Puts the editor away, taking the focus off it before it goes.</summary>
         private void EndEdit()
