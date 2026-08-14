@@ -22,6 +22,17 @@ namespace TerminalQuest.Mcp
         /// <summary>Recent story lines returned by <c>get_state</c> and by an unbounded <c>get_story</c>.</summary>
         private const int DefaultStoryLimit = 20;
 
+        /// <summary>Words returned by <c>random_noun</c> and <c>random_adjective</c> when unasked.</summary>
+        /// <remarks>
+        /// More than one, because a single word has to be used or wasted, and a narrator handed one
+        /// awkward seed will force it rather than draw again. Three is enough to choose from without
+        /// becoming a list to work through.
+        /// </remarks>
+        private const int DefaultWordCount = 3;
+
+        /// <summary>Ceiling on a word draw. Past this the seed stops narrowing anything.</summary>
+        private const int MaxWordCount = 10;
+
         public static IReadOnlyList<QuestTool> Definitions { get; } =
         [
             new("get_state",
@@ -272,6 +283,26 @@ namespace TerminalQuest.Mcp
                 {"type":"object",
                  "properties":{"limit":{"type":"integer","description":"How many of the most recent events to return. Defaults to 20."}}}
                 """),
+
+            new("random_noun",
+                "Draw ordinary words at random, to start somewhere you would not have chosen. Call "
+              + "it before inventing a place, a person or a thing. They are seeds, not vocabulary: "
+              + "let a word suggest something, then throw the word away. Never say one to the "
+              + "player and never use one as a name. A word that suggests nothing is not a puzzle - "
+              + "draw again.",
+                """
+                {"type":"object",
+                 "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
+                """),
+
+            new("random_adjective",
+                "As random_noun, but qualities rather than things. Pair one with a noun when a "
+              + "place or person is coming out like every other: the join between two unrelated "
+              + "words is where the idea is. Seeds only - never say them to the player.",
+                """
+                {"type":"object",
+                 "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
+                """),
         ];
 
         /// <summary>
@@ -308,6 +339,8 @@ namespace TerminalQuest.Mcp
             "remove_money" => RemoveMoney(store, arguments),
             "record_event" => RecordEvent(store, arguments),
             "get_story" => GetStory(store, arguments),
+            "random_noun" => RandomWords(arguments, WordBank.Nouns),
+            "random_adjective" => RandomWords(arguments, WordBank.Adjectives),
             _ => ToolOutcome.Fail($"There is no tool called '{name}'."),
         };
 
@@ -1449,6 +1482,37 @@ namespace TerminalQuest.Mcp
             foreach (var entry in selected)
             {
                 text.AppendLine(QuestRender.StoryEvent(entry));
+            }
+
+            return ToolOutcome.Ok(text.ToString().TrimEnd());
+        }
+
+        /// <summary>
+        /// Backs both word tools. The only handler that neither reads nor writes the save - it
+        /// exists to widen what the narrator invents, not to record anything it invented.
+        /// </summary>
+        /// <remarks>
+        /// The count is clamped rather than refused. A count of zero or ninety is not a mistake
+        /// about the fiction, and answering it with an error would cost a turn to no purpose - the
+        /// same judgement <see cref="Number"/> already makes about <c>"3"</c> arriving for 3.
+        /// <para>
+        /// The framing line is repeated on every call on purpose. It is the only thing standing
+        /// between a seed and the model dropping the literal word into its prose, and it is cheap
+        /// next to the turn it saves.
+        /// </para>
+        /// </remarks>
+        private static ToolOutcome RandomWords(JsonElement arguments, string[] words)
+        {
+            var count = Math.Clamp(Number(arguments, "count") ?? DefaultWordCount, 1, MaxWordCount);
+
+            var text = new StringBuilder();
+            text.AppendLine("Seeds, not vocabulary. Let these suggest something, then discard them.");
+            text.AppendLine();
+
+            // Random.Shared for the same reason the dice use it: one session, one stream.
+            foreach (var word in WordBank.Pick(words, count, Random.Shared))
+            {
+                text.AppendLine(word);
             }
 
             return ToolOutcome.Ok(text.ToString().TrimEnd());

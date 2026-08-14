@@ -81,6 +81,12 @@ namespace TerminalQuest
           + "alone, so an old memory will still say the old name. Treat that as the character's own "
           + "recollection rather than a mistake to correct, and never narrate the correction.\n\n"
 
+          + "Before you invent a place, a person or a thing, call random_noun and "
+          + "random_adjective and let the words suggest something you would not otherwise have "
+          + "written. They are seeds, not vocabulary: never say them to the player, and never use "
+          + "one as a name. A word that suggests nothing is discarded - draw again rather than "
+          + "forcing it. Somewhere that could be anywhere is worse than somewhere strange.\n\n"
+
           + "Tool calls are silent, with one exception. Every roll is shown to the player - who "
           + "rolled, what for, and unless it was hidden, what it came to. They see it whether or not "
           + "you mention it, so do not restate the number as though reporting it, and never write as "
