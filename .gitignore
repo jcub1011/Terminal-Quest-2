@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Publish.ps1 output (already matched by [Rr]elease/ above; listed here for clarity)
+/release/
