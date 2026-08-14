@@ -774,6 +774,11 @@ namespace TerminalQuest
                         state.LastCacheRead = turn.CacheReadTokens;
                         state.LastDurationMs = turn.DurationMs;
 
+                        // Assigned rather than accumulated: this is how full the context is now, not
+                        // how much has passed through it.
+                        state.ContextTokens = turn.ContextTokens;
+                        state.ContextWindowTokens = turn.ContextWindowTokens;
+
                         if (turn.IsError)
                         {
                             window.Narration.AddLine($"[{turn.Text}]", TextRole.Danger);

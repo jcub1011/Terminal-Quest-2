@@ -23,6 +23,18 @@ namespace TerminalQuest.Agents.Claude
     {
         private const int MaxBufferedStandardErrorChars = 16 * 1024;
 
+        /// <summary>
+        /// The window every model this game offers is assumed to hold, reported as the denominator of
+        /// the status pane's context gauge.
+        /// </summary>
+        /// <remarks>
+        /// An assumption, and worth naming as one. The CLI is free to serve a session less than the
+        /// model's ceiling, and it does not say which it gave — nothing in the protocol carries the
+        /// number, so there is nothing to read instead of guessing. Where the real window is smaller
+        /// the gauge reads roomier than the session is.
+        /// </remarks>
+        private const int ClaudeContextTokens = 1_000_000;
+
         private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
         private readonly ClaudeSessionOptions _options;
@@ -35,6 +47,12 @@ namespace TerminalQuest.Agents.Claude
         private Task? _stderrReader;
         private TaskCompletionSource<AgentTurnResult>? _pendingTurn;
         private bool _disposed;
+
+        // Written by the stdout reader, read when a result is assembled - hence Volatile at both
+        // ends. Neither is ever reset: see TrackPromptSize for why the last value seen is the one
+        // that is true.
+        private int _contextPromptTokens;
+        private int _contextOutputTokens;
 
         public ClaudeSession(ClaudeSessionOptions options)
         {
@@ -419,18 +437,87 @@ namespace TerminalQuest.Agents.Claude
 
         private void HandleStreamEvent(JsonElement root)
         {
-            var handler = OnTextDelta;
-            if (handler is null)
-            {
-                return;
-            }
-
             if (!root.TryGetProperty("event", out var payload) || payload.ValueKind != JsonValueKind.Object)
             {
                 return;
             }
 
-            if (ReadString(payload, "type") != "content_block_delta")
+            // Dispatched before any check on OnTextDelta, deliberately: the usage frames are read for
+            // the status pane, not for the caller, and a session nobody is listening to for prose
+            // still fills its context exactly as fast.
+            switch (ReadString(payload, "type"))
+            {
+                case "message_start":
+                    TrackPromptSize(payload);
+                    break;
+                case "message_delta":
+                    TrackOutputSize(payload);
+                    break;
+                case "content_block_delta":
+                    ForwardTextDelta(payload);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Records how large one request's prompt was, from the usage on the frame that opens it.
+        /// </summary>
+        /// <remarks>
+        /// Overwritten rather than added to, and never cleared. Within a turn the conversation only
+        /// grows, so the last request's prompt is both the largest and the one still occupying the
+        /// window; across turns the figure carries, which is what lets the pane keep reading true in
+        /// the gaps between them.
+        /// <para>
+        /// This is the whole reason the turn's <c>result</c> usage is not used for the gauge. That
+        /// block totals every request the turn made, and the tool loop sends the same conversation
+        /// again on each one, so it holds one context several times over.
+        /// </para>
+        /// </remarks>
+        private void TrackPromptSize(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("message", out var message)
+                || message.ValueKind != JsonValueKind.Object
+                || !message.TryGetProperty("usage", out var usage)
+                || usage.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            // All three, because input_tokens counts only what was not served from cache. On every
+            // turn after the first it is the small remainder and cache_read holds the bulk.
+            Volatile.Write(
+                ref _contextPromptTokens,
+                ReadInt32(usage, "input_tokens")
+              + ReadInt32(usage, "cache_read_input_tokens")
+              + ReadInt32(usage, "cache_creation_input_tokens"));
+
+            // The answer has not been written yet, so this starts at whatever the opening frame
+            // claims and is corrected by the deltas below as it arrives.
+            Volatile.Write(ref _contextOutputTokens, ReadInt32(usage, "output_tokens"));
+        }
+
+        /// <summary>
+        /// Updates the length of the answer being generated. The count is cumulative for the message
+        /// in flight, so the last frame seen carries its finished size.
+        /// </summary>
+        private void TrackOutputSize(JsonElement payload)
+        {
+            if (!payload.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            var output = ReadInt32(usage, "output_tokens");
+            if (output > 0)
+            {
+                Volatile.Write(ref _contextOutputTokens, output);
+            }
+        }
+
+        private void ForwardTextDelta(JsonElement payload)
+        {
+            var handler = OnTextDelta;
+            if (handler is null)
             {
                 return;
             }
@@ -465,8 +552,21 @@ namespace TerminalQuest.Agents.Claude
                 ? candidate
                 : default;
 
+            // Zero means no message_start frame was ever seen - an older build, or one that does not
+            // honour --include-partial-messages. The whole-turn total is then all there is: it
+            // overstates a turn that used tools, which is worse than the streamed figure and better
+            // than showing the player nothing.
+            var prompt = Volatile.Read(ref _contextPromptTokens);
+            var context = prompt > 0
+                ? prompt + Volatile.Read(ref _contextOutputTokens)
+                : ReadInt32(usage, "input_tokens")
+                  + ReadInt32(usage, "cache_read_input_tokens")
+                  + ReadInt32(usage, "cache_creation_input_tokens");
+
             turn.TrySetResult(new AgentTurnResult
             {
+                ContextTokens = context,
+                ContextWindowTokens = ClaudeContextTokens,
                 Text = ReadString(root, "result") ?? string.Empty,
                 IsError = root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True,
                 CostUsd = ReadDouble(root, "total_cost_usd"),

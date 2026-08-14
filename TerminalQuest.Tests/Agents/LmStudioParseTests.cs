@@ -39,6 +39,87 @@ namespace TerminalQuest.Tests.Agents
             Assert.Empty(LmStudioModels.Parse(body));
         }
 
+        // ---- The context length --------------------------------------------------------------
+
+        /// <summary>
+        /// An abridged copy of a real answer from LM Studio's <c>/api/v0/models</c>, kept faithful in
+        /// the parts that are read: one loaded chat model, one that is only downloaded, and an
+        /// embedding model to stand in for the entries that are never the narrator.
+        /// </summary>
+        private const string NativeModels =
+            """
+            {"data":[
+              {"id":"google/gemma-4-e4b","object":"model","type":"vlm","state":"loaded",
+               "max_context_length":131072,"loaded_context_length":131072},
+              {"id":"google/gemma-4-12b-qat","object":"model","type":"vlm","state":"not-loaded",
+               "max_context_length":262144},
+              {"id":"text-embedding-nomic-embed-text-v1.5","object":"model","type":"embeddings",
+               "state":"not-loaded","max_context_length":2048}
+            ],"object":"list"}
+            """;
+
+        [Fact]
+        public void The_named_models_context_length_is_found_by_id()
+        {
+            Assert.Equal(131072, LmStudioModels.ParseContextLength(NativeModels, "google/gemma-4-e4b"));
+        }
+
+        [Fact]
+        public void A_model_that_is_only_downloaded_reports_the_length_it_could_be_loaded_at()
+        {
+            // No loaded_context_length, because it is not loaded. The ceiling is the only figure
+            // there is, and it is the right one for a model that has not been given a smaller.
+            Assert.Equal(262144, LmStudioModels.ParseContextLength(NativeModels, "google/gemma-4-12b-qat"));
+        }
+
+        [Fact]
+        public void The_length_actually_loaded_is_preferred_over_the_ceiling()
+        {
+            // The distinction the gauge depends on: quoting 131072 for a model loaded at 8192 would
+            // flatter it by sixteen times, which is the whole error the gauge exists to avoid.
+            const string Loaded =
+                """{"data":[{"id":"m","state":"loaded","max_context_length":131072,"loaded_context_length":8192}]}""";
+
+            Assert.Equal(8192, LmStudioModels.ParseContextLength(Loaded, "m"));
+        }
+
+        [Fact]
+        public void With_no_model_named_the_loaded_one_answers()
+        {
+            // A blank model setting means "whatever is loaded", so that is the model whose window
+            // the turns will be filling.
+            Assert.Equal(131072, LmStudioModels.ParseContextLength(NativeModels, null));
+        }
+
+        [Fact]
+        public void With_no_model_named_and_none_loaded_there_is_nothing_to_report()
+        {
+            const string Idle =
+                """{"data":[{"id":"m","state":"not-loaded","max_context_length":4096}]}""";
+
+            Assert.Null(LmStudioModels.ParseContextLength(Idle, null));
+        }
+
+        [Theory]
+        [InlineData("""{"data":[{"id":"other","state":"loaded","loaded_context_length":4096}]}""", "wanted")]
+        [InlineData("""{"data":[{"id":"m","state":"loaded"}]}""", "m")]
+        [InlineData("""{"data":[{"id":"m","state":"loaded","loaded_context_length":0}]}""", "m")]
+        [InlineData("""{"data":[{"id":"m","state":"loaded","loaded_context_length":"lots"}]}""", "m")]
+        [InlineData("""{"data":[{"id":"m","state":"loaded","loaded_context_length":99999999999999}]}""", "m")]
+        [InlineData("""{"data":"not an array"}""", "m")]
+        [InlineData("""["bare array"]""", "m")]
+        [InlineData("{}", "m")]
+        [InlineData("{ not json", "m")]
+        [InlineData("", "m")]
+        public void A_length_that_cannot_be_read_is_null_rather_than_a_failure(string body, string? model)
+        {
+            // Every one of these is a server the game will still happily narrate with - most of them
+            // are simply not LM Studio. The gauge does without its denominator; the session does not
+            // care. A bare array matters on its own account: it parses cleanly, so the JsonException
+            // catch never sees it, and TryGetProperty on a non-object throws InvalidOperationException.
+            Assert.Null(LmStudioModels.ParseContextLength(body, model));
+        }
+
         [Fact]
         public void Entries_without_a_usable_id_are_skipped()
         {

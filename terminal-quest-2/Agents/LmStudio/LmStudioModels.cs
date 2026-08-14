@@ -81,6 +81,146 @@ namespace TerminalQuest.Agents.LmStudio
         }
 
         /// <summary>
+        /// Asks how many tokens the served model can hold, or null where that cannot be established.
+        /// </summary>
+        /// <remarks>
+        /// This is LM Studio's own endpoint, not the OpenAI-compatible one: <c>/v1/models</c> lists
+        /// ids and nothing else, and the context length is only on <c>/api/v0/models</c>. Everything
+        /// else that speaks this API - Ollama, llama.cpp, vLLM, Jan - answers 404 there, which is why
+        /// every failure here is null rather than an exception. The context gauge is decoration; a
+        /// server that will not say is not a server that is broken.
+        /// </remarks>
+        /// <param name="model">
+        /// The id to ask about. Null means the caller did not name one, so whichever model the server
+        /// has loaded is the one that will answer the turns.
+        /// </param>
+        public static async Task<int?> ContextLengthAsync(
+            string baseUrl,
+            string? apiKey,
+            string? model,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default,
+            HttpMessageHandler? handler = null)
+        {
+            // The configured base url points at the OpenAI-compatible surface; the native one is a
+            // sibling of it, so the /v1 has to come off rather than be appended to.
+            var root = baseUrl.TrimEnd('/');
+            if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            {
+                root = root[..^"/v1".Length];
+            }
+
+            using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
+
+            if (apiKey is { Length: > 0 } key)
+            {
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            }
+
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(timeout);
+
+            try
+            {
+                using var response = await client
+                    .GetAsync($"{root}/api/v0/models", deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                var body = await response.Content.ReadAsStringAsync(deadline.Token).ConfigureAwait(false);
+
+                return ParseContextLength(body, model);
+            }
+            catch (Exception ex)
+                when (ex is HttpRequestException
+                   || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+            {
+                // A server that is not there, refuses, or is too slow simply does not say. The player
+                // leaving is the one exception: that cancellation is theirs and has to go back to the
+                // caller, or a session abandoned mid-startup reports that it started.
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Reads the context length for <paramref name="model"/> out of an <c>/api/v0/models</c> body.
+        /// </summary>
+        /// <remarks>
+        /// Prefers <c>loaded_context_length</c> - what the model is actually serving, and present only
+        /// while it is loaded - over <c>max_context_length</c>, which is the ceiling it could have been
+        /// loaded at. Quoting the ceiling for a model loaded at a quarter of it would flatter the gauge
+        /// by exactly the factor that matters.
+        /// </remarks>
+        internal static int? ParseContextLength(string body, string? model)
+        {
+            var wanted = model?.Trim();
+
+            try
+            {
+                using var document = JsonDocument.Parse(body);
+
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty("data", out var data)
+                    || data.ValueKind != JsonValueKind.Array)
+                {
+                    return null;
+                }
+
+                foreach (var entry in data.EnumerateArray())
+                {
+                    if (entry.ValueKind != JsonValueKind.Object || !Matches(entry, wanted))
+                    {
+                        continue;
+                    }
+
+                    if (Length(entry, "loaded_context_length") is { } loaded)
+                    {
+                        return loaded;
+                    }
+
+                    if (Length(entry, "max_context_length") is { } max)
+                    {
+                        return max;
+                    }
+                }
+
+                return null;
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+
+            static bool Matches(JsonElement entry, string? wanted) =>
+                wanted is { Length: > 0 }
+                    ? entry.TryGetProperty("id", out var id)
+                      && id.ValueKind == JsonValueKind.String
+                      && string.Equals(id.GetString(), wanted, StringComparison.Ordinal)
+
+                    // No id was asked for, so the loaded model is the one that will answer. An
+                    // embedding model sits in this list too and is never it, but it is never loaded
+                    // for narration either, so "loaded" is enough to pick by.
+                    : entry.TryGetProperty("state", out var state)
+                      && state.ValueKind == JsonValueKind.String
+                      && string.Equals(state.GetString(), "loaded", StringComparison.Ordinal);
+
+            static int? Length(JsonElement entry, string name) =>
+                entry.TryGetProperty(name, out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var length)
+                && length > 0
+                    ? length
+                    : null;
+        }
+
+        /// <summary>
         /// Pulls the ids out of the <c>data</c> array.
         /// </summary>
         /// <remarks>

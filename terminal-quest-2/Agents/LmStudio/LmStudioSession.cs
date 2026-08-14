@@ -61,6 +61,13 @@ namespace TerminalQuest.Agents.LmStudio
         private bool _started;
         private bool _disposed;
 
+        /// <summary>
+        /// Context length of the served model, or zero where the server would not say. Read once at
+        /// startup: the model cannot change under a running session, because the session is the
+        /// history it has been building against that model.
+        /// </summary>
+        private int _contextWindowTokens;
+
         /// <param name="handler">
         /// Where the requests go. Null means a real socket, which is what the game always passes.
         /// It exists so the streaming reply can be driven from canned bytes. A supplied handler
@@ -137,6 +144,19 @@ namespace TerminalQuest.Agents.LmStudio
                 throw new AgentException($"'{model}' is not one of the models {_options.BaseUrl} is offering.");
             }
 
+            // After the check above rather than beside it, and unable to fail the start: this only
+            // feeds the status pane's context gauge, and a server that does not offer LM Studio's
+            // native endpoint is a server the game is otherwise perfectly happy to narrate with.
+            _contextWindowTokens = await LmStudioModels
+                .ContextLengthAsync(
+                    _options.BaseUrl,
+                    _options.ApiKey,
+                    _options.Model,
+                    _options.StartupTimeout,
+                    cancellationToken,
+                    _handler)
+                .ConfigureAwait(false) ?? 0;
+
             _started = true;
         }
 
@@ -173,6 +193,11 @@ namespace TerminalQuest.Agents.LmStudio
                 var inputTokens = 0;
                 var outputTokens = 0;
 
+                // Kept apart from outputTokens because the two answer different questions. That one
+                // is billing and totals the turn; this one is occupancy, and only the reply still in
+                // the context counts - the earlier ones are already inside inputTokens.
+                var lastOutputTokens = 0;
+
                 for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
                 {
                     var reply = await StreamReplyAsync(turn.Token).ConfigureAwait(false);
@@ -181,12 +206,13 @@ namespace TerminalQuest.Agents.LmStudio
                     // output accumulates across every request the turn made.
                     inputTokens = reply.InputTokens > 0 ? reply.InputTokens : inputTokens;
                     outputTokens += reply.OutputTokens;
+                    lastOutputTokens = reply.OutputTokens;
 
                     _history.Add(ChatMessage.Assistant(reply.Text, reply.ToolCalls));
 
                     if (reply.ToolCalls.Count == 0)
                     {
-                        return Finish(reply.Text, isError: false, inputTokens, outputTokens, start);
+                        return Finish(reply.Text, isError: false, inputTokens, outputTokens, lastOutputTokens, start);
                     }
 
                     foreach (var call in reply.ToolCalls)
@@ -201,6 +227,7 @@ namespace TerminalQuest.Agents.LmStudio
                     isError: true,
                     inputTokens,
                     outputTokens,
+                    lastOutputTokens,
                     start);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -250,13 +277,25 @@ namespace TerminalQuest.Agents.LmStudio
             return ValueTask.CompletedTask;
         }
 
-        private static AgentTurnResult Finish(string text, bool isError, int inputTokens, int outputTokens, long start) =>
+        private AgentTurnResult Finish(
+            string text,
+            bool isError,
+            int inputTokens,
+            int outputTokens,
+            int lastOutputTokens,
+            long start) =>
             new()
             {
                 Text = text,
                 IsError = isError,
                 InputTokens = inputTokens,
                 OutputTokens = outputTokens,
+
+                // The prompt of the last request plus the answer to it. Every earlier round trip of
+                // the turn is already counted inside that prompt, because this provider resends the
+                // whole history on each one.
+                ContextTokens = inputTokens > 0 ? inputTokens + lastOutputTokens : 0,
+                ContextWindowTokens = _contextWindowTokens,
 
                 // CostUsd and the cache counts stay zero: a model running on this machine has
                 // neither a price nor a prompt cache to report.

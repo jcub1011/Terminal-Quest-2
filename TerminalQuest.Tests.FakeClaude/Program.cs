@@ -108,6 +108,19 @@ namespace TerminalQuest.Tests.FakeClaude
 
             "usage" => [Init(), Delta("counted"), Result("counted", usage: true)],
 
+            // Two requests in one turn, as a tool loop produces. The second message_start is the one
+            // that describes the context: its prompt has grown to include the first exchange, and the
+            // result's totals hold both prompts added together.
+            "context" =>
+            [
+                Init(),
+                MessageStart(input: 100, cacheRead: 200, cacheCreation: 300),
+                MessageStart(input: 10, cacheRead: 1000, cacheCreation: 500),
+                Delta("counted"),
+                MessageDelta(output: 77),
+                Result("counted", usage: true),
+            ],
+
             "noise" => [Init(), "{ not json", "[]", "{\"type\":\"unknown\"}", Delta("survived"), Result("survived")],
 
             "hang" => [Init()],
@@ -124,6 +137,23 @@ namespace TerminalQuest.Tests.FakeClaude
         private static string Delta(string text) =>
             "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
             + "\"delta\":{\"type\":\"text_delta\",\"text\":" + Json(text) + "}}}";
+
+        /// <summary>
+        /// The frame that opens one request, carrying the usage that describes its prompt. The output
+        /// count starts at one because that is what the real stream does - the answer has not been
+        /// written yet.
+        /// </summary>
+        private static string MessageStart(int input, int cacheRead, int cacheCreation) =>
+            "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\",\"message\":{\"usage\":{"
+            + "\"input_tokens\":" + input
+            + ",\"output_tokens\":1"
+            + ",\"cache_read_input_tokens\":" + cacheRead
+            + ",\"cache_creation_input_tokens\":" + cacheCreation + "}}}}";
+
+        /// <summary>The answer's running length, cumulative for the message in flight.</summary>
+        private static string MessageDelta(int output) =>
+            "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_delta\",\"usage\":{"
+            + "\"output_tokens\":" + output + "}}}";
 
         private static string Thinking(string text) =>
             "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","

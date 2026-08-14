@@ -179,6 +179,64 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task Context_is_taken_from_the_last_request_of_the_turn()
+        {
+            using var script = new Script("context");
+            await using var session = new ClaudeSession(Options());
+            session.OnTextDelta += _ => { };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            // The second message_start's three input counts (10 + 1000 + 500) plus the answer's
+            // final length. Not the first request's 600, and emphatically not the two added
+            // together: the same conversation was sent twice, but it only exists once.
+            Assert.Equal(1510 + 77, result.ContextTokens);
+        }
+
+        [Fact]
+        public async Task Context_falls_back_to_the_result_totals_when_no_request_frames_arrive()
+        {
+            // A build that does not emit message_start leaves the whole-turn totals as the only
+            // figure available. It overstates a turn that used tools, and is still better than a
+            // pane that says nothing.
+            using var script = new Script("usage");
+            await using var session = new ClaudeSession(Options());
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(11 + 33 + 44, result.ContextTokens);
+        }
+
+        [Fact]
+        public async Task The_context_window_is_reported_for_the_gauge_to_divide_by()
+        {
+            using var script = new Script("context");
+            await using var session = new ClaudeSession(Options());
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(1_000_000, result.ContextWindowTokens);
+        }
+
+        [Fact]
+        public async Task Context_is_tracked_even_with_nobody_listening_for_prose()
+        {
+            // The usage frames arrive on the same stream as the text deltas, and the guard that used
+            // to skip the whole stream when no delta handler was attached would have skipped these
+            // with it. Nothing here subscribes to OnTextDelta.
+            using var script = new Script("context");
+            await using var session = new ClaudeSession(Options());
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(1510 + 77, result.ContextTokens);
+        }
+
+        [Fact]
         public async Task A_result_with_no_usage_reports_zeroes_rather_than_failing()
         {
             using var script = new Script("reply");

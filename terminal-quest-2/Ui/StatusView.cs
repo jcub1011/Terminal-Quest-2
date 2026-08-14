@@ -9,6 +9,13 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class StatusView : ThemedView
     {
+        /// <summary>
+        /// Where the context gauge turns red. Chosen to leave a turn or two of warning rather than to
+        /// mark the wall: the point of the gauge is to be acted on before the session runs out, and
+        /// what the player does about it - leave and reopen the save - costs them a turn.
+        /// </summary>
+        private const int ContextDangerPercent = 85;
+
         private readonly GameState _state;
 
         public StatusView(GameState state)
@@ -85,6 +92,8 @@ namespace TerminalQuest.Ui
 
             DrawSeparator(ref row, width, height);
 
+            DrawContextGauge(ref row, width, height);
+
             DrawWrapped(ref row, width, height, StyledLine.FromText($"${_state.CostUsd:F4}", TextRole.System));
 
             if (_state.LastDurationMs > 0)
@@ -93,6 +102,112 @@ namespace TerminalQuest.Ui
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Draws how full the narrator's context is - the count, the share of the window, and a bar
+        /// underneath for reading without reading a number.
+        /// </summary>
+        /// <remarks>
+        /// Down here with the cost and the turn time because it is a fact about the sitting rather than
+        /// about the character, and because putting it above the pack would push the pack down.
+        /// <para>
+        /// Nothing is drawn until a turn has reported a figure. A gauge at nought before the first turn
+        /// would claim an empty context, when in truth the system prompt and the tool schemas are
+        /// already in there and simply have not been counted yet.
+        /// </para>
+        /// </remarks>
+        private void DrawContextGauge(ref int row, int width, int height)
+        {
+            var used = _state.ContextTokens;
+            if (used <= 0)
+            {
+                return;
+            }
+
+            // A window nobody could establish leaves the count standing on its own. It still tells a
+            // player who knows their own model something, which an invented denominator would not.
+            var window = _state.ContextWindowTokens;
+            if (window <= 0)
+            {
+                DrawField(ref row, width, height, "Context", FormatTokens(used), TextRole.Normal);
+                return;
+            }
+
+            var percent = (int)Math.Clamp(used * 100L / window, 0, 100);
+            var role = percent >= ContextDangerPercent ? TextRole.Danger : TextRole.Normal;
+
+            DrawField(ref row, width, height, "Context", $"{FormatTokens(used)}  {percent}%", role);
+
+            if (row >= height)
+            {
+                return;
+            }
+
+            var fill = BarFill(used, window, width);
+
+            Move(0, row);
+            SetRole(role);
+            AddStr(new string('█', fill));
+            SetRole(TextRole.System);
+            AddStr(new string('░', width - fill));
+
+            row++;
+        }
+
+        /// <summary>
+        /// Abbreviates a token count to five columns at most, which is all the pane can spare beside a
+        /// label and a percentage.
+        /// </summary>
+        internal static string FormatTokens(int tokens)
+        {
+            if (tokens < 1_000)
+            {
+                return tokens.ToString();
+            }
+
+            if (tokens < 1_000_000)
+            {
+                return $"{tokens / 1_000}k";
+            }
+
+            // The decimal is worth a column while the leading digit is alone, and costs one too many
+            // once it is not: a context of 2,147,483,647 would otherwise format to seven.
+            return tokens < 10_000_000
+                ? $"{tokens / 1_000_000.0:F1}M"
+                : $"{tokens / 1_000_000}M";
+        }
+
+        /// <summary>
+        /// How many of <paramref name="width"/> cells to fill for <paramref name="used"/> tokens of
+        /// <paramref name="window"/>.
+        /// </summary>
+        /// <remarks>
+        /// Rounded, then held off both ends. A bar that reads empty while there is something in the
+        /// context, or full while there is still room, misleads about the one thing it exists to say;
+        /// keeping a cell back at each end costs a percent of accuracy and buys that.
+        /// </remarks>
+        internal static int BarFill(int used, int window, int width)
+        {
+            if (used <= 0 || window <= 0 || width <= 0)
+            {
+                return 0;
+            }
+
+            if (used >= window)
+            {
+                return width;
+            }
+
+            // One column has no room for a partial reading, and "full" is already taken above.
+            if (width == 1)
+            {
+                return 0;
+            }
+
+            var fill = (int)Math.Round((double)used / window * width, MidpointRounding.AwayFromZero);
+
+            return Math.Clamp(fill, 1, width - 1);
         }
 
         /// <summary>Draws a left-aligned label with its value pushed to the right margin.</summary>

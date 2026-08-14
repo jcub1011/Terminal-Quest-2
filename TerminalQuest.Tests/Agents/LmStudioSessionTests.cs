@@ -53,7 +53,101 @@ namespace TerminalQuest.Tests.Agents
 
             await session.StartAsync(Token);
 
-            Assert.Equal("/v1/models", Assert.Single(handler.Paths));
+            // Two questions, both answered before a turn is spent: what is being served, and how much
+            // of it the model can hold.
+            Assert.Equal(["/v1/models", "/api/v0/models"], handler.Paths);
+        }
+
+        [Fact]
+        public async Task Starting_reads_the_context_length_from_the_native_endpoint()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("a-model").ContextLength(8192).Says("Hello.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(8192, result.ContextWindowTokens);
+        }
+
+        [Fact]
+        public async Task A_server_without_the_native_endpoint_still_starts_and_still_narrates()
+        {
+            // Ollama, llama.cpp, vLLM and Jan all speak /v1 and answer 404 here. The context gauge
+            // does without its denominator; the session must not notice at all.
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("a-model").Says("Hello.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(0, result.ContextWindowTokens);
+            Assert.Equal("Hello.", result.Text);
+            Assert.False(result.IsError);
+        }
+
+        [Fact]
+        public async Task Context_is_the_last_prompt_plus_the_answer_to_it()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .ContextLength(8192)
+                .Says("Hello.", promptTokens: 900, completionTokens: 40);
+
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(940, result.ContextTokens);
+        }
+
+        [Fact]
+        public async Task A_turn_that_used_tools_counts_the_conversation_once()
+        {
+            // This provider resends the whole history on every round trip, so the last request's
+            // prompt already contains the earlier ones. Only the last answer is outside it.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .ContextLength(8192)
+                .Calls("get_characters", "{}", promptTokens: 800, completionTokens: 5)
+                .Says("Hello.", promptTokens: 1500, completionTokens: 40);
+
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            // 1540 - the last prompt and the last answer. Not 800 as well: that request's prompt is
+            // a prefix of this one, and adding them would count the conversation twice.
+            Assert.Equal(1540, result.ContextTokens);
+
+            // Billing still totals the turn, both answers included. That the two figures disagree is
+            // the whole reason ContextTokens is not derived from them.
+            Assert.Equal(45, result.OutputTokens);
+        }
+
+        [Fact]
+        public async Task A_server_that_reports_no_usage_reports_no_context_either()
+        {
+            // Rather than an answer's length with no prompt to sit in, which would read as a context
+            // that shrank.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .ContextLength(8192)
+                .Says("Hello.", promptTokens: 0, completionTokens: 0);
+
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(0, result.ContextTokens);
         }
 
         [Fact]

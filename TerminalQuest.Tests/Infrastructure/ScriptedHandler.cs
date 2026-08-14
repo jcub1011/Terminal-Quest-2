@@ -13,10 +13,15 @@ namespace TerminalQuest.Tests.Infrastructure
     /// </remarks>
     internal sealed class ScriptedHandler : HttpMessageHandler
     {
+        /// <summary>LM Studio's own model endpoint - the only place a context length is published.</summary>
+        private const string NativeModelsPath = "/api/v0/models";
+
         private readonly Queue<Func<HttpRequestMessage, HttpResponseMessage>> _replies = new();
         private readonly Lock _gate = new();
         private readonly List<string> _bodies = [];
         private readonly List<string> _paths = [];
+
+        private string? _nativeModels;
 
         /// <summary>Every request body sent, in order.</summary>
         public IReadOnlyList<string> Bodies
@@ -50,6 +55,31 @@ namespace TerminalQuest.Tests.Infrastructure
             return Json($"{{\"data\":[{data}]}}");
         }
 
+        /// <summary>
+        /// Answers <c>/api/v0/models</c> with a raw body, for the context length the session reads at
+        /// startup.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately outside the scripted queue. That queue is one endpoint's conversation taken in
+        /// order; this is a different endpoint, probed once, and putting it in the queue would oblige
+        /// every test that has no interest in context lengths to script a reply for one anyway. Left
+        /// unset it answers 404, which is what every server that is not LM Studio answers.
+        /// </remarks>
+        public ScriptedHandler NativeModels(string body)
+        {
+            lock (_gate)
+            {
+                _nativeModels = body;
+            }
+
+            return this;
+        }
+
+        /// <summary>Answers the native endpoint with one loaded model of the given context length.</summary>
+        public ScriptedHandler ContextLength(int tokens, string id = "a-model") =>
+            NativeModels(
+                $"{{\"data\":[{{\"id\":\"{id}\",\"state\":\"loaded\",\"loaded_context_length\":{tokens}}}]}}");
+
         /// <summary>Answers with a server-sent-event stream built from raw frame lines.</summary>
         public ScriptedHandler Stream(params string[] lines)
         {
@@ -71,12 +101,27 @@ namespace TerminalQuest.Tests.Infrastructure
         }
 
         /// <summary>Answers with a chat completion that asks for one tool and stops.</summary>
-        public ScriptedHandler Calls(string tool, string arguments, string id = "call_1")
+        /// <remarks>
+        /// Reports no usage unless asked to. Most callers have no interest in the counts, and a
+        /// tool-calling round trip that volunteered them would put a usage frame in front of every
+        /// test that only wanted to watch the loop turn over.
+        /// </remarks>
+        public ScriptedHandler Calls(
+            string tool,
+            string arguments,
+            string id = "call_1",
+            int promptTokens = 0,
+            int completionTokens = 0)
         {
             var call = $"\"tool_calls\":[{{\"index\":0,\"id\":\"{id}\","
                 + $"\"function\":{{\"name\":\"{tool}\",\"arguments\":{Quote(arguments)}}}}}]";
 
-            return Stream("data: " + Chunk(call), "data: [DONE]");
+            return promptTokens > 0 || completionTokens > 0
+                ? Stream(
+                    "data: " + Chunk(call),
+                    "data: " + Usage(promptTokens, completionTokens),
+                    "data: [DONE]")
+                : Stream("data: " + Chunk(call), "data: [DONE]");
         }
 
         /// <summary>Answers with a raw JSON body and a 200.</summary>
@@ -115,20 +160,36 @@ namespace TerminalQuest.Tests.Infrastructure
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
+            var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+
             Func<HttpRequestMessage, HttpResponseMessage> reply;
 
             lock (_gate)
             {
                 _bodies.Add(body);
-                _paths.Add(request.RequestUri?.AbsolutePath ?? string.Empty);
+                _paths.Add(path);
 
-                if (!_replies.TryDequeue(out var next))
+                if (path == NativeModelsPath)
                 {
-                    throw new InvalidOperationException(
-                        $"The session made {_bodies.Count} requests but the script only answers {_bodies.Count - 1}.");
+                    // Answered off the queue entirely - see NativeModels for why.
+                    reply = _nativeModels is { } native
+                        ? _ => new HttpResponseMessage(HttpStatusCode.OK)
+                        {
+                            Content = new StringContent(native, Encoding.UTF8, "application/json"),
+                        }
+                        : _ => new HttpResponseMessage(HttpStatusCode.NotFound);
                 }
+                else if (_replies.TryDequeue(out var next))
+                {
+                    reply = next;
+                }
+                else
+                {
+                    var scripted = _bodies.Count - 1 - _paths.Count(p => p == NativeModelsPath);
 
-                reply = next;
+                    throw new InvalidOperationException(
+                        $"The session made {_bodies.Count} requests but the script only answers {scripted}.");
+                }
             }
 
             cancellationToken.ThrowIfCancellationRequested();

@@ -11,6 +11,89 @@ namespace TerminalQuest.Tests.Ui
     /// </summary>
     public sealed class ViewHelpersTests
     {
+        // ---- The context gauge ----------------------------------------------------------------
+
+        [Theory]
+        [InlineData(0, "0")]
+        [InlineData(842, "842")]
+        [InlineData(999, "999")]
+        [InlineData(1_000, "1k")]
+        [InlineData(84_137, "84k")]
+        [InlineData(999_999, "999k")]
+        [InlineData(1_000_000, "1.0M")]
+        [InlineData(1_048_576, "1.0M")]
+        [InlineData(1_500_000, "1.5M")]
+        [InlineData(9_900_000, "9.9M")]
+        [InlineData(10_000_000, "10M")]
+        [InlineData(int.MaxValue, "2147M")]
+        public void A_token_count_abbreviates_to_the_columns_the_pane_can_spare(int tokens, string expected)
+        {
+            Assert.Equal(expected, StatusView.FormatTokens(tokens));
+        }
+
+        [Fact]
+        public void An_abbreviated_count_never_outgrows_five_columns()
+        {
+            // The pane is twenty-seven wide and this shares a row with a label and a percentage, so
+            // the width is a budget rather than an observation.
+            foreach (var tokens in (int[])[0, 999, 1_000, 999_999, 1_000_000, 9_999_999, int.MaxValue])
+            {
+                Assert.True(
+                    StatusView.FormatTokens(tokens).Length <= 5,
+                    $"{tokens} formatted to '{StatusView.FormatTokens(tokens)}'");
+            }
+        }
+
+        [Fact]
+        public void An_empty_context_fills_nothing_and_a_full_one_fills_everything()
+        {
+            Assert.Equal(0, StatusView.BarFill(used: 0, window: 1000, width: 20));
+            Assert.Equal(20, StatusView.BarFill(used: 1000, window: 1000, width: 20));
+            Assert.Equal(20, StatusView.BarFill(used: 1200, window: 1000, width: 20));
+        }
+
+        [Fact]
+        public void A_context_barely_started_still_shows_a_cell()
+        {
+            // Rounding would floor this to nothing, and a bar that reads empty while the narrator is
+            // holding a conversation misleads about the one thing it is there to say.
+            Assert.Equal(1, StatusView.BarFill(used: 1, window: 1_000_000, width: 27));
+        }
+
+        [Fact]
+        public void A_context_nearly_full_still_shows_a_gap()
+        {
+            // The converse: rounding to full would claim there is no room left when there is.
+            Assert.Equal(26, StatusView.BarFill(used: 999_999, window: 1_000_000, width: 27));
+        }
+
+        [Fact]
+        public void The_fill_tracks_the_proportion_in_between()
+        {
+            Assert.Equal(5, StatusView.BarFill(used: 500, window: 1000, width: 10));
+            Assert.Equal(3, StatusView.BarFill(used: 250, window: 1000, width: 10));
+            Assert.Equal(8, StatusView.BarFill(used: 750, window: 1000, width: 10));
+        }
+
+        [Fact]
+        public void A_gauge_with_nothing_to_divide_by_fills_nothing()
+        {
+            // A window of zero is a server that would not say how much it can hold. The caller draws
+            // no bar at all in that case, and this must not throw on the way to finding out.
+            Assert.Equal(0, StatusView.BarFill(used: 500, window: 0, width: 20));
+            Assert.Equal(0, StatusView.BarFill(used: 500, window: -1, width: 20));
+        }
+
+        [Fact]
+        public void A_pane_too_narrow_for_a_bar_does_not_throw_trying_to_draw_one()
+        {
+            // The clamp that keeps a gap at the full end has no room to work in a single column, and
+            // Math.Clamp with a minimum above its maximum throws rather than picking one.
+            Assert.Equal(0, StatusView.BarFill(used: 500, window: 1000, width: 1));
+            Assert.Equal(1, StatusView.BarFill(used: 1000, window: 1000, width: 1));
+            Assert.Equal(0, StatusView.BarFill(used: 500, window: 1000, width: 0));
+        }
+
         // ---- Scroll window --------------------------------------------------------------------
 
         [Fact]

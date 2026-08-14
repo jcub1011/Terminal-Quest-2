@@ -38,6 +38,25 @@ namespace TerminalQuest.Agents
         /// <summary>Tokens written into the prompt cache during this turn, where there is one.</summary>
         public int CacheCreationTokens { get; init; }
 
+        /// <summary>
+        /// How much the model is holding after this turn - the prompt it was last sent plus what it
+        /// answered with.
+        /// <para>
+        /// Deliberately not derivable from the counts above. Those are billing figures for the whole
+        /// turn, and a turn is as many requests as the tool loop takes: the same conversation is sent
+        /// again with every round trip, so summing them counts one context several times over. This
+        /// is the size of the last request alone, which is what is actually occupied.
+        /// </para>
+        /// </summary>
+        public int ContextTokens { get; init; }
+
+        /// <summary>
+        /// The window <see cref="ContextTokens"/> is filling, or zero where it cannot be established.
+        /// A local server that will not say which context length it loaded reports zero rather than a
+        /// guess, and a reader with no number has nothing to be wrong about.
+        /// </summary>
+        public int ContextWindowTokens { get; init; }
+
         /// <summary>Wall-clock duration of the turn, in milliseconds.</summary>
         public int DurationMs { get; init; }
     }

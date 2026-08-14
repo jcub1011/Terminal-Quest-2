@@ -58,6 +58,18 @@ namespace TerminalQuest.Ui
         /// <summary>Cache tokens read on the most recent turn.</summary>
         public int LastCacheRead { get; set; }
 
+        /// <summary>
+        /// How much of the narrator's context is occupied as of the last turn. Zero before the first
+        /// turn lands, and for a provider that does not report it.
+        /// </summary>
+        public int ContextTokens { get; set; }
+
+        /// <summary>
+        /// The window <see cref="ContextTokens"/> is filling, or zero where it is not known - in which
+        /// case the pane shows the count without a proportion rather than inventing a denominator.
+        /// </summary>
+        public int ContextWindowTokens { get; set; }
+
         /// <summary>Wall-clock duration of the most recent turn.</summary>
         public int LastDurationMs { get; set; }
 
