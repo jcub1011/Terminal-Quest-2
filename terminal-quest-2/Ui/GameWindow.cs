@@ -318,8 +318,12 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
-            // PgUp/PgDn scroll the transcript even though focus lives in the input field.
-            if (key == Key.PageUp || key == Key.PageDown)
+            // PgUp/PgDn scroll the transcript even though focus lives in the input field, and
+            // Shift+PgDn returns to the narrator from wherever the player has read back to. All
+            // three only arrive because a single-line TextField implements no paging command of its
+            // own; End and Ctrl+End, which would be the obvious spelling of that last one, are the
+            // field's caret keys and never get this far.
+            if (key == Key.PageUp || key == Key.PageDown || key == Key.PageDown.WithShift)
             {
                 return Narration.NewKeyDownEvent(key);
             }

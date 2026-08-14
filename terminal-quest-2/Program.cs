@@ -696,8 +696,12 @@ namespace TerminalQuest
                         // The session stops being busy so the player can still read the save with
                         // /story and friends; every narrated turn will fail until the game is
                         // restarted.
+                        //
+                        // Nothing is scrolled. The turn died on its own account rather than on the
+                        // player's, and someone who had scrolled back to re-read a scene is owed
+                        // their place in it more than they are owed this sentence the instant it is
+                        // written; the marker on the last row says it is there to be come back to.
                         window.IsBusy = false;
-                        window.Narration.ScrollToBottom();
                     });
 
                     return;
@@ -799,8 +803,12 @@ namespace TerminalQuest
                         // point at which the pane learns what the turn actually changed.
                         RefreshStatus();
 
+                        // The turn ending is the narrator finishing a thought, not the player asking
+                        // to be taken anywhere, so the pane is left exactly where it is. It is
+                        // already where it belongs without help: every line of the turn re-synced it
+                        // as it landed, which follows the stream to the end for a player who never
+                        // left it and holds position for one who did.
                         window.IsBusy = false;
-                        window.Narration.ScrollToBottom();
                     });
                 }
                 catch (OperationCanceledException)
@@ -946,8 +954,12 @@ namespace TerminalQuest
 
                 // CommitBlock cleared the placeholder on its way past. The turn is not over, so the
                 // narrator is still thinking and should still be seen to be.
+                //
+                // This is also the last word on where the pane sits: setting IsWaiting re-syncs it.
+                // Nothing here scrolls, and this is the site where that matters most - the rolls
+                // arrive several times a second for the whole of a turn, so a jump to the end here
+                // would make reading back during a turn impossible rather than merely jarring.
                 window.Narration.IsWaiting = window.IsBusy;
-                window.Narration.ScrollToBottom();
             }
 
             void RefreshStatus()

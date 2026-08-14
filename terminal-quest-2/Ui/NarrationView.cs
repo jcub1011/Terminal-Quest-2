@@ -24,6 +24,12 @@ namespace TerminalQuest.Ui
         private const int WheelRows = 4;
 
         /// <summary>
+        /// Shown on the last row while the player is reading back, and clickable to return. Worded
+        /// as a way out rather than as a warning: nothing has gone wrong, there is simply more.
+        /// </summary>
+        private const string MoreBelow = " ▼ more below ";
+
+        /// <summary>
         /// Stands in for the narration until the first token of it arrives, in the place that
         /// narration will occupy. It belongs here rather than in the status pane: the player is
         /// waiting on prose, and this is where the prose appears.
@@ -81,7 +87,17 @@ namespace TerminalQuest.Ui
         /// stream, and the base class does not revisit the offset when the row count changes
         /// underneath it.
         /// </summary>
-        private int BottomOffset => Math.Max(0, TotalRows - Viewport.Height);
+        private int BottomOffset => BottomOffsetFor(TotalRows, Viewport.Height);
+
+        /// <summary>
+        /// Whether any of the transcript sits below the foot of the pane.
+        /// <para>
+        /// Drives the marker drawn on the last row. A pane that has correctly stopped following the
+        /// narrator is indistinguishable, from the player's side, from a game that has stopped
+        /// working - so the one thing it must not do is go on silently.
+        /// </para>
+        /// </summary>
+        private bool HasMoreBelow => Viewport.Y < BottomOffset;
 
         /// <summary>Appends streamed narration. Safe to call with partial markup tags.</summary>
         public void AppendDelta(string text)
@@ -152,7 +168,7 @@ namespace TerminalQuest.Ui
         private void Scroll(int rows)
         {
             ScrollVertical(rows);
-            _stickToBottom = Viewport.Y >= BottomOffset;
+            _stickToBottom = AtBottom(Viewport.Y, TotalRows, Viewport.Height);
             SetNeedsDraw();
         }
 
@@ -171,13 +187,24 @@ namespace TerminalQuest.Ui
         {
             SetContentHeight(TotalRows);
 
-            var bottom = BottomOffset;
-            var target = _stickToBottom ? bottom : Math.Min(Viewport.Y, bottom);
+            var target = NextOffset(Viewport.Y, TotalRows, Viewport.Height, _stickToBottom);
 
             if (target != Viewport.Y)
             {
-                ScrollVertical(target - Viewport.Y);
+                // Assigned rather than scrolled by a delta. ScrollVertical declines to do anything
+                // at all when the content is exactly as tall as the pane, which is one of the very
+                // cases this correction exists for - it would leave the offset stranded mid-way
+                // through a transcript that now fits, drawing its last rows at the top of an
+                // otherwise blank pane. Assigning goes through the base class's own clamp, which
+                // bounds it to BottomOffset exactly as computed here.
+                Viewport = Viewport with { Y = target };
             }
+
+            // Recomputed from where the pane actually ended up, never carried forward. Growing the
+            // terminal lowers the bottom, and a player who was detached above it can be left sitting
+            // on the last row without ever having asked to rejoin; leaving the flag false there
+            // would freeze the pane a screen short of the narrator for the rest of the session.
+            _stickToBottom = AtBottom(Viewport.Y, TotalRows, Viewport.Height);
         }
 
         private void AfterContentChanged()
@@ -202,6 +229,19 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
+            // The one key that rejoins the narrator outright, however far back the player has read.
+            //
+            // Not End, and not Ctrl+End, though both are the obvious spelling: focus lives in the
+            // command box, a TextField binds each of them to its own caret and is offered every key
+            // first, so neither would ever reach this view. PageUp and PageDown arrive only because
+            // a single-line field implements no paging command at all - and Shift+PageDown is the
+            // rest of that same gap.
+            if (key == Key.PageDown.WithShift)
+            {
+                ScrollToBottom();
+                return true;
+            }
+
             return false;
         }
 
@@ -219,6 +259,18 @@ namespace TerminalQuest.Ui
             if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
             {
                 Scroll(WheelRows);
+                return true;
+            }
+
+            // Clicking the marker rejoins the narrator. The whole row is the target rather than the
+            // glyphs alone: it is only offered while the marker is showing, and there is nothing
+            // else a click on this pane could have been meant to do.
+            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked)
+                && HasMoreBelow
+                && mouse.Position is { } at
+                && at.Y == Viewport.Height - 1)
+            {
+                ScrollToBottom();
                 return true;
             }
 
@@ -271,7 +323,30 @@ namespace TerminalQuest.Ui
                 }
             }
 
+            DrawMoreBelowMarker(width, height);
+
             return true;
+        }
+
+        /// <summary>
+        /// Says, on the last row of the pane, that the transcript carries on below it.
+        /// <para>
+        /// Right-aligned over the tail of whatever is drawn there, which is the one row least likely
+        /// to be the one being read - and it costs those columns only for as long as the player is
+        /// away from the foot. Drawn whenever anything is below the fold rather than only during a
+        /// turn, so it serves the player who scrolled back between turns just as well.
+        /// </para>
+        /// </summary>
+        private void DrawMoreBelowMarker(int width, int height)
+        {
+            if (!HasMoreBelow || width < MoreBelow.Length)
+            {
+                return;
+            }
+
+            Move(width - MoreBelow.Length, height - 1);
+            SetRole(TextRole.System);
+            AddStr(MoreBelow);
         }
 
         /// <summary>
@@ -300,6 +375,41 @@ namespace TerminalQuest.Ui
             _currentRows = _current is { Length: > 0 } ? Wrap(_current.Spans, _wrapWidth) : [];
 
             // The offset is left to the SyncContentSize call that follows every rebuild.
+        }
+
+        /// <summary>
+        /// The offset that rests the last row at the foot of a pane <paramref name="viewportHeight"/>
+        /// rows tall.
+        /// </summary>
+        /// <remarks>
+        /// Zero for a pane with no height yet. A view that has never been laid out has no foot to be
+        /// away from, and answering anything else here would let a transcript decide it had been
+        /// abandoned by the player before it had been drawn once.
+        /// </remarks>
+        internal static int BottomOffsetFor(int totalRows, int viewportHeight) =>
+            viewportHeight <= 0 ? 0 : Math.Max(0, totalRows - viewportHeight);
+
+        /// <summary>
+        /// Whether an offset has the last row on screen. This is the whole definition of "following
+        /// the narrator": there is no separate intent to remember, only where the pane is sitting.
+        /// </summary>
+        internal static bool AtBottom(int offsetY, int totalRows, int viewportHeight) =>
+            offsetY >= BottomOffsetFor(totalRows, viewportHeight);
+
+        /// <summary>
+        /// Where the top of the pane belongs once the transcript has changed underneath it.
+        /// <para>
+        /// Following means going wherever the end went. Not following means staying exactly where
+        /// the player left it - which is the point of the whole mechanism, since the alternative is
+        /// dragging someone off the paragraph they are reading every time a token lands. The clamp
+        /// only ever applies when the transcript got <em>shorter</em>, as a wider terminal re-wrapping
+        /// to fewer rows does, and it is what stops the pane drawing blank space below the last line.
+        /// </para>
+        /// </summary>
+        internal static int NextOffset(int offsetY, int totalRows, int viewportHeight, bool following)
+        {
+            var bottom = BottomOffsetFor(totalRows, viewportHeight);
+            return following ? bottom : Math.Clamp(offsetY, 0, bottom);
         }
 
         /// <summary>

@@ -36,9 +36,9 @@ namespace TerminalQuest.Saves
           + "show instead. End where the player has to decide something, and leave the deciding to them - "
           + "never narrate their choices, their words, or what they do next. "
           + "Mark up your prose semantically, closing each tag by name: "
-          + "items as [item]a rusted key[/item], dangers as [danger]a wolf[/danger], "
+          + "items asa  [item]rusted key[/item], dangers as [danger]a wolf[/danger], "
           + "spoken words as [speech]\"who goes there?\"[/speech], "
-          + "and place names as [place]the Hollow Gate[/place]. "
+          + "and place names as the [place]Hollow Gate[/place]. "
           + "Use no other formatting, and never use square brackets for anything else.\n\n"
 
           + "The world is kept in files. Your tools are the only way to read or change it, and "

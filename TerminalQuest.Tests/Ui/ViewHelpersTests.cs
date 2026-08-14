@@ -68,6 +68,85 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(0, ThemedView.ScrollWindowStart(0, count: 0, height: 10));
         }
 
+        // ---- Transcript follow -----------------------------------------------------------------
+
+        [Fact]
+        public void Following_keeps_the_last_row_at_the_foot()
+        {
+            Assert.Equal(90, NarrationView.NextOffset(0, totalRows: 100, viewportHeight: 10, following: true));
+        }
+
+        [Fact]
+        public void A_transcript_shorter_than_the_pane_never_scrolls()
+        {
+            Assert.Equal(0, NarrationView.NextOffset(0, totalRows: 3, viewportHeight: 10, following: true));
+            Assert.Equal(0, NarrationView.NextOffset(0, totalRows: 3, viewportHeight: 10, following: false));
+        }
+
+        [Fact]
+        public void A_detached_reader_does_not_move_when_text_arrives()
+        {
+            // The whole point of the mechanism: the narrator writing must not cost the player their
+            // place, however much of it arrives.
+            Assert.Equal(20, NarrationView.NextOffset(20, totalRows: 100, viewportHeight: 10, following: false));
+            Assert.Equal(20, NarrationView.NextOffset(20, totalRows: 500, viewportHeight: 10, following: false));
+        }
+
+        [Fact]
+        public void Streaming_never_moves_a_detached_reader()
+        {
+            // The same, as the invariant rather than two examples of it.
+            for (var y = 0; y <= 90; y++)
+            {
+                for (var growth = 1; growth <= 50; growth++)
+                {
+                    Assert.Equal(y, NarrationView.NextOffset(y, 100 + growth, viewportHeight: 10, following: false));
+                }
+            }
+        }
+
+        [Fact]
+        public void A_detached_reader_is_pulled_back_by_a_shrink()
+        {
+            // A wider terminal re-wraps to fewer rows. Left alone the offset would strand the pane
+            // past the end of the transcript, drawing blank space below the last line.
+            Assert.Equal(40, NarrationView.NextOffset(95, totalRows: 50, viewportHeight: 10, following: false));
+        }
+
+        [Fact]
+        public void The_offset_never_leaves_the_transcript()
+        {
+            Assert.Equal(0, NarrationView.NextOffset(-5, totalRows: 100, viewportHeight: 10, following: false));
+        }
+
+        [Fact]
+        public void Following_is_exactly_the_last_row_being_on_screen()
+        {
+            Assert.True(NarrationView.AtBottom(90, totalRows: 100, viewportHeight: 10));
+            Assert.False(NarrationView.AtBottom(89, totalRows: 100, viewportHeight: 10));
+            Assert.True(NarrationView.AtBottom(0, totalRows: 3, viewportHeight: 10));
+        }
+
+        [Fact]
+        public void A_reader_clamped_to_the_foot_rejoins()
+        {
+            // Growing the terminal can land a detached reader on the last row without their having
+            // asked to return. Left detached there the pane would sit a screen short of the narrator
+            // for the rest of the session.
+            var settled = NarrationView.NextOffset(95, totalRows: 50, viewportHeight: 10, following: false);
+
+            Assert.True(NarrationView.AtBottom(settled, totalRows: 50, viewportHeight: 10));
+        }
+
+        [Fact]
+        public void A_pane_that_has_never_been_drawn_still_follows()
+        {
+            // Height is zero until the first layout. A transcript must not decide it has been left
+            // behind before it has been shown once.
+            Assert.Equal(0, NarrationView.BottomOffsetFor(totalRows: 10, viewportHeight: 0));
+            Assert.True(NarrationView.AtBottom(0, totalRows: 10, viewportHeight: 0));
+        }
+
         // ---- Theme -----------------------------------------------------------------------------
 
         [Fact]
