@@ -411,11 +411,7 @@ namespace TerminalQuest
                 return;
             }
 
-            settings.Provider = chosen.Provider;
-            settings.ClaudeModel = chosen.ClaudeModel;
-            settings.LmStudioBaseUrl = chosen.LmStudioBaseUrl;
-            settings.LmStudioModel = chosen.LmStudioModel;
-            settings.LmStudioApiKey = chosen.LmStudioApiKey;
+            settings.CopyFrom(chosen);
         }
 
         /// <summary>The one-line summary of who will be narrating, for the save menu.</summary>
@@ -423,7 +419,9 @@ namespace TerminalQuest
         {
             AgentProvider.LmStudio =>
                 $"LM Studio - {(settings.LmStudioModel is { Length: > 0 } model ? model : "whichever model is loaded")}",
-            _ => $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } model ? model : "default model")}",
+            // By the name the settings screen offered rather than the raw id, so the menu says
+            // back the same word the player picked.
+            _ => $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } model ? ClaudeModels.Describe(model) : "default model")}",
         };
 
         /// <summary>What the character screen settled, once it has been written to the save.</summary>
