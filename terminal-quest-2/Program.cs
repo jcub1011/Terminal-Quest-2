@@ -41,6 +41,12 @@ namespace TerminalQuest
           + "and never ask who they are - read them. If no location is on record, create where they "
           + "begin with upsert_location and move_character them into it.\n\n"
 
+          + "A session is not a campaign. When a save is resumed you are new to it, and the prose you "
+          + "wrote last time is not in your memory - it is in the transcript. Call get_transcript "
+          + "before get_state on the first turn of a resumed save, and write on from the voice you "
+          + "find there rather than starting afresh in your own. It will also tell you if the player "
+          + "asked something the last session ended before answering.\n\n"
+
           + "Record what happens as it happens: damage or healing with update_character; items "
           + "gained or lost with add_item and remove_item; coin earned or spent with add_money and "
           + "remove_money, never as an item; travel with move_character, after "
@@ -146,10 +152,22 @@ namespace TerminalQuest
         /// </summary>
         private static readonly TimeSpan RollPollInterval = TimeSpan.FromMilliseconds(400);
 
+        /// <summary>
+        /// Opening turn for a save that has been played before.
+        /// <para>
+        /// Leads with <c>get_transcript</c> rather than <c>get_state</c>, which is the opposite order
+        /// to every other opening, and deliberately: the world tells the narrator what is true, and
+        /// the transcript tells it what it sounded like. Only one of those is unrecoverable from the
+        /// other, and it is the one that has never been on disk until now.
+        /// </para>
+        /// </summary>
         private const string ContinuePrompt =
-            "This save is being resumed. Call get_state, then record_claims for what you are about to "
-          + "say, then set the scene where the player left off - describe where they are now rather "
-          + "than recapping what they already lived through.";
+            "This save is being resumed and your memory of it is gone. Call get_transcript first: it "
+          + "returns the end of the last session word for word, and says whether the player is owed an "
+          + "answer. Then get_state, then record_claims for what you are about to say. Pick the thread "
+          + "up in the voice the transcript is written in. Describe where the player is now rather than "
+          + "recapping what they already lived through - and if their last line went unanswered, answer "
+          + "it rather than opening a fresh scene over the top of it.";
 
         private static async Task<int> Main(string[] args)
         {
@@ -352,23 +370,26 @@ namespace TerminalQuest
             };
             var pump = new NarrationPump(app, window.Narration);
 
+            // Subscribed beside the pump rather than fed from it, so what reaches the transcript on
+            // disk is the same stream that reached the screen and not a summary of it.
+            var recorder = new NarrationRecorder();
+
             narrator.OnTextDelta += pump.Enqueue;
+            narrator.OnTextDelta += recorder.Append;
 
-            // Said once and then not again. A journal that cannot be written fails on every tool call,
-            // and a Danger line per call would bury the scene the player is reading - while saying
-            // nothing the first one did not. Only the in-process provider reaches this at all: on the
-            // Claude path the tools run in the state server, which reports on its own stderr.
-            var journalReported = false;
-            QuestJournal.OnFailure = message => app.Invoke(() =>
-            {
-                if (leaving || journalReported)
-                {
-                    return;
-                }
-
-                journalReported = true;
-                window.Narration.AddLine($"[{message}. The story is unaffected; its record is not.]", TextRole.Danger);
-            });
+            // Written down rather than shown. A journal that cannot be written is the game's problem
+            // with its own record-keeping: the story is unaffected, the player can do nothing about
+            // it, and a red line in the middle of a scene only takes the scene away from them.
+            //
+            // Every failure now, not the first one only. That guard existed because a Danger line per
+            // tool call would bury the transcript; a log has no such objection, and how many calls
+            // were lost is the thing somebody investigating actually wants to know.
+            //
+            // Not marshalled onto the UI thread either, since nothing here touches a view. Only the
+            // in-process provider reaches this at all: on the Claude path the tools run in the state
+            // server, which reports on its own stderr.
+            QuestJournal.OnFailure = message =>
+                Findings.Record(store, state.Turn, Finding.RecordUnwritable, message);
 
             window.LeaveRequested += Leave;
             window.CommandEntered += OnCommandEntered;
@@ -397,6 +418,14 @@ namespace TerminalQuest
             }
             else
             {
+                // Before the narrator is woken, so the player has the scene they left to read while
+                // it starts up rather than an empty pane. Skipped for a save made this run, which has
+                // no last session to recall.
+                if (!startedFresh)
+                {
+                    ShowRecalledScene();
+                }
+
                 // The narrator is started here rather than before the UI so that a failure to launch
                 // can be reported into the transcript, on a screen the player is already looking at.
                 window.IsBusy = true;
@@ -409,6 +438,7 @@ namespace TerminalQuest
             // Detached before the window goes: a delta still arriving from a turn that has not
             // finished unwinding would otherwise be pumped into a view that is being disposed.
             narrator.OnTextDelta -= pump.Enqueue;
+            narrator.OnTextDelta -= recorder.Append;
 
             // Cleared for the same reason, one level up: this one is static, so left in place it would
             // outlive the session and draw the next save's trouble into a window that has closed.
@@ -493,6 +523,11 @@ namespace TerminalQuest
                 // player spoke, and then the narrator answered.
                 RecordPlayerClaim(text);
 
+                // And for the same reason - but it carries a second meaning the ledger's copy does
+                // not. Written now, a session that dies mid-reply leaves the player's line as the last
+                // thing on record, which is how a resumed save knows the narrator was interrupted.
+                RecordSpoken(TranscriptVoice.Player, state.Turn, text);
+
                 window.IsBusy = true;
                 _ = Task.Run(() => RunTurnAsync(text));
             }
@@ -539,6 +574,90 @@ namespace TerminalQuest
                 {
                     window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
                 }
+            }
+
+            /// <summary>
+            /// Puts one line of the conversation on the transcript, exactly as it was written.
+            /// </summary>
+            /// <remarks>
+            /// The game writes this rather than a tool, for the reason it already writes the player's
+            /// ledger claim: it is holding both halves anyway - the typed line, and the deltas it just
+            /// drew - so asking the narrator to report its own prose back would cost a round trip per
+            /// turn to learn something already in hand, and would be lost on the turns that matter
+            /// most, the ones that went wrong.
+            /// <para>
+            /// A failure is noted and swallowed rather than shown. A transcript one line short costs
+            /// the next resume a little context, which the player can neither act on nor prevent;
+            /// taking the turn down over it would cost them the scene as well.
+            /// </para>
+            /// </remarks>
+            void RecordSpoken(TranscriptVoice voice, int turn, string text)
+            {
+                if (text.AsSpan().IsWhiteSpace())
+                {
+                    return;
+                }
+
+                try
+                {
+                    store.Transcript.Append(new TranscriptEntry
+                    {
+                        Turn = turn,
+                        Voice = voice,
+                        Text = text,
+                    });
+                }
+                catch (SaveException ex)
+                {
+                    Findings.Record(store, turn, Finding.RecordUnwritable, ex.Message);
+                }
+            }
+
+            /// <summary>
+            /// Draws the end of the last session into the pane the player is about to read.
+            /// </summary>
+            /// <remarks>
+            /// Runs before the narrator is woken and on the UI thread, while the window is still being
+            /// built - so the recalled scene is simply the first thing in the transcript rather than
+            /// something that arrives on top of it.
+            /// <para>
+            /// A transcript that will not parse leaves the pane as it was and says so once, on the same
+            /// reasoning as the status refresh: the save is still playable, and the thing that failed
+            /// is a convenience.
+            /// </para>
+            /// </remarks>
+            void ShowRecalledScene()
+            {
+                IReadOnlyList<StyledLine> lines;
+
+                try
+                {
+                    var recalled = TranscriptRecall.Tail(
+                        store.Transcript.Read().Entries,
+                        settings.TranscriptRecallCharacters);
+
+                    if (recalled.Count == 0)
+                    {
+                        return;
+                    }
+
+                    lines = TranscriptReplay.Lines(recalled, store.ReadRolls().Rolls, store.ReadCharacters());
+                }
+                catch (SaveException ex)
+                {
+                    window.Narration.AddLine(
+                        $"[{ex.Message}. The last session cannot be shown; the save is otherwise fine.]",
+                        TextRole.Danger);
+                    window.Narration.AddBlankLine();
+                    return;
+                }
+
+                foreach (var line in lines)
+                {
+                    window.Narration.AddLine(line);
+                }
+
+                window.Narration.AddBlankLine();
             }
 
             void RunPlayerCommand(string text)
@@ -626,6 +745,16 @@ namespace TerminalQuest
                 var watching = turnLife.Token;
                 _ = Task.Run(() => WatchRollsAsync(watching));
 
+                // Read here rather than off the field later. This task was started immediately after
+                // the turn was incremented, so this is the turn the prose belongs to - and by the time
+                // it lands the field may have moved on.
+                var spokenTurn = state.Turn;
+
+                // Whatever the last turn left behind is not this turn's opening words. Cleared going
+                // in rather than coming out, so an abandoned turn cannot bequeath its half-sentence to
+                // the next one.
+                recorder.Clear();
+
                 try
                 {
                     var turn = await narrator.SendAsync(prompt, life.Token);
@@ -659,11 +788,25 @@ namespace TerminalQuest
                         {
                             window.Narration.AddLine($"[{turn.Text}]", TextRole.Danger);
                         }
-                        else if (ClaimsMissing(turn.Text))
+                        else
                         {
-                            window.Narration.AddLine(
-                                "[The narrator wrote prose and recorded no claims. Nothing it said this turn is on the ledger.]",
-                                TextRole.Danger);
+                            if (ClaimsMissing(turn.Text, spokenTurn))
+                            {
+                                Findings.Record(store, spokenTurn, Finding.ClaimsMissing);
+                            }
+
+                            // Only here: past the cancellation, past the failure, past the provider
+                            // reporting the turn itself as an error, and past the leaving check above.
+                            // A reply is written down once it exists in full or it is not written down
+                            // at all, which is what lets a resumed save trust every line it reads back.
+                            //
+                            // The streamed copy is preferred over turn.Text because it is what the
+                            // player actually saw; turn.Text stands in only for a provider that
+                            // answers without streaming, where there is nothing else to have.
+                            RecordSpoken(
+                                TranscriptVoice.Narrator,
+                                spokenTurn,
+                                recorder.TakeAndClear() is { Length: > 0 } spoken ? spoken : turn.Text);
                         }
 
                         // The narrator's writes happened in another process, so this is the only
@@ -708,15 +851,16 @@ namespace TerminalQuest
             /// Whether the turn narrated something and then failed to write down what it said.
             /// </summary>
             /// <remarks>
-            /// Reported as a fault rather than shrugged at, because an unextracted claim is invisible to
-            /// any later consistency check - a ledger cannot record a gap in itself. Reported in every
+            /// Recorded as a fault rather than shrugged at, because an unextracted claim is invisible to
+            /// any later consistency check - a ledger cannot record a gap in itself. Recorded in every
             /// build too, not only a debug one: the alternative is a shipped game quietly losing its
-            /// record, and if the narrator forgets habitually then a red line every turn is the
-            /// diagnostic working. The fix is the prompt, not this check.
+            /// record. The fix is the prompt, not this check.
             /// <para>
-            /// This is also the only place the two facts are ever in hand at once. The journal holds no
-            /// prose and the transcript holds no tool calls, so a batch job over the log could never tell
-            /// a turn that narrated nothing from a turn that narrated and forgot.
+            /// It goes to <c>diagnostics.jsonl</c> and not to the screen. The player is not the audience
+            /// - they can do nothing about it, and a red line in the middle of a scene costs them the
+            /// scene to tell them something that does not concern them. A narrator that forgets
+            /// habitually now shows up as a run of findings in one file, which is a better diagnostic
+            /// than a run of lines nobody can count.
             /// </para>
             /// <para>
             /// Prose is taken from the turn's own text rather than from a count of pumped deltas, because
@@ -724,7 +868,7 @@ namespace TerminalQuest
             /// fact about the streaming path instead of about the turn.
             /// </para>
             /// </remarks>
-            bool ClaimsMissing(string prose)
+            bool ClaimsMissing(string prose, int turn)
             {
                 if (prose.AsSpan().IsWhiteSpace())
                 {
@@ -733,7 +877,7 @@ namespace TerminalQuest
 
                 try
                 {
-                    return !store.Journal.ForTurn(state.Turn).Any(entry =>
+                    return !store.Journal.ForTurn(turn).Any(entry =>
                         !entry.Failed && string.Equals(entry.Tool, "record_claims", StringComparison.Ordinal));
                 }
                 catch (SaveException)

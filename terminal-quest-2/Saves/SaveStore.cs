@@ -29,6 +29,8 @@ namespace TerminalQuest.Saves
         private const string MetadataFileName = "save.json";
         private const string JournalFileName = "journal.jsonl";
         private const string LedgerFileName = "ledger.jsonl";
+        private const string TranscriptFileName = "transcript.jsonl";
+        private const string DiagnosticsFileName = "diagnostics.jsonl";
 
         /// <summary>
         /// Shared with <see cref="AppendLog{TEntry}"/> so that the documents and the logs cannot come
@@ -105,6 +107,38 @@ namespace TerminalQuest.Saves
         /// <summary>Every assertion made to the player, in order, and by whom.</summary>
         public AppendLog<LedgerEntry> Ledger =>
             field ??= new(Path.Combine(Directory, LedgerFileName), LogJsonContext.Readable.LedgerEntry);
+
+        /// <summary>
+        /// The conversation itself, word for word: what the player typed and what the narrator wrote
+        /// back. What a resumed session is shown and what a cold narrator reads to find its voice
+        /// again.
+        /// </summary>
+        /// <remarks>
+        /// A third log rather than more columns on the ledger, because the two answer different
+        /// questions and are read by different things. The ledger holds one sentence per assertion so
+        /// a consistency check has something to join on; this holds whole paragraphs so a scene can be
+        /// drawn again exactly as it was. Folding them together would give the checker prose to wade
+        /// through and the replay a summary to work from, and serve neither.
+        /// </remarks>
+        public AppendLog<TranscriptEntry> Transcript =>
+            field ??= new(Path.Combine(Directory, TranscriptFileName), LogJsonContext.Readable.TranscriptEntry);
+
+        /// <summary>
+        /// What went wrong that the player was not told about: a turn that narrated and forgot to
+        /// record its claims, a log line that would not write.
+        /// </summary>
+        /// <remarks>
+        /// Kept per save rather than in one file for the machine, because a finding is worth little
+        /// on its own and a good deal beside the tool calls, claims and prose of the same turn. It
+        /// travels with the save for the same reason, so a folder handed to somebody else arrives
+        /// with the evidence in it.
+        /// <para>
+        /// Absent from a save where nothing has gone wrong. <see cref="AppendLog{TEntry}"/> creates
+        /// no file until something is written, so the presence of this one is itself the signal.
+        /// </para>
+        /// </remarks>
+        public AppendLog<DiagnosticEntry> Diagnostics =>
+            field ??= new(Path.Combine(Directory, DiagnosticsFileName), LogJsonContext.Readable.DiagnosticEntry);
 
         /// <summary>
         /// Throws unless this save is one this build can play.

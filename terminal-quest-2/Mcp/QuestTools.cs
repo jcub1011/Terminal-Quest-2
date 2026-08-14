@@ -2,6 +2,7 @@
 using System.Text.Json;
 
 using TerminalQuest.Saves;
+using TerminalQuest.Settings;
 
 namespace TerminalQuest.Mcp
 {
@@ -32,6 +33,13 @@ namespace TerminalQuest.Mcp
 
         /// <summary>Ceiling on a word draw. Past this the seed stops narrowing anything.</summary>
         private const int MaxWordCount = 10;
+
+        /// <summary>
+        /// The least of the transcript <c>get_transcript</c> reads, however small a window was asked
+        /// for. A floor rather than the whole budget: the first line of a byte window is dropped as a
+        /// fragment, so a window narrow enough to hold one line would come back empty.
+        /// </summary>
+        private const int TranscriptTailBytes = 8 * 1024;
 
         public static IReadOnlyList<QuestTool> Definitions { get; } =
         [
@@ -308,6 +316,17 @@ namespace TerminalQuest.Mcp
                  "properties":{"limit":{"type":"integer","description":"How many of the most recent events to return. Defaults to 20."}}}
                 """),
 
+            new("get_transcript",
+                "The end of the last session word for word - what the player typed and the prose you "
+              + "wrote back, markup and all. Call this first when a save is resumed: your memory of it "
+              + "is gone, and this is the only record of how the scene was actually written. It also "
+              + "says whether the player is still owed an answer.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "characters":{"type":"integer","description":"Roughly how much prose to return, in characters. Defaults to the player's setting; whole lines are never cut in half."}}}
+                """),
+
             new("record_claims",
                 "Write down what this turn's prose is about to assert, then write the prose. Call it on "
               + "every turn that says anything, as the last thing before you speak. One entry for each "
@@ -427,6 +446,7 @@ namespace TerminalQuest.Mcp
             "remove_money" => RemoveMoney(store, arguments),
             "record_event" => RecordEvent(store, arguments),
             "get_story" => GetStory(store, arguments),
+            "get_transcript" => GetTranscript(store, arguments),
             "record_claims" => RecordClaims(store, arguments),
             "random_noun" => RandomWords(arguments, WordBank.Nouns),
             "random_adjective" => RandomWords(arguments, WordBank.Adjectives),
@@ -1691,6 +1711,39 @@ namespace TerminalQuest.Mcp
             }
 
             return ToolOutcome.Ok(text.ToString().TrimEnd());
+        }
+
+        /// <summary>
+        /// Hands back the end of the conversation as it was actually written.
+        /// </summary>
+        /// <remarks>
+        /// The one tool that answers with something the model itself wrote rather than with world
+        /// state, and the reason it may is that every line of it has already been on the player's
+        /// screen. That keeps it clear of the rule <see cref="JournalEntry"/> states - no tool reply,
+        /// no secret and no hidden total can reach this file, because nothing writes to it but the
+        /// game, and the game only writes what it has drawn.
+        /// <para>
+        /// The default window is the player's setting, read straight off disk. This handler usually
+        /// runs in the state server, a separate process that is handed a save folder and nothing else,
+        /// but <c>SettingsStore.Read</c> takes no arguments, resolves a fixed path under
+        /// <c>AppDirectory</c> and is documented never to throw - so the preference crosses the
+        /// process boundary without any plumbing to keep in step.
+        /// </para>
+        /// <para>
+        /// The byte budget handed to <c>Tail</c> is deliberately larger than the character budget it
+        /// feeds: a line costs its prose plus its JSON, and markup is prose the player never sees. Four
+        /// times over is slack, not arithmetic - reading a few kilobytes too many costs nothing, and
+        /// reading too few would silently shorten the recall.
+        /// </para>
+        /// </remarks>
+        private static ToolOutcome GetTranscript(SaveStore store, JsonElement arguments)
+        {
+            var characters = TranscriptRecall.Clamp(
+                Number(arguments, "characters") ?? SettingsStore.Read().TranscriptRecallCharacters);
+
+            var recent = store.Transcript.Tail(Math.Max(TranscriptTailBytes, characters * 4));
+
+            return ToolOutcome.Ok(QuestRender.Transcript(TranscriptRecall.Tail(recent, characters)));
         }
 
         /// <summary>

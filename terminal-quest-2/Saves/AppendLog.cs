@@ -244,6 +244,98 @@ namespace TerminalQuest.Saves
             return new LogRead<TEntry>(entries, malformed);
         }
 
+        /// <summary>
+        /// The entries lying wholly within the last <paramref name="bytes"/> of the log, oldest first.
+        /// An absent log reads as empty and is not created by asking.
+        /// </summary>
+        /// <remarks>
+        /// For a reader that only ever wants the end. <see cref="Read"/> deserializes the whole
+        /// campaign, which is work proportional to how long the save has been played rather than to
+        /// how much is being asked for - the objection <see cref="TailBytes"/> is already written
+        /// against, generalised here now that something other than the sequence scan needs it.
+        /// <para>
+        /// The window almost certainly opens mid-line, so the first line of it is dropped rather than
+        /// parsed. That is why this is a byte budget and not an entry count: the caller is expected to
+        /// ask for more than it needs and then choose from what comes back, which is what
+        /// <see cref="TranscriptRecall.Tail"/> does. A window covering the whole file keeps its first
+        /// line, since there is nothing before it for it to be a fragment of.
+        /// </para>
+        /// <para>
+        /// Malformed lines are skipped and not counted, unlike <see cref="Read"/>. A caller reading a
+        /// window has no way to tell a genuinely broken line from one this method sliced in half, so a
+        /// count taken here would be a number nobody could act on.
+        /// </para>
+        /// </remarks>
+        /// <exception cref="SaveException">The log exists and could not be read.</exception>
+        public IReadOnlyList<TEntry> Tail(int bytes)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytes);
+
+            if (!File.Exists(Path))
+            {
+                return [];
+            }
+
+            string text;
+            bool whole;
+
+            try
+            {
+                using var stream = Open();
+
+                if (stream.Length == 0)
+                {
+                    return [];
+                }
+
+                var window = (int)Math.Min(bytes, stream.Length);
+                whole = window == stream.Length;
+                text = Range(stream, stream.Length - window, window);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SaveException($"Could not read {Name}: {ex.Message}", ex);
+            }
+
+            var entries = new List<TEntry>();
+            var first = true;
+
+            foreach (var range in text.AsSpan().Split('\n'))
+            {
+                var line = text.AsSpan(range).TrimEnd('\r');
+
+                if (first)
+                {
+                    first = false;
+
+                    if (!whole)
+                    {
+                        continue;
+                    }
+                }
+
+                if (line.IsWhiteSpace())
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (JsonSerializer.Deserialize(line, _typeInfo) is { } entry)
+                    {
+                        entries.Add(entry);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Skipped, for the reason in the remarks: within a window this is as likely to be
+                    // this method's own doing as anybody's.
+                }
+            }
+
+            return entries;
+        }
+
         /// <summary>The entries stamped with one turn, oldest first.</summary>
         /// <remarks>
         /// Scanned backwards from the end and stopped as soon as the turn number drops below the one

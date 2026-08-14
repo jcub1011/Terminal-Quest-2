@@ -117,15 +117,22 @@ namespace TerminalQuest.Tests.Settings
                 LmStudioModel = "some-model",
                 LmStudioApiKey = "secret",
                 EditorCommand = "code -w",
+                TranscriptRecallCharacters = 1234,
             };
 
             var destination = new AppSettings();
             destination.CopyFrom(source);
 
+            var fresh = new AppSettings();
+
             foreach (var property in typeof(AppSettings)
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Where(property => property.CanRead && property.CanWrite))
             {
+                // Every property has to differ from a fresh instance, or the assertion below would
+                // pass on a setting CopyFrom never touched. That is the exact failure this test is
+                // for, and without this it only catches it by luck.
+                Assert.NotEqual(property.GetValue(fresh), property.GetValue(source));
                 Assert.Equal(property.GetValue(source), property.GetValue(destination));
             }
         }
@@ -224,6 +231,7 @@ namespace TerminalQuest.Tests.Settings
                 LmStudioModel = "some-model",
                 LmStudioApiKey = "secret",
                 EditorCommand = "code -w",
+                TranscriptRecallCharacters = 1234,
             };
 
             SettingsStore.Write(written, temp.Path_);
@@ -235,6 +243,20 @@ namespace TerminalQuest.Tests.Settings
             Assert.Equal("some-model", read.LmStudioModel);
             Assert.Equal("secret", read.LmStudioApiKey);
             Assert.Equal("code -w", read.EditorCommand);
+            Assert.Equal(1234, read.TranscriptRecallCharacters);
+        }
+
+        [Fact]
+        public void An_absent_recall_size_reads_as_the_default_rather_than_zero()
+        {
+            // A settings file written by an older build has no such property, and a save resuming
+            // against a zero would recall nothing at all.
+            using var temp = new TempSettings();
+            temp.Write("""{"provider":"claudeCode"}""");
+
+            Assert.Equal(
+                TranscriptRecall.DefaultCharacters,
+                SettingsStore.Read(temp.Path_).TranscriptRecallCharacters);
         }
 
         [Fact]

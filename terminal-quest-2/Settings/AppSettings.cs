@@ -44,6 +44,22 @@ namespace TerminalQuest.Settings
         /// </remarks>
         public string EditorCommand { get; set; } = DefaultEditorCommand;
 
+        /// <summary>
+        /// How much of the last session, in characters of prose, a resumed save recalls word for word.
+        /// </summary>
+        /// <remarks>
+        /// One number for two consumers on purpose: it sizes both the block drawn on screen when the
+        /// save opens and what <c>get_transcript</c> hands the narrator. Splitting them would let the
+        /// player read further back than the narrator can remember, or the reverse, and either way the
+        /// two would be talking about scenes the other had not seen.
+        /// <para>
+        /// A preference rather than a constant because the trade is genuinely the player's: recall
+        /// competes with the world state for the narrator's context, and what it buys - continuity of
+        /// voice - is worth more in some campaigns than others.
+        /// </para>
+        /// </remarks>
+        public int TranscriptRecallCharacters { get; set; } = Saves.TranscriptRecall.DefaultCharacters;
+
         /// <summary>Small and fast, which is what a turn of narration wants.</summary>
         /// <remarks>
         /// The undated alias rather than a pinned snapshot, so the settings screen can offer it as
@@ -97,6 +113,7 @@ namespace TerminalQuest.Settings
             LmStudioModel = other.LmStudioModel;
             LmStudioApiKey = other.LmStudioApiKey;
             EditorCommand = other.EditorCommand;
+            TranscriptRecallCharacters = other.TranscriptRecallCharacters;
         }
     }
 }

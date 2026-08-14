@@ -65,9 +65,46 @@ That last row is the most important thing in this section, because the document'
 | `record_claims` and the revealed ledger | `Mcp/QuestTools.cs`, `Saves/LedgerEntry.cs`, `Saves/ClaimTruth.cs` | Per-assertion. Called *before* the prose, for the reason in §6. Ledger written first, secrets spent second, deliberately |
 | Spent-derivation | `record_claims`, via `Secrets.Spend` | Every live holder, not only the speaker — see §6 |
 | Player claims recorded by the game | `Program.cs`, in `OnCommandEntered` | Free: the game already holds the typed line |
-| The missing-claims report | `Program.cs`, beside the failed-turn report | The only place prose and the journal are both in hand |
+| The missing-claims check | `Program.cs`, beside the failed-turn report | The only place prose and the journal are both in hand. Its *report* has since moved off the screen — see below |
 | Extend-not-replace descriptions | `Saves/Descriptions.cs`, four call sites in `QuestTools` | Fixed two latent bugs in passing: both `update_*` handlers blanked the field when handed an empty value |
 | The contradiction batch test | `TerminalQuest.Tests/Consistency/ContradictionBatchTests.cs` | Plus the tool-surface sweep in `SecretGateTests` — see §9 on why one of these is not the other |
+
+**Built since: verbatim session recall.**
+
+| Mechanism | Where | Note |
+|---|---|---|
+| The transcript, a third append-only log | `Saves/TranscriptEntry.cs`, `Saves/TranscriptVoice.cs`, `SaveStore.Transcript` → `transcript.jsonl` | One line per turn per voice, prose stored with its markup. `Player` is zero so a line that loses its voice fails safe |
+| A bounded tail read | `AppendLog<TEntry>.Tail(bytes)` | Generalised from the window `Highest` already used. Recall costs what is recalled rather than what the campaign has accumulated |
+| The recall window, as a pure function | `Saves/TranscriptRecall.cs` | No store, no files, no clock — `SecretDivergence`'s precedent. Two processes ask it the same question, so neither owns the rule |
+| `get_transcript` | `Mcp/QuestTools.cs`, rendered by `QuestRender.Transcript` | Deliberately *not* in `SecretGate.KnowledgeFetches`: it reveals nothing per-character, and poisoning the fetch history would refuse the next `get_character` on every resumed save |
+| Narrator prose recorded by the game | `Ui/NarrationRecorder.cs`, appended in `RunTurnAsync` | Taken from the delta stream, not `AgentTurnResult.Text` — see below |
+| The recalled scene on screen | `Ui/TranscriptReplay.cs`, drawn before the narrator is woken | Rolls interleaved by turn through `RollWatcher.Line`, so a hidden total stays hidden without this knowing hiding exists |
+| A tunable window | `AppSettings.TranscriptRecallCharacters`, `Ui/SettingsMemoryPage.cs` | Read across the process boundary by `SettingsStore.Read()`, which takes no arguments and never throws |
+
+**Built since: findings go to a log, not to the player.**
+
+| Mechanism | Where | Note |
+|---|---|---|
+| The findings log | `Saves/DiagnosticEntry.cs`, `Saves/Finding.cs`, `SaveStore.Diagnostics` → `diagnostics.jsonl` | A fifth append-only log, turn-stamped like the rest. Absent from a save where nothing has gone wrong, so its presence is itself the signal |
+| `Findings.Record` | `Saves/DiagnosticEntry.cs` | Swallows everything, by the same bargain `QuestJournal.Record` makes — and more strictly, since one caller is reporting that a log could not be written |
+
+Two notices used to be drawn into the transcript in red and are now recorded instead: the missing-claims report, and the journal-unwritable warning. Neither was ever the player's business. They cannot act on either, both describe the game's own record-keeping rather than anything in the fiction, and a red line mid-scene costs them the scene to say so. `Finding.ClaimsMissing` and `Finding.RecordUnwritable` are where they went.
+
+**Why a fifth log rather than a line in the journal.** The journal is one tool call per line, and a finding is not a tool call. That is not a filing preference: `ClaimsMissing` works by asking the journal whether a turn holds a `record_claims` entry, and `ContradictionBatchTests` asserts over what it finds there. A log answering "what did the narrator do" must not also carry entries about what it failed to do, or the two questions stop having separate answers. Per-save rather than one file for the machine, because a finding is worth little alone and a good deal beside the tool calls, claims and prose of the same turn — and it should travel with a save folder handed to somebody else.
+
+**One guard deliberately dropped.** The journal-unwritable notice used to fire once per session, because a red line per tool call would have buried the transcript. A log has no such objection, so every occurrence is now recorded: how many calls were lost is exactly what somebody investigating wants to know. The handler no longer marshals onto the UI thread either, since nothing in it touches a view.
+
+Recording a finding is expected to fail in the very case it describes — a folder that will not take a journal line will not take this one. It is attempted anyway, because the common causes are specific to one file (an editor holding `journal.jsonl` open, a half-finished hand-edit) and in those the note lands.
+
+Three things about it are worth recording rather than leaving to be rediscovered.
+
+**Why this does not reopen the "replies are never stored" rule.** `JournalEntry` states that a tool's output must never be written down, because that would put every secret and every hidden roll total into a file the player can open. The transcript is clear of it by construction: nothing writes to it but the game, and the game only writes what it has already drawn on screen. Every line in it is either something the player typed or something they read. That is the standing `ledger.jsonl` already has — it records what reached the player — and the same argument licenses both.
+
+**Why the prose is captured from the delta stream.** `AgentTurnResult.Text` is, on the Claude path, the CLI's `result` field, which carries the *final* assistant message. A turn that wrote a line, called a tool and then wrote another put both on the player's screen and may report only the second. Recording that would make the save disagree with what was read, which is the one failure a verbatim transcript exists to prevent — so `NarrationRecorder` subscribes to `OnTextDelta` beside `NarrationPump` and records exactly what drew the screen. `turn.Text` remains the fallback for a provider that answers without streaming.
+
+**Why an unfinished reply needs no flag.** A narrator line is appended only once the turn has come back whole — past cancellation, past failure, past a provider reporting the turn itself as an error. A session killed mid-sentence therefore writes nothing, and the log simply ends on the player's line. Whose move it is falls out of that (`TranscriptRecall.AwaitingNarrator`) rather than being recorded a second time and left free to disagree with the log it sits in. It could not have been recorded anyway on the one path that matters, where the process is gone before it could write.
+
+One consequence is accepted rather than solved: the resume turn is stamped one past the player's unanswered line, so an answer to it is dated a turn late. That follows from the `OpenAsync` pre-increment below and is not worth unpicking.
 
 **Not built:** the Director, directives, pacing state, plot state, and ratification. Everything in §7 and §8 remains a proposal.
 
@@ -380,6 +417,12 @@ Because the journal is append-only and the campaign is replayable from it, contr
 
 - **"No fetch returned a dormant secret."** The journal records a call's *inputs*; it does not and must not record its output. Storing replies would put every secret and every hidden roll total into a plain text file the player can open — a worse leak than the one being tested for. So this becomes a sweep over **every advertised tool** in `SecretGateTests`, asserting a sentinel planted in a dormant secret appears in no tool's output. That is strictly stronger than the log version: it holds for every log that could ever be written, and it covers a tool nobody has written yet.
 - **"No turn produced prose without a claims list."** The journal holds no prose, so a turn that read the world and narrated nothing is indistinguishable from a turn that narrated and forgot. The live check in the game is the mechanism, because that is the only place both facts are ever in hand at once. The batch job checks the weaker real property — that a turn which *did* record claims recorded them once.
+
+A note on `transcript.jsonl`, since it holds prose and the first bullet above forbids storing tool output. The two do not collide, and the distinction is not a technicality. The journal is forbidden its *replies* because a reply is what the world told the narrator, and the world tells it things the player does not know — dormant secrets, hidden totals. The transcript holds the other direction: what the narrator told the player, and what the player typed back. Nothing in it was ever unknown to the player, because the game writes it from what it drew on their screen. So the leak the rule guards cannot occur through this file, and the batch assertion above is unaffected — it sweeps tool *output*, and `get_transcript` returns only lines that were already read.
+
+What the transcript does newly make expressible is the check the second bullet gave up on. Prose and the journal are now both on disk and both turn-stamped, so **"no turn produced prose without a claims list"** could become a batch assertion after all rather than only a live one. Not written yet, and noted here so the next reader does not re-derive the objection that no longer applies.
+
+There is now a cheaper route to the same answer, and it is worth naming because it is easy to miss. The live check writes `Finding.ClaimsMissing` to `diagnostics.jsonl`, so a batch job does not have to re-derive the finding from prose and journal at all — it can read what the game already concluded, turn by turn. The two are not equivalent: the derived version audits a save this build never played, and the recorded version only knows about turns this build was present for. Which one is wanted depends on whether the question is about the narrator or about the file.
 
 *Not written at all, and honestly so:*
 

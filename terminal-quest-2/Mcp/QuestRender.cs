@@ -230,6 +230,49 @@ namespace TerminalQuest.Mcp
             return entry.Detail.Length > 0 ? $"{line} - {entry.Detail}" : line;
         }
 
+        /// <summary>
+        /// The recalled conversation, oldest last, and whose move it is.
+        /// </summary>
+        /// <remarks>
+        /// The only renderer here that resolves no placeholders, because there are none to resolve:
+        /// this is prose as it was shown, not a record written with <c>{This}</c> in it. Markup is left
+        /// alone for the same reason - the narrator wrote those tags and reads them back as its own
+        /// hand, which is most of what makes a recalled scene worth having.
+        /// <para>
+        /// The closing line is the point of the whole call as much as the prose is. A resumed session
+        /// that left the narrator mid-sentence has a player line nobody answered, and without being
+        /// told so the narrator opens a fresh scene over the top of it.
+        /// </para>
+        /// </remarks>
+        public static string Transcript(IReadOnlyList<TranscriptEntry> entries)
+        {
+            ArgumentNullException.ThrowIfNull(entries);
+
+            if (entries.Count == 0)
+            {
+                return "Nothing of the last session was recorded. Set the scene from the world itself.";
+            }
+
+            var text = new StringBuilder();
+            text.AppendLine("The end of the last session, oldest first.");
+            text.AppendLine();
+
+            foreach (var entry in entries)
+            {
+                text.AppendLine(
+                    $"{(entry.Voice == TranscriptVoice.Player ? "PLAYER" : "NARRATOR")}: {entry.Text}");
+            }
+
+            text.AppendLine();
+            text.AppendLine(TranscriptRecall.AwaitingNarrator(entries)
+                ? "The player's last line has not been answered. The session ended while you were still "
+                + "speaking and what you had written was discarded, so answer that line rather than "
+                + "opening a new scene over it."
+                : "The player has not replied to that yet.");
+
+            return text.ToString().TrimEnd();
+        }
+
         /// <summary>The lowercase wire spelling of a kind, matching what the JSON holds.</summary>
         public static string Kind(CharacterKind kind) => kind == CharacterKind.Player ? "player" : "npc";
     }

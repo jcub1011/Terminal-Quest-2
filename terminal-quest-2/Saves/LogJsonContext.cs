@@ -35,6 +35,8 @@ namespace TerminalQuest.Saves
         UseStringEnumConverter = true)]
     [JsonSerializable(typeof(JournalEntry))]
     [JsonSerializable(typeof(LedgerEntry))]
+    [JsonSerializable(typeof(TranscriptEntry))]
+    [JsonSerializable(typeof(DiagnosticEntry))]
     internal sealed partial class LogJsonContext : JsonSerializerContext
     {
         /// <summary>
