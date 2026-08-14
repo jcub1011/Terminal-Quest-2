@@ -18,8 +18,16 @@ namespace TerminalQuest.Ui
         private const string IdleTitle = "command";
         private const string BusyTitle = "command - narrator speaking";
 
+        /// <summary>
+        /// How much of the transcript the suggestions may cover. A bare <c>/</c> matches every
+        /// command there is, and burying the last thing the narrator said under the whole list is
+        /// a worse trade than scrolling the few rows that do not fit.
+        /// </summary>
+        private const int MaxSuggestionRows = 8;
+
         private readonly TextField _input;
         private readonly FrameView _inputFrame;
+        private readonly CommandSuggestionView _suggestions;
 
         public GameWindow(GameState state)
         {
@@ -67,9 +75,21 @@ namespace TerminalQuest.Ui
             };
             _inputFrame.Add(_input);
 
-            _input.Accepting += OnInputAccepting;
+            // Sized and placed only when there is something to show, since both depend on how many
+            // commands the half-typed word still matches.
+            _suggestions = new CommandSuggestionView
+            {
+                X = 0,
+                Width = Dim.Fill() - StatusWidth,
+                Visible = false,
+            };
 
-            Add(Narration, Status, _inputFrame);
+            _input.Accepting += OnInputAccepting;
+            _input.ValueChanged += (_, _) => RefreshSuggestions();
+
+            // The suggestions are added last so they draw over the foot of the transcript, the
+            // same layering the settings screen uses to drop its editor onto a drawn row.
+            Add(Narration, Status, _inputFrame, _suggestions);
         }
 
         public NarrationView Narration { get; }
@@ -127,8 +147,54 @@ namespace TerminalQuest.Ui
 
         public void FocusInput() => _input.SetFocus();
 
+        /// <summary>
+        /// Keys the input field had no use for.
+        /// <para>
+        /// Terminal.Gui offers a key to the focused subview first, and focus lives in the input
+        /// field, so everything printable - and Enter - is gone before this runs. What reaches
+        /// here is what a single-line text field ignores, which is exactly the set the suggestions
+        /// need: the arrows to move through them and Esc to put them away.
+        /// </para>
+        /// </summary>
         protected override bool OnKeyDown(Key key)
         {
+            if (_suggestions.Visible)
+            {
+                // Esc closes the list and stops, so one press cannot dismiss the suggestions and
+                // walk out of the save underneath them at the same time. Only while it is a list,
+                // though: once the command is settled the strip is a reminder that blocks nothing,
+                // and taking a press off leaving would cost more than the reminder is worth - it
+                // is on screen for most of the time any command is being typed.
+                if (key == Key.Esc && _suggestions.IsChoosing)
+                {
+                    HideSuggestions();
+                    return true;
+                }
+
+                // Only while there is a choice to move through. A settled command is one row that
+                // nothing selects, and swallowing the arrows there would take them from the
+                // transcript for the whole time an argument is being typed.
+                if (_suggestions.IsChoosing && (key == Key.CursorUp || key == Key.CursorDown))
+                {
+                    _suggestions.MoveSelection(key == Key.CursorUp ? -1 : 1);
+                    return true;
+                }
+
+                // Tab is claimed before it can move the focus. Nothing else here is focusable, so
+                // the only thing it could otherwise do is nothing at all.
+                //
+                // Right only ever arrives here with the caret at the end of the line - a text
+                // field handles the key itself anywhere else, and stops handling it once there is
+                // nothing to its right. So this takes the suggestion exactly when there is no text
+                // left to walk through, and leaves Right as the caret key the rest of the time,
+                // without having to ask where the caret is.
+                if ((key == Key.Tab || key == Key.CursorRight) && _suggestions.Selected is { } completion)
+                {
+                    Complete(completion);
+                    return true;
+                }
+            }
+
             // Both mean the same thing here: leave this save. Quitting the program is the save
             // menu's to offer, one screen further out.
             if (key == Key.Esc || key == Key.Q.WithCtrl)
@@ -158,14 +224,32 @@ namespace TerminalQuest.Ui
                 return;
             }
 
+            // Enter is the field's before it is the window's, so the suggestions have to take
+            // their turn at it here. A half-typed name is completed rather than run - /ch is not
+            // a command, and running it would only produce an error the player can see coming.
+            //
+            // A line that already names a command is run instead. The test is whether the typed
+            // word is a command at all, not whether it is the highlighted one: /inv is a command
+            // in its own right and is also a prefix of /inventory, so asking only about the
+            // highlight would answer no and turn a finished command into a completion.
+            if (_suggestions.Visible
+                && _suggestions.Selected is { } completion
+                && PlayerCommands.Describing(text) is null)
+            {
+                Complete(completion);
+                return;
+            }
+
             // Asked before anything is cleared or echoed, so a refused line is left exactly as
-            // the player typed it and Enter can simply be pressed again once it will be taken.
+            // the player typed it and Enter can simply be pressed again once it will be taken -
+            // suggestions and all.
             if (CanSubmit is { } canSubmit && !canSubmit(text))
             {
                 return;
             }
 
             _input.Text = string.Empty;
+            HideSuggestions();
 
             Narration.AddBlankLine();
             Narration.AddLine(StyledLine.FromText($"> {text}", TextRole.Command));
@@ -173,6 +257,84 @@ namespace TerminalQuest.Ui
             Narration.ScrollToBottom();
 
             CommandEntered?.Invoke(text);
+        }
+
+        /// <summary>
+        /// Puts the list in step with what has been typed, after every keystroke.
+        /// <para>
+        /// Nothing here looks at whether a turn is in flight. The input field stays live while the
+        /// narrator speaks so the player's own commands still work, and a list of the commands
+        /// that still work is exactly what the suggestions are.
+        /// </para>
+        /// </summary>
+        private void RefreshSuggestions()
+        {
+            var text = _input.Text ?? string.Empty;
+
+            // Two questions in order: which command might this be, and failing that, which command
+            // is it already. The second is what keeps the strip up once the name is settled - it
+            // goes away when the line is submitted or the slash is deleted, not when the player
+            // reaches the argument.
+            var matches = PlayerCommands.Matching(text);
+            var choosing = matches.Count > 0;
+
+            if (!choosing)
+            {
+                matches = PlayerCommands.Describing(text) is { } named ? [named] : [];
+            }
+
+            if (matches.Count == 0)
+            {
+                HideSuggestions();
+                return;
+            }
+
+            var height = Math.Min(matches.Count, MaxSuggestionRows);
+
+            // Set before the rows, which is where the cursor is put back to the top.
+            _suggestions.IsChoosing = choosing;
+            _suggestions.Suggestions = matches;
+            _suggestions.Height = height;
+
+            // Measured up from the input frame rather than down from the top, so the list always
+            // sits against the box it is about to fill and grows away from it.
+            _suggestions.Y = Pos.Bottom(Narration) - height;
+            _suggestions.Visible = true;
+            _suggestions.SetNeedsDraw();
+        }
+
+        /// <summary>Puts the list away, and gives back the rows of transcript it was covering.</summary>
+        private void HideSuggestions()
+        {
+            if (!_suggestions.Visible)
+            {
+                return;
+            }
+
+            _suggestions.Visible = false;
+            _suggestions.Suggestions = [];
+
+            // The transcript underneath has not changed, so nothing else would think to redraw it,
+            // and the rows the list was sitting on would keep its text.
+            Narration.SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// Takes a suggestion: the typed word is replaced outright by the command it stood for,
+        /// with a trailing space so the caret is where an argument would go.
+        /// <para>
+        /// The list does not close, it settles: the space ends the choosing, and what is left is
+        /// the one command, still saying what it takes while the argument is typed.
+        /// </para>
+        /// </summary>
+        private void Complete(PlayerCommandInfo command)
+        {
+            _input.Text = $"/{command.Name} ";
+            _input.InsertionPoint = _input.Text.Length;
+
+            // Belt and braces: assigning the text raises the change that refreshes the strip, but
+            // this must not depend on that having happened.
+            RefreshSuggestions();
         }
     }
 }

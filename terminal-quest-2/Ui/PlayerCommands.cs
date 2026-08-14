@@ -17,8 +17,90 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal static class PlayerCommands
     {
+        /// <summary>
+        /// Every command the game answers, in the order <c>/help</c> lists them, each alias
+        /// directly under the command it stands for.
+        /// <para>
+        /// This table and the switch in <see cref="Execute"/> are a pair and have to be changed
+        /// together: the table is what the player is shown and offered, the switch is what
+        /// actually runs. A name in one and not the other is either a command nobody can find or
+        /// a suggestion that errors when taken.
+        /// </para>
+        /// </summary>
+        public static readonly IReadOnlyList<PlayerCommandInfo> All =
+        [
+            new("story", "", "everything that has happened"),
+            new("inventory", "", "what you are carrying"),
+            new("inv", "", "what you are carrying", IsAlias: true),
+            new("characters", "[name]", "who you have met, and what they remember"),
+            new("who", "[name]", "who you have met, and what they remember", IsAlias: true),
+            new("locations", "[name]", "where you have been, and what happened there"),
+            new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
+            new("saves", "", "every save on this machine"),
+            new("delete", "<name>", "destroy another save, for good"),
+            new("help", "", "this list"),
+            new("quit", "", "leave this save and go back to the menu"),
+            new("exit", "", "leave this save and go back to the menu", IsAlias: true),
+        ];
+
         /// <summary>Whether the input is addressed to the game rather than to the narrator.</summary>
         public static bool IsCommand(string input) => input.StartsWith('/');
+
+        /// <summary>
+        /// Every command the input could still turn out to be, for the suggestions above the box.
+        /// <para>
+        /// Only a bare command word is completed. Once a space has been typed the player has moved
+        /// on to the argument, and a list of commands is no longer an answer to anything - so this
+        /// returns nothing rather than going on offering names that can no longer be reached.
+        /// </para>
+        /// </summary>
+        public static IReadOnlyList<PlayerCommandInfo> Matching(string input)
+        {
+            if (!IsCommand(input) || input.Contains(' '))
+            {
+                return [];
+            }
+
+            var typed = input[1..];
+
+            // Case-insensitive to match Execute, which lower-cases the name before dispatching:
+            // /INV runs, so /IN has to be offered /inventory.
+            return All
+                .Where(command => command.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        /// <summary>
+        /// The command an input is already addressed to by name, or null when it names none.
+        /// <para>
+        /// Where <see cref="Matching"/> answers "which of these might you mean", this answers
+        /// "here is what the one you have named takes" - so the hint above the box outlives the
+        /// space that settles the name, and <c>/delete</c> is still saying it wants one while the
+        /// player is typing it.
+        /// </para>
+        /// </summary>
+        public static PlayerCommandInfo? Describing(string input)
+        {
+            if (!IsCommand(input))
+            {
+                return null;
+            }
+
+            // Split exactly as Execute does, so the command this claims to describe is the command
+            // that would actually run.
+            var parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var name = parts.Length > 0 ? parts[0].TrimStart('/') : string.Empty;
+
+            foreach (var command in All)
+            {
+                if (command.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return command;
+                }
+            }
+
+            return null;
+        }
 
         /// <summary>Runs a command. Only call this when <see cref="IsCommand"/> is true.</summary>
         public static PlayerCommandResult Execute(string input, SaveStore store)
@@ -75,16 +157,23 @@ namespace TerminalQuest.Ui
             return new PlayerCommandResult { Lines = lines };
         }
 
+        /// <summary>
+        /// The list of commands, read out of <see cref="All"/> rather than written out again here,
+        /// so a command added to the table cannot go unmentioned. Aliases are left out: they are
+        /// spellings of rows already on the list, not further things the game does.
+        /// </summary>
         private static void Help(List<StyledLine> lines)
         {
             lines.Add(StyledLine.FromText("Commands", TextRole.System));
-            Describe(lines, "/story", "everything that has happened");
-            Describe(lines, "/inventory", "what you are carrying");
-            Describe(lines, "/characters [name]", "who you have met, and what they remember");
-            Describe(lines, "/locations [name]", "where you have been, and what happened there");
-            Describe(lines, "/saves", "every save on this machine");
-            Describe(lines, "/delete <name>", "destroy another save, for good");
-            Describe(lines, "/quit", "leave this save and go back to the menu");
+
+            foreach (var command in All)
+            {
+                if (!command.IsAlias)
+                {
+                    Describe(lines, command.Usage, command.Summary);
+                }
+            }
+
             lines.Add(StyledLine.FromText("Anything else is spoken to the world.", TextRole.System));
         }
 
