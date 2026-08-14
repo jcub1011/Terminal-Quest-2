@@ -39,6 +39,7 @@ namespace TerminalQuest.Ui
             new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
             new("saves", "", "every save on this machine"),
             new("delete", "<name>", "destroy another save, for good"),
+            new("system-prompt", "", "rewrite the narrator's instructions (ends the session)"),
             new("help", "", "this list"),
             new("quit", "", "leave this save and go back to the menu"),
             new("exit", "", "leave this save and go back to the menu", IsAlias: true),
@@ -143,6 +144,8 @@ namespace TerminalQuest.Ui
                     case "delete":
                         Delete(lines, store, argument);
                         break;
+                    case "system-prompt":
+                        return SystemPrompt(lines);
                     case "quit":
                     case "exit":
                         return new PlayerCommandResult { Lines = lines, Quit = true };
@@ -524,6 +527,34 @@ namespace TerminalQuest.Ui
             }
 
             lines.Add(StyledLine.FromText($"Deleted '{argument}'.", TextRole.System));
+        }
+
+        /// <summary>
+        /// Asks the host to open this save's narrator brief in an editor, having said what that costs.
+        /// </summary>
+        /// <remarks>
+        /// The warning is written here, and printed before the host acts on the flag, so the player
+        /// reads it while there is still a keystroke between them and an editor. Nothing is optional
+        /// about it: the narrator was given the old prompt when its process started and cannot be
+        /// handed another, so a session that went on running would be a session ignoring the file the
+        /// player had just written. Ending it is the only version of this that is not a lie.
+        /// <para>
+        /// The file is neither read nor written here. This command has no editor and no window, and
+        /// printing a few thousand words of prompt into the transcript would answer a question nobody
+        /// asked - the file itself is where it can be read.
+        /// </para>
+        /// </remarks>
+        private static PlayerCommandResult SystemPrompt(List<StyledLine> lines)
+        {
+            lines.Add(StyledLine.FromText(
+                "Editing the narrator's instructions ends this session: the narrator is built once, when the save opens.",
+                TextRole.System));
+
+            lines.Add(StyledLine.FromText(
+                "Save and close the editor to leave for the menu, and open the save again to play with what you wrote.",
+                TextRole.System));
+
+            return new PlayerCommandResult { Lines = lines, EditSystemPrompt = true };
         }
 
         private static void Describe(List<StyledLine> lines, string command, string meaning)

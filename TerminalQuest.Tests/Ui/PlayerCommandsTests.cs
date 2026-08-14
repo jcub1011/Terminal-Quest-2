@@ -337,5 +337,70 @@ namespace TerminalQuest.Tests.Ui
 
             Assert.NotEmpty(text);
         }
+
+        // ---- The narrator's brief -----------------------------------------------------------------------
+
+        [Theory]
+        [InlineData("/system-prompt")]
+        [InlineData("/SYSTEM-PROMPT")]
+        public void Rewriting_the_brief_asks_the_host_to_open_an_editor(string input)
+        {
+            using var save = Seeded();
+
+            var result = PlayerCommands.Execute(input, save.Store);
+
+            Assert.True(result.EditSystemPrompt);
+
+            // Not Quit: the host ends the session itself, and only once the file has really changed.
+            // Setting both would leave for the menu whether the player wrote anything or not.
+            Assert.False(result.Quit);
+        }
+
+        [Fact]
+        public void No_other_command_asks_to_edit_the_brief()
+        {
+            using var save = Seeded();
+
+            foreach (var command in PlayerCommands.All.Where(c => c.Name != "system-prompt"))
+            {
+                Assert.False(PlayerCommands.Execute($"/{command.Name}", save.Store).EditSystemPrompt);
+            }
+        }
+
+        [Fact]
+        public void The_warning_that_the_session_ends_comes_before_the_editor_does()
+        {
+            // The lines are printed by the host before it acts on the flag, so what this asserts is
+            // that the warning exists at all: an editor opening unannounced, on a command that takes
+            // the session away, would be the one surprise this feature must not have.
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/system-prompt", save.Store));
+
+            Assert.Contains("ends this session", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_brief_itself_is_not_printed_into_the_transcript()
+        {
+            // The file is where it can be read. Emptying thousands of words of prompt into the scene
+            // the player is in the middle of would answer a question nobody asked.
+            const string Written = "ZZQX-the-whole-prompt-must-not-be-echoed-ZZQX";
+
+            using var save = Seeded();
+            save.Store.WriteSystemPrompt(Written);
+
+            var text = TextOf(PlayerCommands.Execute("/system-prompt", save.Store));
+
+            Assert.DoesNotContain(Written, text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_half_typed_name_still_finds_it()
+        {
+            Assert.Contains(
+                "system-prompt",
+                PlayerCommands.Matching("/sys").Select(command => command.Name));
+        }
     }
 }

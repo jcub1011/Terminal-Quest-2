@@ -19,6 +19,14 @@ namespace TerminalQuest.Ui
     /// when they close it.
     /// </para>
     /// <para>
+    /// There are two ways in. <see cref="TryBegin"/> edits a field, by way of a scratch copy that is
+    /// read back and thrown away. <see cref="TryBeginFile"/> edits a file that already means
+    /// something - the save's system prompt - in place, with nothing to read back into and nothing to
+    /// delete afterwards. They share everything between the keystroke and the editor closing, which
+    /// is most of what is here: finding the program, giving it a console of its own, waiting for it
+    /// off the UI thread, and putting the terminal back together.
+    /// </para>
+    /// <para>
     /// One instance for the whole application, built in <c>Program</c> and handed to each window. The
     /// windows keep their own editor protocols; all this owns is the file, the child process, and the
     /// text that came back.
@@ -106,24 +114,13 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
-            var command = _command().Trim();
-
-            if (command.Length == 0)
+            if (!TryResolveEditor(notice, out var launch))
             {
-                notice($"No editor is set - see Settings, Editor. The default is {AppSettings.DefaultEditorCommand}.");
-                return true;
-            }
-
-            if (!EditorCommandLine.TryParse(command, out var launch, out var reason))
-            {
-                notice(reason);
                 return true;
             }
 
             var text = Resolve(field);
             var path = Path.Combine(ScratchDirectory, $"tq-edit-{Guid.NewGuid():N}.txt");
-
-            Process process;
 
             try
             {
@@ -137,15 +134,18 @@ namespace TerminalQuest.Ui
                 // CRLF because Notepad is the default and older builds of it draw a lone \n as no
                 // break at all - the whole text on one line, which is the opposite of the point.
                 File.WriteAllText(path, text.ReplaceLineEndings("\r\n"), Utf8NoBom);
-
-                process = Process.Start(launch.ToStartInfo(path))
-                    ?? throw new InvalidOperationException("no process was started");
             }
-            catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException
-                                          or InvalidOperationException or NotSupportedException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                          or NotSupportedException or ArgumentException)
             {
                 TryDelete(path);
                 notice($"Could not start {launch.Display}: {ex.Message}");
+                return true;
+            }
+
+            if (!Start(launch, path, text, notice, field, saved: null, scratch: true))
+            {
+                TryDelete(path);
                 return true;
             }
 
@@ -153,31 +153,61 @@ namespace TerminalQuest.Ui
             // one copy while editing another.
             field.ReadOnly = true;
 
-            var pending = new Pending(field, notice, path, text, launch.Display);
-            _pending = pending;
+            return true;
+        }
 
-            notice($"Editing in {launch.Display}... close it to continue.");
+        /// <summary>
+        /// Opens the editor on a file that is already somebody's, and leaves it there.
+        /// </summary>
+        /// <param name="path">
+        /// The file itself, not a copy of it. Whatever the editor saves is what the file now says -
+        /// nothing here writes it, reads it back into a control, or deletes it afterwards.
+        /// </param>
+        /// <param name="notice">
+        /// As <see cref="TryBegin"/>'s: shown while the editor is open, called with null once it has
+        /// closed and there is nothing to report.
+        /// </param>
+        /// <param name="saved">
+        /// Called once the editor has closed and the file's text has actually changed, after
+        /// <paramref name="notice"/> and after this has let go of the edit. Not called when the editor
+        /// saved nothing, so a caller can act on a real change - ending the session, in the one case
+        /// this exists for - without acting on a look.
+        /// </param>
+        /// <returns>Whether the key was dealt with. Always true, on the same reasoning as the other.</returns>
+        public bool TryBeginFile(string path, Action<string?> notice, Action? saved = null)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(path);
+            ArgumentNullException.ThrowIfNull(notice);
 
-            // Waited for off the UI thread. Doing it here would hold the loop that has to paint the
-            // notice, and the game would look hung rather than busy.
-            _ = Task.Run(async () =>
+            if (IsBusy)
             {
-                try
-                {
-                    await process.WaitForExitAsync().ConfigureAwait(false);
-                }
-                catch (SystemException)
-                {
-                    // Nothing to learn from a process we can no longer ask about, and the notice has
-                    // to come down either way. What is in the file is the only thing that matters.
-                }
-                finally
-                {
-                    _app.Invoke(() => Finish(pending));
-                    process.Dispose();
-                }
-            });
+                return true;
+            }
 
+            if (!TryResolveEditor(notice, out var launch))
+            {
+                return true;
+            }
+
+            string original;
+
+            try
+            {
+                // Read before the editor runs, so a change can be told from a look afterwards. Read
+                // with the same BOM detection the way back uses, or a file that already had one would
+                // read differently before and after and every edit would look like a change.
+                original = File.Exists(path) ? File.ReadAllText(path, Utf8NoBom) : string.Empty;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                          or NotSupportedException or ArgumentException)
+            {
+                notice($"Could not read {Path.GetFileName(path)}: {ex.Message}");
+                return true;
+            }
+
+            // No scratch file to write and none to clean up: the file the editor is given is the file
+            // that matters, so the delete every other path ends with must not happen here.
+            Start(launch, path, original, notice, field: null, saved, scratch: false);
             return true;
         }
 
@@ -235,6 +265,88 @@ namespace TerminalQuest.Ui
             _pending = null;
         }
 
+        /// <summary>
+        /// Which program to run, or false having already said why not.
+        /// </summary>
+        private bool TryResolveEditor(Action<string?> notice, out EditorCommandLine launch)
+        {
+            launch = default;
+
+            var command = _command().Trim();
+
+            if (command.Length == 0)
+            {
+                notice($"No editor is set - see Settings, Editor. The default is {AppSettings.DefaultEditorCommand}.");
+                return false;
+            }
+
+            if (!EditorCommandLine.TryParse(command, out launch, out var reason))
+            {
+                notice(reason);
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Starts the editor on a file and arranges for <see cref="Finish"/> to run when it closes.
+        /// </summary>
+        /// <returns>
+        /// False having already reported a program that would not start, in which case nothing is
+        /// pending and the caller still owns whatever it wrote out.
+        /// </returns>
+        private bool Start(
+            EditorCommandLine launch,
+            string path,
+            string original,
+            Action<string?> notice,
+            TextField? field,
+            Action? saved,
+            bool scratch)
+        {
+            Process process;
+
+            try
+            {
+                process = Process.Start(launch.ToStartInfo(path))
+                    ?? throw new InvalidOperationException("no process was started");
+            }
+            catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException
+                                          or InvalidOperationException or NotSupportedException)
+            {
+                notice($"Could not start {launch.Display}: {ex.Message}");
+                return false;
+            }
+
+            var pending = new Pending(field, notice, path, original, launch.Display, saved, scratch);
+            _pending = pending;
+
+            notice($"Editing in {launch.Display}... close it to continue.");
+
+            // Waited for off the UI thread. Doing it here would hold the loop that has to paint the
+            // notice, and the game would look hung rather than busy.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await process.WaitForExitAsync().ConfigureAwait(false);
+                }
+                catch (SystemException)
+                {
+                    // Nothing to learn from a process we can no longer ask about, and the notice has
+                    // to come down either way. What is in the file is the only thing that matters.
+                }
+                finally
+                {
+                    _app.Invoke(() => Finish(pending));
+                    process.Dispose();
+                }
+            });
+
+            return true;
+        }
+
         /// <summary>Takes what the editor left, on the UI thread.</summary>
         private void Finish(Pending pending)
         {
@@ -242,12 +354,21 @@ namespace TerminalQuest.Ui
 
             if (pending.Abandoned)
             {
-                TryDelete(pending.Path);
+                TryDeleteScratch(pending);
                 return;
             }
 
             _pending = null;
-            pending.Field.ReadOnly = false;
+
+            if (pending.Field is { } editedField)
+            {
+                editedField.ReadOnly = false;
+            }
+
+            // Set only on the way out of a real change, and acted on in the finally: the callback may
+            // close the window this was started from, so it must run after everything here is done
+            // with the field and with _pending.
+            var changed = false;
 
             try
             {
@@ -276,22 +397,32 @@ namespace TerminalQuest.Ui
                     return;
                 }
 
+                changed = true;
+
+                // Nothing to bring back for a file that was edited where it lives. It says what it
+                // says, and the caller is about to be told that it changed.
+                if (pending.Field is not { } field)
+                {
+                    pending.Notice(null);
+                    return;
+                }
+
                 // Trailing newlines are the editor's, not the player's - Notepad adds one on its own.
                 var raw = edited.TrimEnd('\r', '\n');
                 var flattened = EditorText.Flatten(raw).Trim();
 
-                pending.Field.Text = flattened;
-                pending.Field.InsertionPoint = flattened.Length;
+                field.Text = flattened;
+                field.InsertionPoint = flattened.Length;
 
                 // Only worth remembering when the two differ. Anything else would have Resolve
                 // reporting a value the field is already showing.
                 if (string.Equals(raw, flattened, StringComparison.Ordinal))
                 {
-                    _shadows.Remove(pending.Field);
+                    _shadows.Remove(field);
                 }
                 else
                 {
-                    _shadows[pending.Field] = new Shadow(raw, flattened);
+                    _shadows[field] = new Shadow(raw, flattened);
                 }
 
                 pending.Notice(null);
@@ -303,11 +434,16 @@ namespace TerminalQuest.Ui
             }
             finally
             {
-                TryDelete(pending.Path);
+                TryDeleteScratch(pending);
 
-                if (pending.Field.CanFocus)
+                if (pending.Field is { CanFocus: true } focusable)
                 {
-                    pending.Field.SetFocus();
+                    focusable.SetFocus();
+                }
+
+                if (changed && pending.Saved is { } saved)
+                {
+                    saved();
                 }
             }
         }
@@ -352,6 +488,22 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// Throws away the file an edit was given, but only when the game is the one that made it.
+        /// </summary>
+        /// <remarks>
+        /// The guard is the whole method. A field's text is edited through a copy that exists for no
+        /// other reason and must not be left behind; a file edited in place is the save's, and deleting
+        /// it would destroy the thing the player just wrote.
+        /// </remarks>
+        private static void TryDeleteScratch(Pending pending)
+        {
+            if (pending.IsScratch)
+            {
+                TryDelete(pending.Path);
+            }
+        }
+
+        /// <summary>
         /// Deletes the scratch file, and does not care if it cannot.
         /// </summary>
         /// <remarks>
@@ -378,21 +530,26 @@ namespace TerminalQuest.Ui
         private sealed class Pending
         {
             public Pending(
-                TextField field,
+                TextField? field,
                 Action<string?> notice,
                 string path,
                 string original,
-                string display)
+                string display,
+                Action? saved,
+                bool scratch)
             {
                 Field = field;
                 Notice = notice;
                 Path = path;
                 Original = original;
                 Display = display;
+                Saved = saved;
+                IsScratch = scratch;
                 Started = Stopwatch.StartNew();
             }
 
-            public TextField Field { get; }
+            /// <summary>Where the text came from and goes back to, or null for a file edited in place.</summary>
+            public TextField? Field { get; }
 
             public Action<string?> Notice { get; }
 
@@ -403,6 +560,14 @@ namespace TerminalQuest.Ui
 
             /// <summary>The editor's name, as the player would recognise it in a message.</summary>
             public string Display { get; }
+
+            /// <summary>Told once the file has really changed, if anybody asked to be.</summary>
+            public Action? Saved { get; }
+
+            /// <summary>
+            /// Whether the file is the game's own copy, and so whether it may be deleted afterwards.
+            /// </summary>
+            public bool IsScratch { get; }
 
             public Stopwatch Started { get; }
 

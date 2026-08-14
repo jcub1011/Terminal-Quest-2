@@ -28,7 +28,9 @@ The AI Dungeon Master is split into two logical roles, run as **separate instanc
 
 Both instances are the same model. The split is achieved entirely through **different system prompts and different slices of game state**, not different models or fine-tunes.
 
-That split is unusually cheap to reach from where the code already stands, and the reason is worth stating early because it shapes everything downstream: the two instances do not need an inter-process channel invented for them. The world already lives in a folder of JSON documents that two processes read and write concurrently — the game and the narrator's tool server (`Saves/SaveStore.cs:9-15`) — so §6's requirement that the state store be the only coordination channel is not a constraint to impose. It is a description of what is already true.
+The Narrator's prompt is no longer a constant in the program. It is `system-prompt.txt` inside the save folder, seeded from `SystemPromptFile.Default` and thereafter the player's to rewrite — so "different system prompts" is now two things at once: the role split this document is about, and a per-save setting the player controls. Both roles will want their own file when Phase 2 arrives; see §2.
+
+That split is unusually cheap to reach from where the code already stands, and the reason is worth stating early because it shapes everything downstream: the two instances do not need an inter-process channel invented for them. The world already lives in a folder of documents that two processes read and write concurrently — the game and the narrator's tool server (`Saves/SaveStore.cs:9-15`) — so §6's requirement that the state store be the only coordination channel is not a constraint to impose. It is a description of what is already true.
 
 ## 2. Where the code already stands
 
@@ -40,7 +42,7 @@ Revisions 1–4 proposed a number of things that exist. This section is here so 
 |---|---|---|
 | Deterministic rules resolver, embedded beside the state store | `Saves/Dice.cs:81` (`TryRoll`), wired at `Mcp/QuestTools.cs:803` | §3's decision, shipped. Pure; `Random` arrives as a parameter, so a seeded replay is a call-site change |
 | Mechanical outcomes withheld from the model | `Mcp/QuestTools.cs:793-802`, `:1039` | The `roll` handler is described in the source as "the one handler that refuses things the fiction would allow", and refuses a flat bonus alongside a named attribute so the model cannot supply its own modifier |
-| Structured state store as the only coordination channel | `Saves/SaveStore.cs:22` | Six documents per save folder; nothing cached, because "the file on disk is the only authority, and this process may not be the one that last changed it" |
+| Structured state store as the only coordination channel | `Saves/SaveStore.cs:22` | Six JSON documents per save folder, four append-only logs beside them, and one plain-text file the player owns; nothing cached, because "the file on disk is the only authority, and this process may not be the one that last changed it" |
 | Per-character knowledge | `Saves/Memory.cs`, retrieved by `get_memories(character, about)` | Turn-stamped, subject-indexed by id so retrieval survives a rename. The substrate secrets need |
 | Append-only history | `Location.Events`, `StoryFile.Events`, `RollFile.Rolls`, `Character.Memories` | All turn-stamped, all oldest-first, none rewritten |
 | A turn clock, already on disk before the turn runs | `SaveMetadata.Turn`, stamped at `Program.cs:435` | Stamped early precisely so the out-of-process tool server can date what it writes |
@@ -105,6 +107,21 @@ Three things about it are worth recording rather than leaving to be rediscovered
 **Why an unfinished reply needs no flag.** A narrator line is appended only once the turn has come back whole — past cancellation, past failure, past a provider reporting the turn itself as an error. A session killed mid-sentence therefore writes nothing, and the log simply ends on the player's line. Whose move it is falls out of that (`TranscriptRecall.AwaitingNarrator`) rather than being recorded a second time and left free to disagree with the log it sits in. It could not have been recorded anyway on the one path that matters, where the process is gone before it could write.
 
 One consequence is accepted rather than solved: the resume turn is stamped one past the player's unanswered line, so an answer to it is dated a turn late. That follows from the `OpenAsync` pre-increment below and is not worth unpicking.
+
+**Built since: the narrator's brief belongs to the save.**
+
+| Mechanism | Where | Note |
+|---|---|---|
+| The prompt as a save document | `Saves/SystemPromptFile.cs`, `SaveStore.SystemPromptPath` → `system-prompt.txt` | The first non-JSON file in a save folder and the first one the *player* writes. `SystemPromptFile.Default` holds what used to be `Program.SystemPrompt` |
+| Text read and write on the store | `SaveStore.ReadText` / `WriteText` | The same shared-read retry and temp-file-then-rename as every JSON document, and deliberately *not* the empty-is-absent rule — there is no shape to fall back to, so emptiness is a value |
+| Seeded on open, never re-seeded | `SystemPromptFile.Ensure`, called in `RunSessionAsync` beside `RequireSupportedSchema` | A save made before the file existed grows one on its next play, so no migration and no schema bump. A file that is already there is left exactly as it is |
+| Edited in place, not through a field | `ExternalEditor.TryBeginFile` | Ctrl+G's route writes a scratch copy and flattens what comes back into one line; thousands of words of prompt cannot survive that. The delete every scratch edit ends with is gated on the file being the game's own |
+| Before the first turn | `Ctrl+P` on `Ui/NewCharacterWindow.cs` | Beside the character, which is the other thing settled before the narrator exists |
+| During a session | `/system-prompt` → `PlayerCommandResult.EditSystemPrompt` → `Program.EditSystemPrompt` | Warns first, then ends the session on a real change — see §8 |
+
+**Why the session ends rather than warning.** The prompt reaches the provider once and cannot be replaced in place: on the Claude path it is a command line argument to a process held open for the whole session (`Agents/Claude/ClaudeSession.cs:300`), and on the LM Studio path it is the first message of a history resent every turn (`LmStudioSession.cs:96`). A session that carried on after the edit would be one quietly ignoring the file the player had just written, so `/system-prompt` returns to the menu once the editor closes having actually changed something — and says so before it opens. Closing the editor unchanged leaves the session running, which is why the editor reports a change at all rather than merely closing.
+
+**What the player can now break, and deliberately so.** The prompt's opening paragraph is paired with `Ui/MarkupParser.cs:169-180`: a save whose prompt drops the markup rules gets square brackets in its prose, or none at all. Nothing validates the file, because a game that refused prompts it did not recognise would be a game with one prompt. The guarantees this document is about are unaffected — every one of them is enforced in a mechanism rather than in the prompt (see the three examples above), so a rewritten brief can change what the narrator *says* and not what it is allowed to *do*. A hidden roll's total is still not in the line, `[roll]` is still not a tag it has, and the tool allowlist is still derived from the definitions. The one thing worth warning about is length: the Claude path passes the prompt as a single argv entry, so past `SystemPromptFile.WarnAboveCharacters` the session opens on a note saying which file to shorten and why.
 
 **Not built:** the Director, directives, pacing state, plot state, and ratification. Everything in §7 and §8 remains a proposal.
 
@@ -213,6 +230,9 @@ Both instances read from and write to a **single, structured source of truth** �
 | Pacing state | Claims queue only | Yes |
 | Revealed ledger | Yes (append-only) | No (read-only) |
 | Journal | Written by the tool layer, not by either instance | — |
+| The narrator's brief (`system-prompt.txt`) | No | No |
+
+That last row is the only one in the table whose answer is *neither*, and it is worth spelling out because the file sits in the same folder as the world. It is not world-state: nothing reads it to find out what is true, no tool returns it, and the narrator cannot see that it exists. It is the instruction the session was started with, which the game seeds once and the **player** owns from then on — the only file in a save folder that no instance may write. Give it a row rather than leaving it off the table, because a file in this folder with no stated owner is one somebody will eventually give a tool to.
 
 The Narrator must be able to write scene and NPC state, because play *happens* in the Narrator. The real boundary is not read/write — it is that **plot and pacing belong to the Director, scene and NPC belong to the Narrator.**
 
@@ -364,7 +384,9 @@ Rev. 4's *fact resolutions* field is gone with §5's inversion; there are no ope
 
 **Structured on disk, prose on the way in.** Rev. 4 asked for a JSON-like schema "so the Narrator consumes it deterministically". Half of that is right and half of it is contradicted by the code. `Mcp/QuestRender.cs:7-19` is explicit that tool results are plain text rather than JSON *deliberately*, because the consumer "is a language model that is about to write prose from this, and it reads a line like `Bess (npc) - HP 12/12` more reliably than the same fact wrapped in braces and quotes — for a fraction of the tokens, on every call, for the whole session." A directive is read by the same consumer for the same purpose. So: JSON on disk, where determinism matters and the Director writes it; rendered to text through `QuestRender` on the way to the Narrator, where legibility matters.
 
-**A directive cannot ride in the system prompt.** The system prompt is the cached prefix — the whole reason one process is held open across turns — and it must stay byte-stable or every turn pays to rebuild it (`Program.cs:19-21`, `Agents/Claude/ClaudeSession.cs:12-14`). The directive is prepended to the per-turn user message instead, which today is the player's raw typed line and nothing else (`Program.cs:441`).
+**A directive cannot ride in the system prompt.** The system prompt is the cached prefix — the whole reason one process is held open across turns — and it must stay byte-stable or every turn pays to rebuild it (`Saves/SystemPromptFile.cs`, `Agents/Claude/ClaudeSession.cs:12-14`). The directive is prepended to the per-turn user message instead, which today is the player's raw typed line and nothing else.
+
+**The prompt being a per-save file does not weaken that.** Byte-stable *within a session* is the property the cache needs, and it still holds absolutely: the file is read once, as the session opens, and the string is fixed for the life of the provider's process. What changed is that two sessions of the same save may open on different prefixes, which costs one cold cache on the session after an edit and nothing thereafter. This is also the whole reason `/system-prompt` ends the session rather than warning (§2): there is no mechanism by which a running session could adopt a new prefix, so the choice was never between updating it and warning — it was between restarting and lying.
 
 **Staleness.** Because directives are generated at turn N and consumed at N+1 or later, the world can change underneath them: the NPC a directive concerns dies, the player leaves the location, the twist's premise evaporates. On consumption, the Narrator compares the directive's target sequence against the journal's current head; if an invalidating write landed in between, the directive is dropped and the Director re-triggered. Cheap, and it removes a whole category of "why did the NPC say that" bugs.
 
@@ -372,7 +394,9 @@ Rev. 4's *fact resolutions* field is gone with §5's inversion; there are no ope
 
 Contradiction is a **bug to prevent structurally, not a mechanic to support**. The game does not retcon in-world: no NPC reinterprets what they said last scene, no narration quietly revises an earlier fact. If a contradiction does reach the player, it is logged and fixed out of band, and the game stays silent about it in play. A narrated self-correction is worse than the original error, because it tells the player the world is not stable.
 
-This is already the shipped instinct in the one place it comes up. A rename leaves prose written before it alone, and the tool says so when it happens: memories *"written before now still spell out the old name — they are not rewritten"* (`Mcp/QuestTools.cs:633-636`), and the system prompt tells the narrator to *"treat that as the character's own recollection rather than a mistake to correct, and never narrate the correction"* (`Program.cs:78-82`). Rev. 5's §9 is that instinct generalised.
+This is already the shipped instinct in the one place it comes up. A rename leaves prose written before it alone, and the tool says so when it happens: memories *"written before now still spell out the old name — they are not rewritten"* (`Mcp/QuestTools.cs:633-636`), and the shipped prompt tells the narrator to *"treat that as the character's own recollection rather than a mistake to correct, and never narrate the correction"* (`Saves/SystemPromptFile.cs`, `Default`). Rev. 5's §9 is that instinct generalised.
+
+Note what moved underneath that citation. The prompt is now per-save and player-editable, so a sentence quoted from it is evidence about the **default** rather than about every save — which is the reason none of §9's guarantees is allowed to rest on one. Each is enforced in a mechanism instead, and the prompt sentences quoted through this document are manners on top of them.
 
 ### Three tiers of fact
 
@@ -441,7 +465,7 @@ Re-cut against the repository. Phase 0 is new; it exists because everything afte
 
 1. **Phase 0 — the journal. Done (rev. 6).** `journal.jsonl`, appended by the tool dispatch layer (`QuestTools.Invoke`), carrying sequence, turn, tool, arguments and outcome. No behaviour change, nothing the model can see, and it is the version counter §8 needs and the log §9 tests over. Cheapest possible first step and everything else assumes it.
 2. **Phase 1 — partitioning and the ledger. Narrator only. Done (rev. 6).** Secrets with lifecycle stages and names, the fetch-boundary gate, the divergence function as a pure predicate, `record_claims` plus the ledger, spent-derivation, extend-not-replace descriptions, and the contradiction batch test. `get_character`'s "including everything they know" is retired here, and a test asserts the sentence stays retired. Secrets are created live by the Narrator through `grant_secret` and adjudicated by hand-editing the save; unratified claims queue up for a human, which doubles as a survey of what the Director will need to do.
-3. **Phase 2 — the Director.** A second `IAgentSession` from `AgentSessionFactory`, its own system prompt, its own tool slice derived from role-tagged definitions, and its own model setting. Asynchronous overseer; event triggers plus the 8-turn ceiling; dormant becomes the default secret stage; ratification, description-negation validation, directive rendering and expiry.
+3. **Phase 2 — the Director.** A second `IAgentSession` from `AgentSessionFactory`, its own system prompt — a second file in the save folder now that the Narrator's lives in one, on the same seed-and-leave-alone terms — its own tool slice derived from role-tagged definitions, and its own model setting. Asynchronous overseer; event triggers plus the 8-turn ceiling; dormant becomes the default secret stage; ratification, description-negation validation, directive rendering and expiry.
 4. **Phase 3 — tune against replayed sessions:** the event trigger set, the ceiling value, how aggressively secrets go live (the main cost lever), and ratification throughput.
 
 **~~Adopting any of this costs every existing save.~~ Withdrawn (rev. 6): it cost nothing, and the schema stayed at 2.**
@@ -453,6 +477,8 @@ Bumping anyway would have destroyed every existing save to no purpose, since `Re
 The one real cost is asymmetric and belongs in release notes rather than in a version number: **an older build that writes `characters.json` will silently drop any secrets in the save**, because it deserialises without the property and serialises without it. That is the thing that will eventually justify a bump — not this change.
 
 The general rule, since this is the second time the question has come up: bump when an existing document changes *meaning*, as version 2 did when names stopped being identities. Adding a field, or adding a file, is not that.
+
+**Third time, and the rule held.** `system-prompt.txt` is a new file, so the schema stayed at 2. An old save opens, `SystemPromptFile.Ensure` writes the default into it, and it plays exactly as it did before — because the default *is* what it was played with. The asymmetric cost is milder than the secrets one: an older build ignores the file entirely and narrates from its own constant, so a player who had rewritten their prompt would find that build quietly not using it. Nothing is destroyed, and the file is still there for the newer build.
 
 ## 11. Decisions Record
 

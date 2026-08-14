@@ -33,6 +33,12 @@ namespace TerminalQuest.Saves
         private const string DiagnosticsFileName = "diagnostics.jsonl";
 
         /// <summary>
+        /// The one document here that is not JSON, and the one the player writes rather than the
+        /// game. See <see cref="SystemPromptPath"/>.
+        /// </summary>
+        private const string SystemPromptFileName = "system-prompt.txt";
+
+        /// <summary>
         /// Shared with <see cref="AppendLog{TEntry}"/> so that the documents and the logs cannot come
         /// to disagree about encoding. A preamble written into the middle of a line-oriented file
         /// corrupts exactly one line while being invisible in every editor.
@@ -91,6 +97,31 @@ namespace TerminalQuest.Saves
         /// is, since it is a fresh process per tool call's parent session.
         /// </summary>
         public int CurrentTurn() => ReadMetadata().Turn;
+
+        /// <summary>
+        /// The narrator's brief for this save: what it is told before it is told anything else.
+        /// </summary>
+        /// <remarks>
+        /// A path rather than only a read, because this is the one document an editor is pointed
+        /// straight at. Everything else here is written by this process or the narrator's, and the
+        /// player is not expected to open it; this one exists so that they can.
+        /// <para>
+        /// See <see cref="SystemPromptFile"/> for what a missing or empty file means and who seeds it.
+        /// </para>
+        /// </remarks>
+        public string SystemPromptPath => Path.Combine(Directory, SystemPromptFileName);
+
+        /// <summary>
+        /// What <c>system-prompt.txt</c> holds, or null when the save has not got one.
+        /// </summary>
+        /// <remarks>
+        /// Null rather than an empty string, so that "nobody has written one" and "somebody emptied
+        /// it" stay separable - the caller treats them the same, but only because it decided to.
+        /// </remarks>
+        public string? ReadSystemPrompt() => ReadText(SystemPromptFileName);
+
+        /// <summary>Replaces <c>system-prompt.txt</c> with <paramref name="text"/>, byte for byte.</summary>
+        public void WriteSystemPrompt(string text) => WriteText(SystemPromptFileName, text);
 
         /// <summary>
         /// Every tool call, in order, numbered. The version counter the rest of the design stamps
@@ -333,6 +364,63 @@ namespace TerminalQuest.Saves
             catch (JsonException ex)
             {
                 throw new SaveException($"{fileName} is not valid JSON: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Reads a document that is text rather than JSON. Null when there is no such file.
+        /// </summary>
+        /// <remarks>
+        /// The same sharing and the same retry as <see cref="Read{T}"/>, and for the same reason -
+        /// this folder is open in two processes. What it does not do is treat an empty file as an
+        /// absent one: there is no shape to fall back to here, so emptiness is a value and what it
+        /// means is the caller's to decide.
+        /// </remarks>
+        private string? ReadText(string fileName)
+        {
+            var path = Path.Combine(Directory, fileName);
+
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                return ReadShared(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new SaveException($"Could not read {fileName}: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Writes a text document, through the temporary file every other write here goes through.
+        /// </summary>
+        /// <remarks>
+        /// The text is written exactly as given, line endings and all. A document store that quietly
+        /// rewrote what it was handed would make the file on disk stop matching what the player
+        /// saved, which is the one thing this file has to be.
+        /// </remarks>
+        private void WriteText(string fileName, string text)
+        {
+            ArgumentNullException.ThrowIfNull(text);
+
+            var path = Path.Combine(Directory, fileName);
+            var temporary = path + ".tmp";
+
+            try
+            {
+                System.IO.Directory.CreateDirectory(Directory);
+
+                File.WriteAllText(temporary, text, Utf8NoBom);
+                File.Move(temporary, path, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                TryDelete(temporary);
+                throw new SaveException($"Could not write {fileName}: {ex.Message}", ex);
             }
         }
 

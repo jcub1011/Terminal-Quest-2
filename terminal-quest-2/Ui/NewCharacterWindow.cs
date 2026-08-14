@@ -22,7 +22,9 @@ namespace TerminalQuest.Ui
     internal sealed class NewCharacterWindow : Window
     {
         private const int FieldHeight = 3;
-        private const int HintHeight = 2;
+
+        /// <summary>The kit line and the two hint rows below it.</summary>
+        private const int HintHeight = 3;
 
         /// <summary>Long enough for any name worth typing, short enough to stay on one status row.</summary>
         private const int MaxNameLength = 40;
@@ -30,9 +32,22 @@ namespace TerminalQuest.Ui
         private const string Hint =
             "Up/Down picks a class.  Enter moves down the form.  Ctrl+G opens an editor.  Ctrl+Enter begins.  Esc quits.";
 
+        /// <summary>
+        /// A row of its own, because what it offers is not another key for filling in this form.
+        /// <para>
+        /// This is the one place the narrator's brief can be rewritten before it has ever been read.
+        /// Once the session starts the prompt is fixed for its whole life, so a player who wants a
+        /// different kind of game entirely - a different tone, different rules, no dice at all - wants
+        /// to know about it here rather than after the first scene has been narrated at them.
+        /// </para>
+        /// </summary>
+        private const string PromptHint =
+            "Ctrl+P rewrites the narrator's instructions for this save.";
+
         private readonly ClassListView _classes;
         private readonly Label _kit;
         private readonly Label _hint;
+        private readonly Label _promptHint;
         private readonly TextField _name;
         private readonly TextField _description;
         private readonly TextField _place;
@@ -70,6 +85,16 @@ namespace TerminalQuest.Ui
             };
             _hint.SetScheme(Theme.CreateScheme());
 
+            _promptHint = new Label
+            {
+                X = 0,
+                Y = Pos.Bottom(_hint),
+                Width = Dim.Fill(),
+                Height = 1,
+                Text = PromptHint,
+            };
+            _promptHint.SetScheme(Theme.CreateScheme());
+
             // Enter walks down the form; only the last field begins the game.
             _name = MakeField();
             _name.Accepting += OnFieldAccepting;
@@ -80,11 +105,11 @@ namespace TerminalQuest.Ui
             _place = MakeField();
             _place.Accepting += OnFieldAccepting;
 
-            var nameFrame = Labelled("name", _name, Pos.Bottom(_hint));
+            var nameFrame = Labelled("name", _name, Pos.Bottom(_promptHint));
             var descriptionFrame = Labelled("who you are", _description, Pos.Bottom(nameFrame));
             var placeFrame = Labelled("where you begin (optional - blank lets the narrator choose)", _place, Pos.Bottom(descriptionFrame));
 
-            Add(_classes, _kit, _hint, nameFrame, descriptionFrame, placeFrame);
+            Add(_classes, _kit, _hint, _promptHint, nameFrame, descriptionFrame, placeFrame);
 
             ShowKit();
 
@@ -104,6 +129,17 @@ namespace TerminalQuest.Ui
         /// somewhere it can be read back, rather than typed blind into a box one line high.
         /// </remarks>
         public ExternalEditor? Editor { get; init; }
+
+        /// <summary>
+        /// The save's <c>system-prompt.txt</c>, which Ctrl+P opens, or null to offer nothing.
+        /// </summary>
+        /// <remarks>
+        /// A path rather than the text, and edited in place rather than collected like the answers
+        /// above it. This window still owns no game logic: it does not read the file, write it, or
+        /// know what is in it - the host settles all of that before this screen opens, and the editor
+        /// does the rest.
+        /// </remarks>
+        public string? SystemPromptPath { get; init; }
 
         /// <summary>The name typed, trimmed.</summary>
         public string PlayerName { get; private set; } = string.Empty;
@@ -156,6 +192,19 @@ namespace TerminalQuest.Ui
                 }
 
                 return external.TryBegin(field, SetEditingNotice);
+            }
+
+            // Ctrl+P rather than another Ctrl+G on a fourth field: the prompt is thousands of words of
+            // paragraphs, and the field-and-shadow route Ctrl+G takes would show it as one line and
+            // lose all of it the moment a key was pressed. The file is edited where it lives instead.
+            //
+            // Free for the same reason Ctrl+G is: a single-line text field claims neither, so the
+            // chord reaches this window while a field holds the focus.
+            if (key == Key.P.WithCtrl
+                && Editor is { } prompts
+                && SystemPromptPath is { Length: > 0 } promptPath)
+            {
+                return prompts.TryBeginFile(promptPath, SetEditingNotice);
             }
 
             if (key == Key.Esc || key == Key.Q.WithCtrl)
@@ -264,6 +313,15 @@ namespace TerminalQuest.Ui
             // Handled either way: Enter must never propagate up and trigger a default accept on
             // the window itself.
             e.Handled = true;
+
+            // The form does not move while an editor is open, matching OnKeyDown. A read-only field
+            // still takes Enter, and the key never reaches OnKeyDown because the field handles it
+            // first - so on the last field this would begin the game while another program still held
+            // the description, or the narrator's instructions.
+            if (Editor is { IsBusy: true })
+            {
+                return;
+            }
 
             var next = ReferenceEquals(sender, _name) ? _description
                 : ReferenceEquals(sender, _description) ? _place
@@ -379,6 +437,17 @@ namespace TerminalQuest.Ui
         /// </summary>
         private void SetEditingNotice(string? notice)
         {
+            // Every field, not the one being edited. OnKeyDown swallows the chords while an editor is
+            // open, but a key the focused field handles itself never reaches it - so without this a
+            // player could type into the form, or press Enter on the last field and begin the game,
+            // while another program still holds the narrator's instructions. Ctrl+G's own edit marks
+            // its one field read-only inside the editor; a file edit has no field to mark.
+            var editing = Editor is { IsBusy: true };
+
+            _name.ReadOnly = editing;
+            _description.ReadOnly = editing;
+            _place.ReadOnly = editing;
+
             if (notice is null)
             {
                 ShowHint();

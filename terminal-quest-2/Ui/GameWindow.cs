@@ -178,6 +178,31 @@ namespace TerminalQuest.Ui
         public void FocusInput() => _input.SetFocus();
 
         /// <summary>
+        /// Opens a file in the player's editor, saying so where this screen says things.
+        /// </summary>
+        /// <param name="path">The file to edit, in place.</param>
+        /// <param name="saved">Called once the editor has closed having actually changed it.</param>
+        /// <returns>False when there is no editor to open it with, which is the caller's to report.</returns>
+        /// <remarks>
+        /// A method rather than exposing the notice, so <see cref="ShowEditingNotice"/> stays this
+        /// window's own business - the command box's title is the only place there is to say anything
+        /// here. What is being edited and what to do afterwards remain the host's.
+        /// </remarks>
+        public bool BeginExternalEdit(string path, Action? saved = null)
+        {
+            if (Editor is not { } editor)
+            {
+                return false;
+            }
+
+            // For the reason Ctrl+G hides them: the suggestions are for a command being typed, and
+            // they would be drawing over the notice.
+            HideSuggestions();
+
+            return editor.TryBeginFile(path, ShowEditingNotice, saved);
+        }
+
+        /// <summary>
         /// Redraws everything fed by <see cref="GameState"/>, after the host has re-read the save.
         /// One call rather than two, so a new field cannot be added to the state and then quietly
         /// left stale on screen.
@@ -213,6 +238,13 @@ namespace TerminalQuest.Ui
         {
             _inputFrame.Title = notice ?? (IsBusy ? BusyTitle : IdleTitle);
             _inputFrame.SetNeedsDraw();
+
+            // The command box stops taking text for as long as an editor is open, and this is the only
+            // place that can be said for both kinds of edit. Ctrl+G's own edit is of this field and the
+            // editor marks it read-only itself; a file edit has no field to mark, so without this the
+            // player could type a line - or press Enter and start a turn - while another program holds
+            // the save's prompt and the session is a keystroke away from ending.
+            _input.ReadOnly = Editor is { IsBusy: true };
         }
 
         /// <summary>
@@ -323,6 +355,16 @@ namespace TerminalQuest.Ui
             // Mark handled either way, so Enter never propagates up and triggers a default
             // "accept" on the window itself.
             e.Handled = true;
+
+            // Nothing is submitted while an editor is open. ReadOnly stops the field taking text but
+            // not taking Enter, and OnKeyDown never sees the key because the field handles it first -
+            // so this is the only place the rule can be applied. Without it, Enter on the line that
+            // was already in the box would start a turn against a scene the player is elsewhere
+            // rewriting the instructions for.
+            if (Editor is { IsBusy: true })
+            {
+                return;
+            }
 
             // Through the editor rather than off the field, so a command written in Notepad reaches
             // the narrator with its line breaks intact rather than as the one line shown here.

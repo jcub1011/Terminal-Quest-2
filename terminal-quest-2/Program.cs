@@ -11,120 +11,6 @@ namespace TerminalQuest
     internal class Program
     {
         /// <summary>
-        /// The narrator's entire brief: how to write, and how to keep the world.
-        /// <para>
-        /// The markup rules come first and are matched exactly by <see cref="MarkupParser"/> - the
-        /// two have to be changed together. Everything after them is the tool contract, and it is
-        /// worded as instructions about <em>when</em> to reach for a tool rather than what the
-        /// tools are, because the schemas already say what they are. This whole prefix is cached
-        /// after the first turn, so its length costs once per session rather than once per turn.
-        /// </para>
-        /// </summary>
-        private const string SystemPrompt =
-            "You are the narrator of a terminal adventure game. Write as much as the moment deserves: a "
-          + "line when a line will do, and several paragraphs when the player has walked somewhere worth "
-          + "looking at or somebody has something to say. Do not pad, and do not summarise what you could "
-          + "show instead. End where the player has to decide something, and leave the deciding to them - "
-          + "never narrate their choices, their words, or what they do next. "
-          + "Mark up your prose semantically, closing each tag by name: "
-          + "items as [item]a rusted key[/item], dangers as [danger]a wolf[/danger], "
-          + "spoken words as [speech]\"who goes there?\"[/speech], "
-          + "and place names as [place]the Hollow Gate[/place]. "
-          + "Use no other formatting, and never use square brackets for anything else.\n\n"
-
-          + "The world is kept in files. Your tools are the only way to read or change it, and "
-          + "nothing you merely say is remembered. Never invent health, inventory, or who is "
-          + "present - read them.\n\n"
-
-          + "Call get_state before narrating the first scene of a session. The player character is "
-          + "made before the session starts, by the player: never invent one, never replace one, "
-          + "and never ask who they are - read them. If no location is on record, create where they "
-          + "begin with upsert_location and move_character them into it.\n\n"
-
-          + "A session is not a campaign. When a save is resumed you are new to it, and the prose you "
-          + "wrote last time is not in your memory - it is in the transcript. Call get_transcript "
-          + "before get_state on the first turn of a resumed save, and write on from the voice you "
-          + "find there rather than starting afresh in your own. It will also tell you if the player "
-          + "asked something the last session ended before answering.\n\n"
-
-          + "Record what happens as it happens: damage or healing with update_character; items "
-          + "gained or lost with add_item and remove_item; coin earned or spent with add_money and "
-          + "remove_money, never as an item; travel with move_character, after "
-          + "upsert_location when the place is new; a lasting change to a place with "
-          + "add_location_event; and each beat of the story - arriving somewhere, meeting someone, "
-          + "a bargain struck - with record_event.\n\n"
-
-          + "When an outcome is genuinely in doubt - a leap, a lie, a lock, a blow struck - do not "
-          + "decide it. Call roll first, read the total, and write what the dice said even when it "
-          + "is not the scene you had in mind. Name who is rolling and which of their attributes "
-          + "applies, and the modifier is added for you; a bonus you assert yourself is not a bonus, "
-          + "it is a guess. Use hidden when knowing the number would tell the player something their "
-          + "character does not know - whether a lie was believed, whether a search missed "
-          + "something - and then narrate only what they could actually tell. Call reveal_roll later "
-          + "if the moment comes when they should know after all. Do not roll for things nobody is "
-          + "attempting, and do not roll twice for one attempt.\n\n"
-
-          + "Attributes are what a character is made of, and everyone has the six: Strength, "
-          + "Dexterity, Constitution, Intelligence, Wisdom, Charisma. Change one with set_attribute "
-          + "only when the story has earned it - a season of hard training, a curse, a wound that "
-          + "healed wrong, a reputation won or lost - and use the same tool to invent an attribute "
-          + "the six cannot carry, like standing in a guild or a god's favour. This is not a reward "
-          + "for a good roll.\n\n"
-
-          + "On arriving anywhere, call get_location and describe the place as it now stands. What "
-          + "happened there has not been undone.\n\n"
-
-          + "Before voicing a character, call get_memories for them, with 'about' set to whoever "
-          + "they are dealing with. What they remember decides their tone: trust, fear, a grudge, "
-          + "a debt. Never write a character who holds memories as a blank slate.\n\n"
-
-          + "Give a memory to every character who perceived something, not only the one it "
-          + "happened to - a witness remembers what they saw. Write it from their vantage point, "
-          + "using {This} for the one remembering and {Player} for the player. Name who or what a "
-          + "memory concerns in 'subjects', using names already on record so it can be found "
-          + "again.\n\n"
-
-          + "Some characters know things others do not. Give somebody a secret with grant_secret, and "
-          + "grant it to everyone who ought to be in on it. You are only ever shown a secret when you "
-          + "ask about the character holding it, so what comes back is what that character may act on - "
-          + "never assume anybody else knows it. If you have already read one character's secrets this "
-          + "turn, another who does not share them cannot be read until the next turn: let them hold "
-          + "their tongue for now rather than working around it. A secret the player has already been "
-          + "told comes back marked common knowledge, and anyone may speak of it.\n\n"
-
-          + "Names can change. A character who gives a false name and later admits their real one, "
-          + "or a place the player learns the true name of, is renamed with update_character or "
-          + "update_location - not replaced with a second record. Where people stand and what they "
-          + "remember follow a rename by themselves, but prose you have already written is left "
-          + "alone, so an old memory will still say the old name. Treat that as the character's own "
-          + "recollection rather than a mistake to correct, and never narrate the correction.\n\n"
-
-          + "Descriptions work the same way. What you send for a place or a person already on record is "
-          + "added to what it already says and never replaces it, so say only what is new. When "
-          + "something about a place has actually changed - a door replaced, a roof fallen in - record "
-          + "it with add_location_event rather than describing away what the player was shown before.\n\n"
-
-          + "Before you invent a place, a person or a thing, call random_noun and "
-          + "random_adjective and let the words suggest something you would not otherwise have "
-          + "written. They are seeds, not vocabulary: never say them to the player, and never use "
-          + "one as a name. A word that suggests nothing is discarded - draw again rather than "
-          + "forcing it. Somewhere that could be anywhere is worse than somewhere strange.\n\n"
-
-          + "Then, before writing the turn's prose, settle what that prose will assert and record it with "
-          + "record_claims - one entry for each separate thing you are about to state as true of the "
-          + "world, so a price, a road and a rumour are three. Name who asserts each one, or leave the "
-          + "speaker out when it is your own narration. A character may lie: record it as a lie and the "
-          + "world will hold it as one, to be paid off later, rather than reading it as a mistake to be "
-          + "corrected. If a line will give away a secret somebody is holding, name that secret in "
-          + "'reveals'. Then write the prose, and write what you recorded - this is the last thing you do "
-          + "before speaking, not an afterthought once you have spoken.\n\n"
-
-          + "Tool calls are silent, with one exception. Every roll is shown to the player - who "
-          + "rolled, what for, and unless it was hidden, what it came to. They see it whether or not "
-          + "you mention it, so do not restate the number as though reporting it, and never write as "
-          + "though no roll was made.";
-
-        /// <summary>
         /// Opening turn for a save whose player named where they begin. Everything the narrator
         /// needs is already on disk, so this only has to stop it from building a second one.
         /// </summary>
@@ -286,11 +172,22 @@ namespace TerminalQuest
             string? startupError = null;
             var needsCharacter = false;
 
+            // What this save tells the narrator. Read once, here, because both providers keep the
+            // prompt they were given for the whole life of their process - which is what makes
+            // /system-prompt end the session rather than take effect in it.
+            var systemPrompt = SystemPromptFile.Default;
+
             try
             {
                 // Before anything else, and before the narrator is created further down: a save
                 // this build would misread must not reach a turn.
                 store.RequireSupportedSchema();
+
+                // Seeded rather than merely read, so a save made before this file existed grows one
+                // now and can be edited from the character screen and from /system-prompt. Inside
+                // this try, so a folder that cannot be written says so on the same path as every
+                // other save fault - and the character screen and the narrator are both skipped.
+                systemPrompt = SystemPromptFile.Ensure(store);
 
                 // A save with nobody in it has never been played, whatever its metadata says.
                 needsCharacter = store.ReadCharacters().Characters.Count == 0;
@@ -360,7 +257,7 @@ namespace TerminalQuest
             using var life = new CancellationTokenSource();
             var leaving = false;
 
-            await using var narrator = AgentSessionFactory.Create(settings, store, SystemPrompt);
+            await using var narrator = AgentSessionFactory.Create(settings, store, systemPrompt);
 
             // No Title: the window draws its own title row from the state, which already knows the
             // save name, so that the place name in it can be green on its own.
@@ -418,6 +315,21 @@ namespace TerminalQuest
             }
             else
             {
+                // Said before the narrator is woken, because on the Claude path that is the thing that
+                // will fail: the prompt goes as a single command line argument, and Windows caps the
+                // whole line a little over 32,000 characters. A process that would not start is
+                // reported already, but "could not start claude" is a baffling thing to be told when
+                // the cause is a file the player edited an hour ago.
+                if (systemPrompt.Length > SystemPromptFile.WarnAboveCharacters)
+                {
+                    window.Narration.AddLine(
+                        $"system-prompt.txt is {systemPrompt.Length:N0} characters. Past about "
+                      + $"{SystemPromptFile.WarnAboveCharacters:N0} the Claude narrator may refuse to start, "
+                      + "because the prompt is passed to it on the command line. Shorten the file if it does.",
+                        TextRole.Danger);
+                    window.Narration.AddBlankLine();
+                }
+
                 // Before the narrator is woken, so the player has the scene they left to read while
                 // it starts up rather than an empty pane. Skipped for a save made this run, which has
                 // no last session to recall.
@@ -672,10 +584,84 @@ namespace TerminalQuest
                 window.Narration.AddBlankLine();
                 window.Narration.ScrollToBottom();
 
+                if (result.EditSystemPrompt)
+                {
+                    EditSystemPrompt();
+                }
+
                 if (result.Quit)
                 {
                     Leave();
                 }
+            }
+
+            /// <summary>
+            /// Hands this save's narrator brief to an editor, and ends the session once it changes.
+            /// </summary>
+            /// <remarks>
+            /// Refused mid-turn, alone among the player's commands. The rest only read the save and are
+            /// deliberately available while the narrator speaks; this one would put another program over
+            /// a reply still arriving and then take the session away underneath it. Waiting out one turn
+            /// is a smaller cost than either.
+            /// <para>
+            /// The leaving is not a courtesy. The narrator was given the old prompt as a command line
+            /// argument, or as the first message of a history it resends every turn, and neither can be
+            /// replaced in place - so a session that carried on would be one quietly ignoring the file
+            /// the player had just written.
+            /// </para>
+            /// </remarks>
+            void EditSystemPrompt()
+            {
+                if (window.IsBusy)
+                {
+                    window.Narration.AddLine(
+                        "The narrator is mid-turn. Wait for it to finish, then ask again.",
+                        TextRole.System);
+                    window.Narration.AddBlankLine();
+                    window.Narration.ScrollToBottom();
+                    return;
+                }
+
+                // Seeded again rather than trusted: the file has been on disk since the session opened,
+                // and anything may have happened to it in between - including being deleted by hand.
+                try
+                {
+                    SystemPromptFile.Ensure(store);
+                }
+                catch (SaveException ex)
+                {
+                    window.Narration.AddLine(ex.Message, TextRole.Danger);
+                    window.Narration.AddBlankLine();
+                    window.Narration.ScrollToBottom();
+                    return;
+                }
+
+                if (!window.BeginExternalEdit(store.SystemPromptPath, OnSystemPromptSaved))
+                {
+                    window.Narration.AddLine(
+                        $"There is no editor to open it with. The file is {store.SystemPromptPath}.",
+                        TextRole.System);
+                    window.Narration.AddBlankLine();
+                    window.Narration.ScrollToBottom();
+                }
+            }
+
+            /// <summary>
+            /// Runs once the editor has closed having really changed the prompt. Says so, and leaves.
+            /// </summary>
+            void OnSystemPromptSaved()
+            {
+                if (leaving)
+                {
+                    return;
+                }
+
+                window.Narration.AddLine(
+                    $"The narrator's instructions have changed. Leaving '{store.Name}' - open it again to play with them.",
+                    TextRole.System);
+                window.Narration.ScrollToBottom();
+
+                Leave();
             }
 
             async Task OpenAsync()
@@ -1077,7 +1063,13 @@ namespace TerminalQuest
         /// </remarks>
         private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store, ExternalEditor editor)
         {
-            using var window = new NewCharacterWindow(store.Name) { Editor = editor };
+            // The prompt file is already on disk by now - RunSessionAsync seeds it before this screen
+            // opens - so the window is handed a path it can simply give to an editor.
+            using var window = new NewCharacterWindow(store.Name)
+            {
+                Editor = editor,
+                SystemPromptPath = store.SystemPromptPath,
+            };
 
             window.Done += () => app.RequestStop(window);
             window.Cancelled += () => app.RequestStop(window);
