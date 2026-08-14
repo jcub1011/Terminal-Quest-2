@@ -55,8 +55,23 @@ namespace TerminalQuest.Saves
         /// spelling: a narrator may write the player as <c>{Player}</c> in one record and by name
         /// in the next, and a filter that missed one of those would be worse than no filter.
         /// </summary>
-        public static bool Mentions(string text, string entity, string owner, string? playerName) =>
-            text.Contains(entity, StringComparison.OrdinalIgnoreCase)
-            || Resolve(text, owner, playerName).Contains(entity, StringComparison.OrdinalIgnoreCase);
+        /// <remarks>
+        /// Both blanks are answered false rather than left to <see cref="string.Contains(string)"/>,
+        /// which is wrong in opposite directions on each. A memory with no text is a hand-editable
+        /// state and should read as "mentions nobody" the way <see cref="Resolve"/> reads it as
+        /// empty, not throw mid-turn. An empty entity is contained by every string, so without the
+        /// guard a blank subject matches everything - which on the memory-filter path means handing
+        /// back a character's entire history instead of nothing.
+        /// </remarks>
+        public static bool Mentions(string? text, string entity, string owner, string? playerName)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(entity))
+            {
+                return false;
+            }
+
+            return text.Contains(entity, StringComparison.OrdinalIgnoreCase)
+                || Resolve(text, owner, playerName).Contains(entity, StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

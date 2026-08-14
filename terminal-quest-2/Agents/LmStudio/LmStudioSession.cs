@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
@@ -34,6 +34,17 @@ namespace TerminalQuest.Agents.LmStudio
         /// <summary>Cap on an error body quoted back into an exception message.</summary>
         private const int MaxQuotedErrorChars = 2 * 1024;
 
+        /// <summary>
+        /// The most tool calls one message may ask for.
+        /// </summary>
+        /// <remarks>
+        /// A bound rather than a rule: <c>index</c> arrives from the server and is used to size a
+        /// list, so a single delta claiming index 20,000,000 would allocate twenty million entries
+        /// before anything else got a say. A model asking for more than this many at once is
+        /// malfunctioning, and the deltas past the cap are dropped rather than trusted.
+        /// </remarks>
+        private const int MaxToolCalls = 64;
+
         private static readonly MediaTypeHeaderValue Json = new("application/json");
 
         /// <summary>How Claude Code names these same tools, and the one wrong name worth forgiving.</summary>
@@ -42,6 +53,7 @@ namespace TerminalQuest.Agents.LmStudio
         private readonly LmStudioSessionOptions _options;
         private readonly SaveStore _store;
         private readonly HttpClient _client;
+        private readonly HttpMessageHandler? _handler;
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly List<ChatMessage> _history = [];
 
@@ -49,7 +61,16 @@ namespace TerminalQuest.Agents.LmStudio
         private bool _started;
         private bool _disposed;
 
-        public LmStudioSession(LmStudioSessionOptions options, SaveStore store)
+        /// <param name="handler">
+        /// Where the requests go. Null means a real socket, which is what the game always passes.
+        /// It exists so the streaming reply can be driven from canned bytes. A supplied handler
+        /// stays the caller's to dispose - this session also hands it to
+        /// <see cref="LmStudioModels.ListAsync"/>, so it must survive the client that used it.
+        /// </param>
+        public LmStudioSession(
+            LmStudioSessionOptions options,
+            SaveStore store,
+            HttpMessageHandler? handler = null)
         {
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(store);
@@ -57,7 +78,9 @@ namespace TerminalQuest.Agents.LmStudio
             _options = options;
             _store = store;
 
-            _client = new HttpClient
+            _handler = handler;
+
+            _client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
             {
                 // The turn owns the deadline, not the request: one turn is several requests plus
                 // the tool calls between them, and a per-request timeout would cut a slow local
@@ -95,7 +118,12 @@ namespace TerminalQuest.Agents.LmStudio
             }
 
             var models = await LmStudioModels
-                .ListAsync(_options.BaseUrl, _options.ApiKey, _options.StartupTimeout, cancellationToken)
+                .ListAsync(
+                    _options.BaseUrl,
+                    _options.ApiKey,
+                    _options.StartupTimeout,
+                    cancellationToken,
+                    _handler)
                 .ConfigureAwait(false);
 
             // A model name that is merely absent from the list is still worth refusing here. Sent
@@ -434,8 +462,16 @@ namespace TerminalQuest.Agents.LmStudio
         /// arrival order, which is what <c>index</c> is for: it identifies which call a fragment
         /// belongs to when a model asks for several at once, and it is the only thing tying the
         /// pieces together.
+        /// <para>
+        /// It is also a number off the wire used to index a list, so it is checked against
+        /// <see cref="MaxToolCalls"/> before it gets to. A negative one would throw past the loop
+        /// below, which cannot grow a list to a negative size, and an absurd one would grow it to
+        /// whatever was asked for. Either takes the turn down with something the caller is not
+        /// prepared for, so a delta naming an index outside the range is skipped the same way one
+        /// that is not an object is.
+        /// </para>
         /// </remarks>
-        private static void Accumulate(List<PartialToolCall> calls, JsonElement deltas)
+        internal static void Accumulate(List<PartialToolCall> calls, JsonElement deltas)
         {
             foreach (var delta in deltas.EnumerateArray())
             {
@@ -445,6 +481,11 @@ namespace TerminalQuest.Agents.LmStudio
                 }
 
                 var index = ReadInt32(delta, "index");
+
+                if (index is < 0 or >= MaxToolCalls)
+                {
+                    continue;
+                }
 
                 while (calls.Count <= index)
                 {
@@ -604,7 +645,7 @@ namespace TerminalQuest.Agents.LmStudio
             int OutputTokens);
 
         /// <summary>A tool call still being assembled out of stream fragments.</summary>
-        private sealed class PartialToolCall
+        internal sealed class PartialToolCall
         {
             public string Id { get; set; } = string.Empty;
 

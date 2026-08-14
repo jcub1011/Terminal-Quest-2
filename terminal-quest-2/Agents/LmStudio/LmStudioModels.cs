@@ -18,15 +18,23 @@ namespace TerminalQuest.Agents.LmStudio
     {
         /// <summary>The model ids the server lists, in the order it lists them.</summary>
         /// <exception cref="AgentException">The server could not be reached or refused the request.</exception>
+        /// <param name="handler">
+        /// Where the request goes. Null means a real socket, which is what the game always passes.
+        /// A supplied handler stays the caller's to dispose, because it may outlive this call.
+        /// </param>
         public static async Task<IReadOnlyList<string>> ListAsync(
             string baseUrl,
             string? apiKey,
             TimeSpan timeout,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            HttpMessageHandler? handler = null)
         {
             var address = $"{baseUrl.TrimEnd('/')}/models";
 
-            using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
+            {
+                Timeout = Timeout.InfiniteTimeSpan,
+            };
 
             if (apiKey is { Length: > 0 } key)
             {
@@ -79,14 +87,23 @@ namespace TerminalQuest.Agents.LmStudio
         /// An answer in an unexpected shape yields an empty list rather than an error. The server
         /// answered, which is the harder half of what the caller wanted to know, and both callers
         /// treat "no list" as "cannot say" rather than as "no models".
+        /// <para>
+        /// That includes an answer whose root is not an object at all - a bare array, a number, a
+        /// literal <c>null</c>. Those parse cleanly, so the <c>catch</c> below never sees them, and
+        /// <c>TryGetProperty</c> throws <see cref="InvalidOperationException"/> on anything but an
+        /// object. Left unchecked it escapes <see cref="ListAsync"/> and
+        /// <see cref="LmStudioSession.StartAsync"/> as something no caller is prepared for, unlike
+        /// the <see cref="AgentException"/> every other failure here arrives as.
+        /// </para>
         /// </remarks>
-        private static IReadOnlyList<string> Parse(string body)
+        internal static IReadOnlyList<string> Parse(string body)
         {
             try
             {
                 using var document = JsonDocument.Parse(body);
 
-                if (!document.RootElement.TryGetProperty("data", out var data)
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty("data", out var data)
                     || data.ValueKind != JsonValueKind.Array)
                 {
                     return [];

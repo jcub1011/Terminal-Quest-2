@@ -18,15 +18,31 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class NarrationPump
     {
-        private readonly IApplication _app;
-        private readonly NarrationView _view;
+        private readonly Action<Action> _invoke;
+        private readonly INarrationSink _view;
         private readonly ConcurrentQueue<string> _queue = new();
 
         private int _drainScheduled;
 
-        public NarrationPump(IApplication app, NarrationView view)
+        public NarrationPump(IApplication app, INarrationSink view)
+            : this(app.Invoke, view)
         {
-            _app = app;
+        }
+
+        /// <summary>
+        /// The same, given only a way onto the UI thread.
+        /// </summary>
+        /// <remarks>
+        /// What this type needs from the application is one method, and taking it as a delegate is
+        /// what lets the drain gate below be exercised without a terminal - including the ordering
+        /// that matters, where a delta arrives while a drain is already running.
+        /// </remarks>
+        internal NarrationPump(Action<Action> invoke, INarrationSink view)
+        {
+            ArgumentNullException.ThrowIfNull(invoke);
+            ArgumentNullException.ThrowIfNull(view);
+
+            _invoke = invoke;
             _view = view;
         }
 
@@ -42,7 +58,7 @@ namespace TerminalQuest.Ui
 
             if (Interlocked.CompareExchange(ref _drainScheduled, 1, 0) == 0)
             {
-                _app.Invoke(Drain);
+                _invoke(Drain);
             }
         }
 
@@ -69,7 +85,7 @@ namespace TerminalQuest.Ui
         /// Flushes anything still queued and closes the paragraph. Safe to call from any thread;
         /// the work is marshalled like everything else.
         /// </summary>
-        public void CompleteBlock() => _app.Invoke(CompleteBlockNow);
+        public void CompleteBlock() => _invoke(CompleteBlockNow);
 
         /// <summary>
         /// The same, on the calling thread and without marshalling. Only safe from the UI thread.

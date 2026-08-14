@@ -20,6 +20,24 @@ namespace TerminalQuest.Saves
         private const int MaxNameLength = 64;
 
         /// <summary>
+        /// The names Windows reserves for devices.
+        /// </summary>
+        /// <remarks>
+        /// None of them contains an invalid character, so without this table they pass
+        /// <see cref="IsValidName"/> and then fail at <c>Directory.CreateDirectory</c> well after
+        /// validation said yes - the player is told the name is fine and handed an IO error. Held
+        /// on every platform rather than behind an OS check: a save folder is meant to be copied
+        /// between machines, and one of these could never be restored on Windows.
+        /// </remarks>
+        private static readonly HashSet<string> ReservedNames =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                "CON", "PRN", "AUX", "NUL",
+                "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+            };
+
+        /// <summary>
         /// The saves directory. <c>%APPDATA%\TerminalQuest\Saves</c> unless <c>TQ_SAVES</c> says
         /// otherwise.
         /// </summary>
@@ -59,7 +77,20 @@ namespace TerminalQuest.Saves
                     continue;
                 }
 
-                var metadata = new SaveStore(directory).ReadMetadata();
+                SaveMetadata metadata;
+                try
+                {
+                    metadata = new SaveStore(directory).ReadMetadata();
+                }
+                catch (SaveException)
+                {
+                    // The remark above is the rule, and this is the case it was written for: a
+                    // save whose document cannot be read is one to show the player, not one to
+                    // hide. Left unguarded, a single unparseable save.json takes every other save
+                    // out of the menu with it. The defaults sort it to the bottom, which is where
+                    // a save that needs looking at belongs.
+                    metadata = new SaveMetadata();
+                }
 
                 // The folder name wins over whatever the document says its name is: the folder is
                 // what the game opens, and a stale Name in save.json would offer a save that
@@ -290,7 +321,20 @@ namespace TerminalQuest.Saves
 
             return trimmed.Length is > 0 and <= MaxNameLength
                 && trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
-                && trimmed is not ("." or "..");
+                && trimmed is not ("." or "..")
+                && !IsReserved(trimmed);
+        }
+
+        /// <summary>
+        /// Whether a name is one of <see cref="ReservedNames"/>. The stem before the first dot is
+        /// what Windows reserves, so <c>CON.txt</c> is refused along with <c>CON</c>.
+        /// </summary>
+        private static bool IsReserved(string trimmed)
+        {
+            var dot = trimmed.IndexOf('.');
+            var stem = dot < 0 ? trimmed : trimmed[..dot];
+
+            return ReservedNames.Contains(stem);
         }
 
         /// <summary>

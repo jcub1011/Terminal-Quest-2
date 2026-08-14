@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -259,7 +259,7 @@ namespace TerminalQuest.Agents.Claude
             _turnGate.Dispose();
         }
 
-        private static IEnumerable<string> BuildArguments(ClaudeSessionOptions options)
+        internal static IEnumerable<string> BuildArguments(ClaudeSessionOptions options)
         {
             yield return "-p";
 
@@ -513,7 +513,7 @@ namespace TerminalQuest.Agents.Claude
             await input.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        private static string BuildUserMessage(string prompt)
+        internal static string BuildUserMessage(string prompt)
         {
             var buffer = new ArrayBufferWriter<byte>();
 

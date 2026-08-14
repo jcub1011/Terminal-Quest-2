@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 
 using TerminalQuest.Saves;
@@ -1036,7 +1036,7 @@ namespace TerminalQuest.Mcp
         /// be doubled up with. Dice terms are stepped over rather than parsed; this only has to know
         /// whether a bare number stands anywhere in the sum.
         /// </summary>
-        private static bool CarriesFlatTerm(string notation)
+        internal static bool CarriesFlatTerm(string notation)
         {
             var hasDigit = false;
             var hasLetter = false;
@@ -1518,7 +1518,7 @@ namespace TerminalQuest.Mcp
             return ToolOutcome.Ok(text.ToString().TrimEnd());
         }
 
-        private static bool TryParseKind(string value, out CharacterKind kind)
+        internal static bool TryParseKind(string value, out CharacterKind kind)
         {
             switch (value.Trim().ToLowerInvariant())
             {
@@ -1534,7 +1534,7 @@ namespace TerminalQuest.Mcp
             }
         }
 
-        private static string? Text(JsonElement arguments, string propertyName) =>
+        internal static string? Text(JsonElement arguments, string propertyName) =>
             arguments.ValueKind == JsonValueKind.Object
             && arguments.TryGetProperty(propertyName, out var value)
             && value.ValueKind == JsonValueKind.String
@@ -1545,7 +1545,7 @@ namespace TerminalQuest.Mcp
         /// A number argument, tolerating the string form. Models routinely send <c>"30"</c> where
         /// the schema asks for 30, and refusing that would cost a turn to no purpose.
         /// </summary>
-        private static int? Number(JsonElement arguments, string propertyName)
+        internal static int? Number(JsonElement arguments, string propertyName)
         {
             if (arguments.ValueKind != JsonValueKind.Object
                 || !arguments.TryGetProperty(propertyName, out var value))
@@ -1566,7 +1566,7 @@ namespace TerminalQuest.Mcp
         /// does: models send <c>"true"</c> where the schema asks for <c>true</c>, and refusing that
         /// would cost a turn to no purpose.
         /// </summary>
-        private static bool? Bool(JsonElement arguments, string propertyName)
+        internal static bool? Bool(JsonElement arguments, string propertyName)
         {
             if (arguments.ValueKind != JsonValueKind.Object
                 || !arguments.TryGetProperty(propertyName, out var value))
@@ -1591,7 +1591,7 @@ namespace TerminalQuest.Mcp
         /// should not cost the narrator the whole character it was creating - the rest of the call
         /// is still good, and a missing attribute reads as neutral.
         /// </remarks>
-        private static List<(string Name, int Score)> Scores(JsonElement arguments, string propertyName)
+        internal static List<(string Name, int Score)> Scores(JsonElement arguments, string propertyName)
         {
             var scores = new List<(string, int)>();
 
@@ -1621,7 +1621,7 @@ namespace TerminalQuest.Mcp
         }
 
         /// <summary>The raw JSON text of an argument, for reporting a value that was not a string.</summary>
-        private static string? RawText(JsonElement arguments, string propertyName) =>
+        internal static string? RawText(JsonElement arguments, string propertyName) =>
             arguments.ValueKind == JsonValueKind.Object
             && arguments.TryGetProperty(propertyName, out var value)
             && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
@@ -1629,7 +1629,7 @@ namespace TerminalQuest.Mcp
                 : null;
 
         /// <summary>A string-array argument, tolerating a single bare string in its place.</summary>
-        private static List<string> Strings(JsonElement arguments, string propertyName)
+        internal static List<string> Strings(JsonElement arguments, string propertyName)
         {
             var values = new List<string>();
 

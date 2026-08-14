@@ -1,0 +1,257 @@
+using TerminalQuest.Mcp;
+using TerminalQuest.Saves;
+
+using Xunit;
+
+namespace TerminalQuest.Tests.Mcp
+{
+    /// <summary>
+    /// The plain text a tool call hands back to the narrator.
+    /// </summary>
+    public sealed class QuestRenderTests
+    {
+        private static Character Rowan() => new()
+        {
+            Id = "chr_1",
+            Name = "Rowan",
+            Kind = CharacterKind.Player,
+            Health = 12,
+            MaxHealth = 20,
+        };
+
+        [Fact]
+        public void A_character_line_reads_as_a_sentence_a_model_can_parse()
+        {
+            Assert.Equal("Rowan (player) - HP 12/20", QuestRender.CharacterLine(Rowan()));
+        }
+
+        [Fact]
+        public void An_npc_is_marked_as_one()
+        {
+            var bess = Rowan();
+            bess.Name = "Bess";
+            bess.Kind = CharacterKind.Npc;
+
+            Assert.StartsWith("Bess (npc)", QuestRender.CharacterLine(bess), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_rendered_kind_matches_the_wire_spelling()
+        {
+            // The same strings the JSON holds and the tool schemas advertise.
+            Assert.Equal("player", QuestRender.Kind(CharacterKind.Player));
+            Assert.Equal("npc", QuestRender.Kind(CharacterKind.Npc));
+        }
+
+        [Fact]
+        public void Attributes_show_the_modifier_beside_the_score()
+        {
+            // A model that can see "Strength 16 (+3)" is far less tempted to invent a bonus than
+            // one handed a bare 16.
+            var character = Rowan();
+            CharacterAttributes.Set(character, "Strength", 16);
+
+            var line = QuestRender.Attributes(character);
+
+            Assert.Contains("Strength 16 (+3)", line, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Attributes_are_spelled_out_in_full()
+        {
+            // A shape the model never sees is a shape it never guesses wrong.
+            var line = QuestRender.Attributes(Rowan());
+
+            Assert.Contains("Constitution", line, StringComparison.Ordinal);
+            Assert.DoesNotContain("CON ", line, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Every_character_shows_all_six_even_when_the_save_mentions_none()
+        {
+            var line = QuestRender.Attributes(Rowan());
+
+            Assert.All(
+                CharacterAttributes.Core,
+                name => Assert.Contains(name, line, StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public void A_full_character_includes_memories_resolved()
+        {
+            var character = Rowan();
+            character.Memories.Add(new Memory { Id = 1, Turn = 4, Text = "{This} met {Player}." });
+
+            var text = QuestRender.Character(character, "Rowan");
+
+            Assert.Contains("[turn 4] Rowan met Rowan.", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("{This}", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_character_with_nothing_remembered_says_so()
+        {
+            Assert.Contains("Memories: none yet.", QuestRender.Character(Rowan(), "Rowan"), StringComparison.Ordinal);
+        }
+
+        // ---- Rolls -----------------------------------------------------------------------------
+
+        [Fact]
+        public void A_roll_reads_back_with_its_faces_and_total()
+        {
+            var roll = new DiceRoll
+            {
+                Notation = "1d20",
+                Reason = "Forcing the door",
+                Total = 14,
+            };
+            roll.Faces.Add(14);
+
+            Assert.Equal(
+                "Rowan rolled 1d20 for Forcing the door: [14] = 14.",
+                QuestRender.Roll(roll, "Rowan"));
+        }
+
+        [Fact]
+        public void A_roll_names_the_attribute_that_supplied_the_modifier()
+        {
+            var roll = new DiceRoll
+            {
+                Notation = "1d20",
+                Reason = "Forcing the door",
+                Attribute = "Strength",
+                Modifier = 3,
+                Total = 17,
+            };
+            roll.Faces.Add(14);
+
+            Assert.Contains("+3 Strength = 17", QuestRender.Roll(roll, "Rowan"), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_roll_with_nobody_behind_it_still_reads()
+        {
+            var roll = new DiceRoll { Notation = "1d6", Reason = "The weather", Total = 3 };
+
+            Assert.StartsWith("Something rolled", QuestRender.Roll(roll, null), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_narrator_sees_the_total_of_a_hidden_roll()
+        {
+            // Hiding governs what the *player* is told. A narrator that could not see its own dice
+            // could not describe what they did.
+            var roll = new DiceRoll
+            {
+                Notation = "1d20",
+                Reason = "Sensing the lie",
+                Total = 18,
+                Hidden = true,
+            };
+            roll.Faces.Add(18);
+
+            Assert.Contains("= 18.", QuestRender.Roll(roll, "Rowan"), StringComparison.Ordinal);
+        }
+
+        // ---- Locations --------------------------------------------------------------------------
+
+        [Fact]
+        public void A_location_line_names_who_is_present()
+        {
+            var characters = new CharacterFile();
+            characters.Characters.Add(new Character { Id = "chr_1", Name = "Rowan" });
+            var location = new Location { Id = "loc_1", Name = "The Ford" };
+            location.CharacterIds.Add("chr_1");
+
+            var line = QuestRender.LocationLine(location, WorldIndex.Build(characters));
+
+            Assert.Equal("The Ford (Rowan)", line);
+        }
+
+        [Fact]
+        public void An_empty_location_says_nobody_is_there()
+        {
+            var location = new Location { Id = "loc_1", Name = "The Ford" };
+
+            Assert.Equal("The Ford (nobody here)", QuestRender.LocationLine(location, WorldIndex.Build()));
+        }
+
+        [Fact]
+        public void A_roster_never_shows_an_id()
+        {
+            // A reference to a character no longer on record describes an empty room more truthfully
+            // than it describes anything else — and the model must never see "chr_9".
+            var location = new Location { Id = "loc_1", Name = "The Ford" };
+            location.CharacterIds.Add("chr_9");
+
+            var line = QuestRender.LocationLine(location, WorldIndex.Build());
+
+            Assert.Equal("The Ford (nobody here)", line);
+            Assert.DoesNotContain("chr_", line, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_full_location_resolves_its_history()
+        {
+            var location = new Location { Id = "loc_1", Name = "The Ford", Description = "Shallow." };
+            location.Events.Add(new LocationEvent { Id = 1, Turn = 3, Text = "{This} flooded." });
+
+            var text = QuestRender.Location(location, WorldIndex.Build(), "Rowan");
+
+            Assert.Contains("[turn 3] The Ford flooded.", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("{This}", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_location_nothing_has_happened_in_says_so()
+        {
+            var location = new Location { Id = "loc_1", Name = "The Ford" };
+
+            var text = QuestRender.Location(location, WorldIndex.Build(), null);
+
+            Assert.Contains("nothing has happened here yet", text, StringComparison.Ordinal);
+            Assert.Contains("Here now: nobody.", text, StringComparison.Ordinal);
+        }
+
+        // ---- Odds and ends -----------------------------------------------------------------------
+
+        [Fact]
+        public void Nought_coin_reads_as_a_fact_rather_than_a_missing_value()
+        {
+            Assert.Equal("Money: none.", QuestRender.Money(0));
+            Assert.Equal("Money: 12 coin.", QuestRender.Money(12));
+        }
+
+        [Fact]
+        public void An_item_shows_its_description_when_it_has_one()
+        {
+            Assert.Equal(
+                "  rope x2 - Hemp, knotted.",
+                QuestRender.Item(new Item { Name = "rope", Quantity = 2, Description = "Hemp, knotted." }));
+
+            Assert.Equal(
+                "  rope x2",
+                QuestRender.Item(new Item { Name = "rope", Quantity = 2 }));
+        }
+
+        [Fact]
+        public void A_story_event_shows_its_detail_when_it_has_one()
+        {
+            Assert.Equal(
+                "  [turn 6] The ford - Crossed at dusk.",
+                QuestRender.StoryEvent(new StoryEvent { Turn = 6, Title = "The ford", Detail = "Crossed at dusk." }));
+
+            Assert.Equal(
+                "  [turn 6] The ford",
+                QuestRender.StoryEvent(new StoryEvent { Turn = 6, Title = "The ford" }));
+        }
+
+        [Fact]
+        public void A_memory_is_stamped_with_the_turn_it_was_formed_on()
+        {
+            var memory = new Memory { Turn = 9, Text = "{Player} paid the toll." };
+
+            Assert.Equal("  [turn 9] Tam paid the toll.", QuestRender.Memory(memory, "Rowan", "Tam"));
+        }
+    }
+}

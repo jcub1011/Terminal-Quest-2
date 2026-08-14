@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace TerminalQuest.Saves
 {
     /// <summary>
@@ -61,6 +63,13 @@ namespace TerminalQuest.Saves
         /// scheme wrote. Tolerant on purpose: a malformed id read from a hand-edited file should
         /// leave numbering alone rather than throw in the middle of a turn.
         /// </summary>
+        /// <remarks>
+        /// <see cref="NumberStyles.None"/> rather than the default, which is
+        /// <see cref="NumberStyles.Integer"/> and permits a leading sign and surrounding
+        /// whitespace. <c>chr_+5</c> would otherwise be well formed and count toward the ceiling
+        /// while never matching an ordinal id lookup - a record reachable by numbering but not by
+        /// reference.
+        /// </remarks>
         private static int? Number(string? id, string prefix)
         {
             if (id is not { Length: > 0 } || !id.StartsWith(prefix, StringComparison.Ordinal))
@@ -68,9 +77,14 @@ namespace TerminalQuest.Saves
                 return null;
             }
 
-            return int.TryParse(id.AsSpan(prefix.Length), out var number) && number > 0
-                ? number
-                : null;
+            return int.TryParse(
+                    id.AsSpan(prefix.Length),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var number)
+                && number > 0
+                    ? number
+                    : null;
         }
     }
 }

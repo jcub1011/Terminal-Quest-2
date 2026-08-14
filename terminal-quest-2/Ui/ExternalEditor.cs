@@ -200,8 +200,8 @@ namespace TerminalQuest.Ui
 
             var shown = field.Text ?? string.Empty;
 
-            return _shadows.TryGetValue(field, out var shadow) && shadow.Flattened == shown
-                ? shadow.Raw
+            return _shadows.TryGetValue(field, out var shadow)
+                ? EditorText.Resolve(shown, shadow.Raw, shadow.Flattened)
                 : shown;
         }
 
@@ -233,38 +233,6 @@ namespace TerminalQuest.Ui
 
             pending.Abandoned = true;
             _pending = null;
-        }
-
-        /// <summary>Joins a multi-line value into the one line a text field can show.</summary>
-        /// <remarks>
-        /// Every field in the game is single-line, so this is unconditional rather than a choice a
-        /// caller makes. A run of breaks becomes one space - a paragraph break is one gap, not two -
-        /// and a run at the end becomes nothing, because a pending break is only ever flushed by a
-        /// character that follows it.
-        /// </remarks>
-        private static string Flatten(string text)
-        {
-            var flattened = new StringBuilder(text.Length);
-            var pendingSpace = false;
-
-            foreach (var character in text)
-            {
-                if (char.IsControl(character))
-                {
-                    pendingSpace = flattened.Length > 0;
-                    continue;
-                }
-
-                if (pendingSpace)
-                {
-                    flattened.Append(' ');
-                    pendingSpace = false;
-                }
-
-                flattened.Append(character);
-            }
-
-            return flattened.ToString();
         }
 
         /// <summary>Takes what the editor left, on the UI thread.</summary>
@@ -310,7 +278,7 @@ namespace TerminalQuest.Ui
 
                 // Trailing newlines are the editor's, not the player's - Notepad adds one on its own.
                 var raw = edited.TrimEnd('\r', '\n');
-                var flattened = Flatten(raw).Trim();
+                var flattened = EditorText.Flatten(raw).Trim();
 
                 pending.Field.Text = flattened;
                 pending.Field.InsertionPoint = flattened.Length;

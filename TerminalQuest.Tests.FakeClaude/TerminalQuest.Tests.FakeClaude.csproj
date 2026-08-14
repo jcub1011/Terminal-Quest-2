@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A stand-in for the `claude` CLI, used by ClaudeSession's integration tests.
+
+    It has to be a real executable rather than a script: ClaudeSession sets ProcessStartInfo.FileName
+    to the configured path and supplies the argument vector itself, so there is nowhere to put an
+    interpreter. It speaks the same newline-delimited JSON protocol over stdin and stdout, replying
+    with whatever the test asked for through TQ_FAKE_CLAUDE_SCRIPT.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>tq-fake-claude</AssemblyName>
+    <RootNamespace>TerminalQuest.Tests.FakeClaude</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

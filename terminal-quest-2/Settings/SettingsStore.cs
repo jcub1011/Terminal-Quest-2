@@ -25,12 +25,22 @@ namespace TerminalQuest.Settings
         /// a working configuration. They can see what went wrong on the settings screen, which is
         /// where they would go to fix it anyway.
         /// </remarks>
-        public static AppSettings Read()
+        public static AppSettings Read() => Read(Path);
+
+        /// <summary>
+        /// The same, from a named file.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Path"/> is fixed under <see cref="AppDirectory"/> with no override — saves
+        /// can be redirected with <c>TQ_SAVES</c> but settings cannot. This overload is the seam
+        /// that lets the recovery behaviour above be checked without writing to the real profile.
+        /// </remarks>
+        internal static AppSettings Read(string path)
         {
+            ArgumentNullException.ThrowIfNull(path);
+
             try
             {
-                var path = Path;
-
                 if (!File.Exists(path))
                 {
                     return new AppSettings();
@@ -54,15 +64,23 @@ namespace TerminalQuest.Settings
 
         /// <summary>Stores the settings, replacing whatever was there.</summary>
         /// <exception cref="SaveException">The file could not be written.</exception>
-        public static void Write(AppSettings settings)
+        public static void Write(AppSettings settings) => Write(settings, Path);
+
+        /// <summary>The same, to a named file. The seam described on <see cref="Read(string)"/>.</summary>
+        /// <exception cref="SaveException">The file could not be written.</exception>
+        internal static void Write(AppSettings settings, string path)
         {
             ArgumentNullException.ThrowIfNull(settings);
-
-            var path = Path;
+            ArgumentNullException.ThrowIfNull(path);
 
             try
             {
-                Directory.CreateDirectory(AppDirectory.Root);
+                var folder = System.IO.Path.GetDirectoryName(path);
+
+                if (folder is { Length: > 0 })
+                {
+                    Directory.CreateDirectory(folder);
+                }
 
                 File.WriteAllText(
                     path,

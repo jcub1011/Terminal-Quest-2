@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Mirrors the app. SaveEntry.SizeText and CharacterAttributes.Sign format without an
+         explicit culture, so the test host must agree with the game about what a number
+         looks like or those assertions drift on a comma-decimal machine. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- xunit.v3 pins the whole Microsoft.Testing.Platform stack at 1.9.1. Do not add an
+         explicit Microsoft.Testing.Platform* reference: upgrading one package without the
+         others splits the set and the host dies with a TypeLoadException at startup. -->
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\terminal-quest-2\TerminalQuest.csproj" />
+
+    <!-- Built alongside the tests but never referenced in code: ClaudeSession launches it as a
+         process, so all the tests need is for it to exist on disk next to them. -->
+    <ProjectReference Include="..\TerminalQuest.Tests.FakeClaude\TerminalQuest.Tests.FakeClaude.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!--
+    ReferenceOutputAssembly="false" keeps the stand-in off the compile references - nothing calls
+    into it - but that also stops its files being copied, and the tests need the apphost .exe on
+    disk beside them. Copy the whole output rather than naming files: it needs its runtimeconfig
+    and deps alongside the executable to start at all.
+  -->
+  <Target Name="CopyFakeClaude" AfterTargets="Build">
+    <ItemGroup>
+      <FakeClaudeFiles Include="$(MSBuildThisFileDirectory)..\TerminalQuest.Tests.FakeClaude\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FakeClaudeFiles)"
+          DestinationFolder="$(OutDir)%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

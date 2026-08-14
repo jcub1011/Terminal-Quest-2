@@ -74,7 +74,7 @@ namespace TerminalQuest.Mcp
         }
 
         /// <summary>Turns one request line into one response line, or null for a notification.</summary>
-        private static string? Handle(SaveStore store, string line)
+        internal static string? Handle(SaveStore store, string line)
         {
             JsonDocument document;
             try

@@ -52,7 +52,7 @@ namespace TerminalQuest.Ui
         /// TQ_FPS overrides the cap, for a machine where the extra wake-ups are not worth it -
         /// or one where they are not enough. Clamped, so a typo cannot stall the loop or spin it.
         /// </summary>
-        private static ushort Cap() =>
+        internal static ushort Cap() =>
             ushort.TryParse(Environment.GetEnvironmentVariable("TQ_FPS"), out var fps)
                 ? Math.Clamp(fps, MinimumIterationsPerSecond, MaximumIterationsPerSecond)
                 : DefaultIterationsPerSecond;

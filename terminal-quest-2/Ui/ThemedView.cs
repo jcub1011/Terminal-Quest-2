@@ -55,7 +55,7 @@ namespace TerminalQuest.Ui
         /// replaced underneath it.
         /// </para>
         /// </summary>
-        protected static int ScrollWindowStart(int selectedIndex, int count, int height) =>
+        internal static int ScrollWindowStart(int selectedIndex, int count, int height) =>
             Math.Max(0, Math.Min(selectedIndex - (height / 2), count - height));
 
         /// <summary>A row of spaces <paramref name="width"/> wide, reusing the last one when it fits.</summary>

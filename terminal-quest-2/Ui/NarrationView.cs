@@ -18,7 +18,7 @@ namespace TerminalQuest.Ui
     /// Without that split, streaming would re-wrap the entire transcript per token.
     /// </para>
     /// </summary>
-    internal sealed class NarrationView : ThemedView
+    internal sealed class NarrationView : ThemedView, INarrationSink
     {
         /// <summary>Rows the wheel moves per notch.</summary>
         private const int WheelRows = 4;

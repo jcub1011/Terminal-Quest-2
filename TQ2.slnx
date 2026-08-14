@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="terminal-quest-2/TerminalQuest.csproj" />
+  <Project Path="TerminalQuest.Tests/TerminalQuest.Tests.csproj" />
+  <Project Path="TerminalQuest.Tests.FakeClaude/TerminalQuest.Tests.FakeClaude.csproj" />
 </Solution>

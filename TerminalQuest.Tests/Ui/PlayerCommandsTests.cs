@@ -1,0 +1,304 @@
+using TerminalQuest.Saves;
+using TerminalQuest.Tests.Infrastructure;
+using TerminalQuest.Ui;
+
+using Xunit;
+
+namespace TerminalQuest.Tests.Ui
+{
+    /// <summary>
+    /// The player's own commands, answered by the game rather than forwarded to the narrator.
+    /// </summary>
+    public sealed class PlayerCommandsTests
+    {
+        private static TempSave Seeded()
+        {
+            var save = new TempSave();
+            NewGame.Create(save.Store, "Rowan", "A quiet sort.", ClassTemplates.All[0], "The Ford");
+            return save;
+        }
+
+        private static string TextOf(PlayerCommandResult result) =>
+            string.Join(
+                "\n",
+                result.Lines.Select(line => string.Concat(line.Spans.Select(span => span.Text))));
+
+        // ---- The table and the switch are a pair ---------------------------------------------
+
+        [Fact]
+        public void Every_command_in_the_table_actually_runs()
+        {
+            // A name in the table but not the switch is a suggestion that errors when taken.
+            using var save = Seeded();
+
+            foreach (var command in PlayerCommands.All)
+            {
+                var result = PlayerCommands.Execute($"/{command.Name}", save.Store);
+
+                Assert.DoesNotContain(
+                    $"There is no command '/{command.Name}'",
+                    TextOf(result),
+                    StringComparison.Ordinal);
+            }
+        }
+
+        [Fact]
+        public void An_unknown_command_is_refused_rather_than_spoken_to_the_world()
+        {
+            // A typo must never quietly become a story prompt.
+            using var save = Seeded();
+
+            var result = PlayerCommands.Execute("/nosuchthing", save.Store);
+
+            Assert.Contains("There is no command", TextOf(result), StringComparison.Ordinal);
+            Assert.False(result.Quit);
+        }
+
+        [Fact]
+        public void Help_lists_every_command_that_is_not_an_alias()
+        {
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/help", save.Store));
+
+            foreach (var command in PlayerCommands.All.Where(c => !c.IsAlias))
+            {
+                Assert.Contains($"/{command.Name}", text, StringComparison.Ordinal);
+            }
+        }
+
+        [Fact]
+        public void Command_names_are_unique()
+        {
+            var names = PlayerCommands.All.Select(command => command.Name).ToList();
+
+            Assert.Equal(names.Count, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        }
+
+        [Fact]
+        public void No_command_name_contains_a_space()
+        {
+            // Parsing is positional and space-delimited, so a name with a space could never be run.
+            Assert.All(PlayerCommands.All, command => Assert.DoesNotContain(' ', command.Name));
+        }
+
+        [Fact]
+        public void Every_alias_stands_for_a_command_that_does_the_same_thing()
+        {
+            using var save = Seeded();
+
+            foreach (var alias in PlayerCommands.All.Where(command => command.IsAlias))
+            {
+                var twin = PlayerCommands.All.First(command =>
+                    !command.IsAlias && command.Summary == alias.Summary);
+
+                Assert.Equal(
+                    TextOf(PlayerCommands.Execute($"/{twin.Name}", save.Store)),
+                    TextOf(PlayerCommands.Execute($"/{alias.Name}", save.Store)));
+            }
+        }
+
+        // ---- Recognising a command -------------------------------------------------------------
+
+        [Theory]
+        [InlineData("/help")]
+        [InlineData("/")]
+        [InlineData("/anything at all")]
+        public void Input_starting_with_a_slash_is_addressed_to_the_game(string input)
+        {
+            Assert.True(PlayerCommands.IsCommand(input));
+        }
+
+        [Theory]
+        [InlineData("look around")]
+        [InlineData("")]
+        [InlineData(" /help")]
+        public void Anything_else_is_spoken_to_the_world(string input)
+        {
+            Assert.False(PlayerCommands.IsCommand(input));
+        }
+
+        // ---- Suggestions --------------------------------------------------------------------------
+
+        [Fact]
+        public void A_bare_slash_offers_everything()
+        {
+            Assert.Equal(PlayerCommands.All.Count, PlayerCommands.Matching("/").Count);
+        }
+
+        [Fact]
+        public void A_prefix_narrows_the_offer()
+        {
+            var matches = PlayerCommands.Matching("/inv");
+
+            Assert.Equal(["inventory", "inv"], matches.Select(command => command.Name).ToList());
+        }
+
+        [Fact]
+        public void Suggestions_are_case_insensitive_because_execution_is()
+        {
+            // /INV runs, so /IN has to be offered /inventory.
+            Assert.NotEmpty(PlayerCommands.Matching("/IN"));
+        }
+
+        [Fact]
+        public void Nothing_is_offered_once_the_player_has_moved_on_to_the_argument()
+        {
+            // A list of commands is no longer an answer to anything.
+            Assert.Empty(PlayerCommands.Matching("/delete "));
+            Assert.Empty(PlayerCommands.Matching("/delete Riverbend"));
+        }
+
+        [Fact]
+        public void Nothing_is_offered_for_input_that_is_not_a_command()
+        {
+            Assert.Empty(PlayerCommands.Matching("look around"));
+        }
+
+        [Fact]
+        public void A_prefix_nothing_starts_with_offers_nothing()
+        {
+            Assert.Empty(PlayerCommands.Matching("/zzz"));
+        }
+
+        // ---- Describing ------------------------------------------------------------------------------
+
+        [Fact]
+        public void A_named_command_is_described_even_once_the_argument_has_begun()
+        {
+            // So /delete is still saying it wants a name while the player is typing it.
+            var described = PlayerCommands.Describing("/delete Riverbend");
+
+            Assert.NotNull(described);
+            Assert.Equal("delete", described.Value.Name);
+        }
+
+        [Fact]
+        public void A_partial_name_describes_nothing()
+        {
+            Assert.Null(PlayerCommands.Describing("/del"));
+        }
+
+        [Theory]
+        [InlineData("/")]
+        [InlineData("/   ")]
+        [InlineData("look around")]
+        public void Input_naming_no_command_describes_nothing(string input)
+        {
+            Assert.Null(PlayerCommands.Describing(input));
+        }
+
+        [Fact]
+        public void Describing_splits_exactly_as_execute_does()
+        {
+            // Otherwise the hint could describe a different command from the one that would run.
+            using var save = Seeded();
+
+            foreach (var input in new[] { "/help", "/HELP", "/help ", "/help extra", "  /help" })
+            {
+                var described = PlayerCommands.Describing(input);
+                var ran = !TextOf(PlayerCommands.Execute(input, save.Store))
+                    .Contains("There is no command", StringComparison.Ordinal);
+
+                Assert.Equal(ran && PlayerCommands.IsCommand(input), described is not null);
+            }
+        }
+
+        [Fact]
+        public void Usage_shows_the_argument_when_there_is_one()
+        {
+            Assert.Equal("/delete <name>", PlayerCommands.All.First(c => c.Name == "delete").Usage);
+            Assert.Equal("/help", PlayerCommands.All.First(c => c.Name == "help").Usage);
+        }
+
+        // ---- Running -----------------------------------------------------------------------------------
+
+        [Theory]
+        [InlineData("/quit")]
+        [InlineData("/exit")]
+        [InlineData("/QUIT")]
+        public void Leaving_asks_the_session_to_end(string input)
+        {
+            using var save = Seeded();
+
+            Assert.True(PlayerCommands.Execute(input, save.Store).Quit);
+        }
+
+        [Fact]
+        public void No_other_command_ends_the_session()
+        {
+            using var save = Seeded();
+
+            foreach (var command in PlayerCommands.All.Where(c => c.Name is not ("quit" or "exit")))
+            {
+                Assert.False(PlayerCommands.Execute($"/{command.Name}", save.Store).Quit);
+            }
+        }
+
+        [Fact]
+        public void The_inventory_read_is_the_record_rather_than_a_recollection()
+        {
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/inventory", save.Store));
+
+            foreach (var item in save.Store.ReadInventory().Items)
+            {
+                Assert.Contains(item.Name, text, StringComparison.Ordinal);
+            }
+        }
+
+        [Fact]
+        public void Characters_lists_who_has_been_met()
+        {
+            using var save = Seeded();
+
+            Assert.Contains("Rowan", TextOf(PlayerCommands.Execute("/characters", save.Store)), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Locations_lists_where_the_player_has_been()
+        {
+            using var save = Seeded();
+
+            Assert.Contains("The Ford", TextOf(PlayerCommands.Execute("/where", save.Store)), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_command_never_shows_an_entity_id()
+        {
+            using var save = Seeded();
+
+            foreach (var command in PlayerCommands.All)
+            {
+                var text = TextOf(PlayerCommands.Execute($"/{command.Name}", save.Store));
+
+                Assert.DoesNotContain(EntityIds.Character, text, StringComparison.Ordinal);
+                Assert.DoesNotContain(EntityIds.Location, text, StringComparison.Ordinal);
+                Assert.DoesNotContain(EntityIds.Item, text, StringComparison.Ordinal);
+            }
+        }
+
+        [Fact]
+        public void A_broken_save_is_reported_rather_than_thrown_at_the_player()
+        {
+            using var save = Seeded();
+            save.WriteRaw("characters.json", "{ not json");
+
+            var result = PlayerCommands.Execute("/characters", save.Store);
+
+            Assert.NotEmpty(result.Lines);
+            Assert.Contains("characters.json", TextOf(result), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Deleting_without_a_name_asks_for_one_rather_than_guessing()
+        {
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/delete", save.Store));
+
+            Assert.NotEmpty(text);
+        }
+    }
+}

@@ -112,6 +112,12 @@ namespace TerminalQuest.Saves
         /// stored - which for one of the six means only that nobody has changed it from
         /// <see cref="Neutral"/>; see <see cref="All"/>.
         /// </summary>
+        /// <remarks>
+        /// Both sides are canonicalised, not just the one being asked for. A hand-edited save -
+        /// which the rest of this file goes out of its way to tolerate - can hold <c>str</c> where
+        /// <see cref="Set"/> would have written <c>Strength</c>, and comparing the stored spelling
+        /// raw would leave that score invisible to every reader.
+        /// </remarks>
         public static CharacterAttribute? Find(Character character, string? name)
         {
             ArgumentNullException.ThrowIfNull(character);
@@ -121,7 +127,8 @@ namespace TerminalQuest.Saves
                 return null;
             }
 
-            return character.Attributes.Find(attribute => SaveStore.Matches(attribute.Name, wanted));
+            return character.Attributes.Find(attribute =>
+                CanonicalName(attribute.Name) is { } stored && SaveStore.Matches(stored, wanted));
         }
 
         /// <summary>
@@ -134,6 +141,11 @@ namespace TerminalQuest.Saves
         /// one edited by hand, therefore reads as a complete character without being quietly
         /// rewritten the first time anybody looks at it - the same instinct as the blank-id repair
         /// in <c>upsert_character</c>, minus the write.
+        /// <para>
+        /// One stored under an abbreviation is reported under its canonical name for the same
+        /// reason and in the same way: a copy carries the score out, and the document keeps the
+        /// spelling somebody typed into it.
+        /// </para>
         /// </remarks>
         public static IEnumerable<CharacterAttribute> All(Character character)
         {
@@ -141,7 +153,18 @@ namespace TerminalQuest.Saves
 
             foreach (var name in Core)
             {
-                yield return Find(character, name) ?? new CharacterAttribute { Name = name, Score = Neutral };
+                if (Find(character, name) is not { } stored)
+                {
+                    yield return new CharacterAttribute { Name = name, Score = Neutral };
+                }
+                else if (SaveStore.Matches(stored.Name, name))
+                {
+                    yield return stored;
+                }
+                else
+                {
+                    yield return new CharacterAttribute { Name = name, Score = stored.Score };
+                }
             }
 
             foreach (var attribute in character.Attributes)
