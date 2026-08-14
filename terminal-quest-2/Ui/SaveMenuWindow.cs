@@ -27,14 +27,20 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class SaveMenuWindow : Window
     {
-        /// <summary>The narrator line, the hint line, and the row the editor sits on.</summary>
-        private const int FooterHeight = 3;
+        /// <summary>
+        /// The narrator line, two hint lines, and the row the editor sits on. Two hint lines because
+        /// the saves level has more keys than fit across a narrow terminal in one.
+        /// </summary>
+        private const int FooterHeight = 4;
 
         private const string OptionsHint =
             "Press the letter in brackets, or Up/Down and Enter.  Right opens a submenu.";
 
         private const string SavesHint =
-            "Enter loads.  R renames.  D duplicates.  X deletes.  Left goes back.";
+            "Enter loads.  R renames.  D duplicates.";
+
+        private const string SavesHintMore =
+            "F opens the save folder.  X deletes.  Left goes back.";
 
         /// <summary>Where the options live, so the keys and the rows cannot drift apart.</summary>
         private const int ContinueRow = 0;
@@ -48,6 +54,10 @@ namespace TerminalQuest.Ui
         private readonly BreadcrumbView _breadcrumb;
         private readonly Label _narrator;
         private readonly Label _hint;
+
+        /// <summary>The hint line's second row, blank whenever the first row is carrying a notice.</summary>
+        private readonly Label _hintMore;
+
         private readonly Label _prompt;
         private readonly TextField _editor;
 
@@ -108,8 +118,9 @@ namespace TerminalQuest.Ui
 
             _narrator = Line($"Narrator: {narrator}", Pos.Bottom(_options));
             _hint = Line(string.Empty, Pos.Bottom(_narrator));
+            _hintMore = Line(string.Empty, Pos.Bottom(_hint));
 
-            _prompt = Line(string.Empty, Pos.Bottom(_hint));
+            _prompt = Line(string.Empty, Pos.Bottom(_hintMore));
             _prompt.Width = Dim.Auto();
             _prompt.Visible = false;
 
@@ -120,7 +131,7 @@ namespace TerminalQuest.Ui
             _editor = new TextField
             {
                 X = Pos.Right(_prompt),
-                Y = Pos.Bottom(_hint),
+                Y = Pos.Bottom(_hintMore),
                 Width = Dim.Fill(),
                 Height = 1,
                 Visible = false,
@@ -129,7 +140,7 @@ namespace TerminalQuest.Ui
             _editor.SetScheme(Theme.CreateScheme());
             _editor.Accepting += OnEditorAccepting;
 
-            Add(_breadcrumb, _options, _saves, _narrator, _hint, _prompt, _editor);
+            Add(_breadcrumb, _options, _saves, _narrator, _hint, _hintMore, _prompt, _editor);
 
             Reload(out var failure);
             ShowLevel();
@@ -368,6 +379,12 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
+            if (Letter(key, Key.F))
+            {
+                Reveal();
+                return true;
+            }
+
             return base.OnKeyDown(key);
         }
 
@@ -597,6 +614,54 @@ namespace TerminalQuest.Ui
             Fail(failure ?? $"Copied '{selected.Name}' to '{copy}'.");
         }
 
+        /// <summary>
+        /// Shows the selected save's files. A save is a folder and nothing else, so there is nothing
+        /// to export or unpack here - the player just wants to be standing in it.
+        /// </summary>
+        private void Reveal()
+        {
+            if (_saves.Selected is not { } selected)
+            {
+                Fail("There is no save to show.");
+                return;
+            }
+
+            string folder;
+
+            try
+            {
+                folder = SavePaths.Folder(selected.Name);
+            }
+            catch (ArgumentException ex)
+            {
+                Fail(ex.Message);
+                return;
+            }
+
+            // The list was read off the disk, so a folder that has gone since means something
+            // outside the game moved it. Read it again rather than leave a row that does nothing.
+            if (!Directory.Exists(folder))
+            {
+                Reload(out _);
+
+                if (_saves.Saves.Count == 0)
+                {
+                    GoToOptions();
+                }
+
+                Fail($"'{selected.Name}' is no longer on disk.");
+                return;
+            }
+
+            if (!FileExplorer.TryOpen(folder, out var reason))
+            {
+                Fail(reason ?? $"Could not open the folder for '{selected.Name}'.");
+                return;
+            }
+
+            Fail($"Opened the folder for '{selected.Name}'.");
+        }
+
         private void Open(string name)
         {
             try
@@ -717,19 +782,39 @@ namespace TerminalQuest.Ui
 
         private SaveEntry? Latest() => _saves.Saves.Count > 0 ? _saves.Saves[0] : null;
 
-        private void ShowHint() => SetHint(_level == Level.Saves ? SavesHint : OptionsHint);
+        private void ShowHint()
+        {
+            if (_level == Level.Saves)
+            {
+                SetHint(SavesHint, SavesHintMore);
+                return;
+            }
+
+            SetHint(OptionsHint);
+        }
 
         private void Fail(string message) => SetHint(message);
 
-        private void SetHint(string text)
+        /// <param name="more">
+        /// The second row. Empty by default, so a notice or an edit's own hint - both of which are
+        /// one line - takes the row underneath it back off rather than leaving half of the keys for
+        /// the level beneath sitting under an unrelated message.
+        /// </param>
+        private void SetHint(string text, string more = "")
         {
-            if (_hint.Text == text)
+            Set(_hint, text);
+            Set(_hintMore, more);
+        }
+
+        private static void Set(Label label, string text)
+        {
+            if (label.Text == text)
             {
                 return;
             }
 
-            _hint.Text = text;
-            _hint.SetNeedsDraw();
+            label.Text = text;
+            label.SetNeedsDraw();
         }
 
         private static Label Line(string text, Pos y)

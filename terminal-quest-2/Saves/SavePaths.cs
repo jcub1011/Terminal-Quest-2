@@ -94,6 +94,14 @@ namespace TerminalQuest.Saves
             }
         }
 
+        /// <summary>
+        /// The folder a save's name means, whether or not it is there. Unlike <see cref="Open"/>
+        /// this creates nothing - it is for showing a save's files to the player, not for reading
+        /// them.
+        /// </summary>
+        /// <exception cref="ArgumentException">The name could never have been a save.</exception>
+        public static string Folder(string name) => Resolve(name, nameof(name));
+
         /// <summary>Whether a save folder of this name already exists.</summary>
         public static bool Exists(string name) =>
             IsValidName(name) && Directory.Exists(Path.Combine(Root, name.Trim()));
