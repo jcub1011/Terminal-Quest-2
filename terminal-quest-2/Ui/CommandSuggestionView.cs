@@ -89,7 +89,7 @@ namespace TerminalQuest.Ui
             BeginPaint(width, height);
 
             // Keep the highlight on screen when there are more commands than rows to show them in.
-            var first = Math.Max(0, Math.Min(_selectedIndex - (height / 2), _suggestions.Count - height));
+            var first = ScrollWindowStart(_selectedIndex, _suggestions.Count, height);
 
             for (var row = 0; row < height && first + row < _suggestions.Count; row++)
             {

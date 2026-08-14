@@ -58,8 +58,7 @@ namespace TerminalQuest.Ui
             BeginPaint(width, height);
 
             // Keep the highlight on screen when the list is longer than the pane.
-            var first = Math.Max(0, Math.Min(_selectedIndex - (height / 2), _classes.Count - height));
-            first = Math.Max(0, first);
+            var first = ScrollWindowStart(_selectedIndex, _classes.Count, height);
 
             for (var row = 0; row < height && first + row < _classes.Count; row++)
             {

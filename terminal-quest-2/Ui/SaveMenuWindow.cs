@@ -217,6 +217,41 @@ namespace TerminalQuest.Ui
             : OnKeyDownOptions(key);
 
         /// <summary>
+        /// Moves the highlight on the wheel, on whichever list the level is showing.
+        /// <para>
+        /// Handled here rather than on the lists themselves because moving the highlight on the
+        /// saves level is never only that: it abandons a half-confirmed delete, exactly as the
+        /// arrows do. A wheel wired straight into the list would slide the highlight off the save
+        /// the confirmation was asked about and leave it armed.
+        /// </para>
+        /// </summary>
+        protected override bool OnMouseEvent(Mouse mouse)
+        {
+            ArgumentNullException.ThrowIfNull(mouse);
+
+            var delta = mouse.Flags.HasFlag(MouseFlags.WheeledUp) ? -1
+                : mouse.Flags.HasFlag(MouseFlags.WheeledDown) ? 1
+                : 0;
+
+            // Nothing moves under a name being typed: the cursor the player is watching is in the
+            // field, and the list it would move is the one that field is sitting on.
+            if (delta == 0 || _editing != Editing.None)
+            {
+                return false;
+            }
+
+            if (_level != Level.Saves)
+            {
+                _options.MoveSelection(delta);
+                return true;
+            }
+
+            CancelPendingDelete();
+            _saves.MoveSelection(delta);
+            return true;
+        }
+
+        /// <summary>
         /// Keys while a name is being typed.
         /// <para>
         /// The focused editor has already had its turn by the time this runs - Terminal.Gui offers

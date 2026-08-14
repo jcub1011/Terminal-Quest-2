@@ -191,6 +191,42 @@ namespace TerminalQuest.Ui
             return base.OnKeyDown(key);
         }
 
+        /// <summary>
+        /// The wheel drives the class list, for the same reason the arrows do: it is the only list
+        /// on the screen, so there is nothing else the wheel could mean.
+        /// <para>
+        /// Handled here rather than on the list itself because moving the highlight is never only
+        /// that - the kit below it describes the highlighted class, and a wheel that moved one
+        /// without the other would leave the two disagreeing.
+        /// </para>
+        /// </summary>
+        protected override bool OnMouseEvent(Mouse mouse)
+        {
+            ArgumentNullException.ThrowIfNull(mouse);
+
+            // Nothing moves while a field is in another program, matching OnKeyDown.
+            if (Editor is { IsBusy: true })
+            {
+                return true;
+            }
+
+            var delta = Wheel(mouse);
+            if (delta == 0)
+            {
+                return false;
+            }
+
+            _classes.MoveSelection(delta);
+            ShowKit();
+            return true;
+        }
+
+        /// <summary>Rows the wheel asks for: one per notch, or none when it was not the wheel.</summary>
+        private static int Wheel(Mouse mouse) =>
+            mouse.Flags.HasFlag(MouseFlags.WheeledUp) ? -1
+            : mouse.Flags.HasFlag(MouseFlags.WheeledDown) ? 1
+            : 0;
+
         private static TextField MakeField() => new()
         {
             X = 0,

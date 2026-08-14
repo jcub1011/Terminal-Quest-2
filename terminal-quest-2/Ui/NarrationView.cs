@@ -41,7 +41,6 @@ namespace TerminalQuest.Ui
         /// <summary>Width the caches were built for; -1 forces a rebuild.</summary>
         private int _wrapWidth = -1;
 
-        private int _scroll;
         private bool _stickToBottom = true;
 
         private bool _isWaiting;
@@ -74,6 +73,15 @@ namespace TerminalQuest.Ui
         /// clamping need no special case for it.
         /// </summary>
         private int TotalRows => _committedRows.Count + _currentRows.Count + (ShowWaiting ? 1 : 0);
+
+        /// <summary>
+        /// The offset that rests the last row at the foot of the pane - the furthest this can
+        /// scroll. The base class clamps to the same bound whenever the offset is assigned, but it
+        /// has to be named here too: it is also the test for whether the view is following the
+        /// stream, and the base class does not revisit the offset when the row count changes
+        /// underneath it.
+        /// </summary>
+        private int BottomOffset => Math.Max(0, TotalRows - Viewport.Height);
 
         /// <summary>Appends streamed narration. Safe to call with partial markup tags.</summary>
         public void AppendDelta(string text)
@@ -128,28 +136,53 @@ namespace TerminalQuest.Ui
         /// <summary>Inserts a blank spacer row.</summary>
         public void AddBlankLine() => AddLine(new StyledLine());
 
-        public void ScrollBy(int rows)
-        {
-            var maxScroll = Math.Max(0, TotalRows - Viewport.Height);
-            _scroll = Math.Clamp(_scroll + rows, 0, maxScroll);
-            _stickToBottom = _scroll >= maxScroll;
-            SetNeedsDraw();
-        }
-
         public void ScrollToBottom()
         {
             _stickToBottom = true;
-            _scroll = Math.Max(0, TotalRows - Viewport.Height);
+            SyncContentSize();
             SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// Scrolls by whole rows. The scroll offset is <see cref="View.Viewport"/>'s, so the base
+        /// class does the clamping; this only has to keep the follow-the-stream flag in step, so
+        /// that wheeling up during a turn detaches from the stream and wheeling back down rejoins
+        /// it.
+        /// </summary>
+        private void Scroll(int rows)
+        {
+            ScrollVertical(rows);
+            _stickToBottom = Viewport.Y >= BottomOffset;
+            SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// Publishes the row count as the view's content height, which is what lets the base class
+        /// own the scroll offset, and then puts the offset where it belongs.
+        /// <para>
+        /// The base class clamps the offset when it is assigned but never revisits it on its own,
+        /// so the offset has to be pulled back into range here: re-wrapping at a wider terminal
+        /// yields fewer rows and can leave it stranded past the end, which would draw the pane with
+        /// blank rows below the last line. Assigned only when it actually moves, so that a redraw
+        /// that changed nothing stays free.
+        /// </para>
+        /// </summary>
+        private void SyncContentSize()
+        {
+            SetContentHeight(TotalRows);
+
+            var bottom = BottomOffset;
+            var target = _stickToBottom ? bottom : Math.Min(Viewport.Y, bottom);
+
+            if (target != Viewport.Y)
+            {
+                ScrollVertical(target - Viewport.Y);
+            }
         }
 
         private void AfterContentChanged()
         {
-            if (_stickToBottom)
-            {
-                _scroll = Math.Max(0, TotalRows - Viewport.Height);
-            }
-
+            SyncContentSize();
             SetNeedsDraw();
         }
 
@@ -159,37 +192,33 @@ namespace TerminalQuest.Ui
 
             if (key == Key.PageUp)
             {
-                ScrollBy(-page);
+                Scroll(-page);
                 return true;
             }
 
             if (key == Key.PageDown)
             {
-                ScrollBy(page);
+                Scroll(page);
                 return true;
             }
 
             return false;
         }
 
-        /// <summary>
-        /// Scrolls on the wheel. <see cref="ScrollBy"/> already clamps and maintains the
-        /// stick-to-bottom flag, so wheeling up during a turn detaches from the stream and wheeling
-        /// back down rejoins it.
-        /// </summary>
+        /// <summary>Scrolls on the wheel. <see cref="Scroll"/> clamps and tracks the stream.</summary>
         protected override bool OnMouseEvent(Mouse mouse)
         {
             ArgumentNullException.ThrowIfNull(mouse);
 
             if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))
             {
-                ScrollBy(-WheelRows);
+                Scroll(-WheelRows);
                 return true;
             }
 
             if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
             {
-                ScrollBy(WheelRows);
+                Scroll(WheelRows);
                 return true;
             }
 
@@ -215,12 +244,13 @@ namespace TerminalQuest.Ui
 
             BeginPaint(width, height);
 
-            var maxScroll = Math.Max(0, TotalRows - height);
-            _scroll = Math.Clamp(_scroll, 0, maxScroll);
+            // The pane may have been resized since the row count last changed, which moves the
+            // bottom without going through any of the callers that would have re-synced it.
+            SyncContentSize();
 
             for (var y = 0; y < height; y++)
             {
-                var index = _scroll + y;
+                var index = Viewport.Y + y;
                 if (index >= TotalRows)
                 {
                     break;
@@ -269,10 +299,7 @@ namespace TerminalQuest.Ui
 
             _currentRows = _current is { Length: > 0 } ? Wrap(_current.Spans, _wrapWidth) : [];
 
-            if (_stickToBottom)
-            {
-                _scroll = Math.Max(0, TotalRows - Viewport.Height);
-            }
+            // The offset is left to the SyncContentSize call that follows every rebuild.
         }
 
         /// <summary>
