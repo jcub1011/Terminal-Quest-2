@@ -84,7 +84,7 @@ namespace TerminalQuest.Ui
             Describe(lines, "/locations [name]", "where you have been, and what happened there");
             Describe(lines, "/saves", "every save on this machine");
             Describe(lines, "/delete <name>", "destroy another save, for good");
-            Describe(lines, "/quit", "leave the game");
+            Describe(lines, "/quit", "leave this save and go back to the menu");
             lines.Add(StyledLine.FromText("Anything else is spoken to the world.", TextRole.System));
         }
 

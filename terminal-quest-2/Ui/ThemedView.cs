@@ -13,6 +13,13 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal abstract class ThemedView : View
     {
+        /// <summary>
+        /// The blank row the last clear used, kept so a redraw at an unchanged width does not
+        /// allocate a fresh one. Every view here clears at the full viewport width, and the width
+        /// only changes when the terminal is resized, so in practice one string serves them all.
+        /// </summary>
+        private static string _blank = string.Empty;
+
         protected ThemedView()
         {
             CanFocus = false;
@@ -30,12 +37,28 @@ namespace TerminalQuest.Ui
         {
             SetRole(TextRole.Normal);
 
-            var blank = new string(' ', width);
+            var blank = Blank(width);
             for (var y = 0; y < height; y++)
             {
                 Move(0, y);
                 AddStr(blank);
             }
+        }
+
+        /// <summary>A row of spaces <paramref name="width"/> wide, reusing the last one when it fits.</summary>
+        private static string Blank(int width)
+        {
+            // Read once: drawing is on the UI thread, but the field is shared by every view and
+            // there is no reason to read it twice.
+            var cached = _blank;
+            if (cached.Length == width)
+            {
+                return cached;
+            }
+
+            var blank = new string(' ', width);
+            _blank = blank;
+            return blank;
         }
 
         /// <summary>Selects the attribute for a semantic role over the terminal's background.</summary>

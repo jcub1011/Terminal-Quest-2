@@ -15,7 +15,11 @@ namespace TerminalQuest.Ui
         private const int StatusWidth = 16;
         private const int InputHeight = 3;
 
+        private const string IdleTitle = "command";
+        private const string BusyTitle = "command - narrator speaking";
+
         private readonly TextField _input;
+        private readonly FrameView _inputFrame;
 
         public GameWindow(GameState state)
         {
@@ -52,20 +56,20 @@ namespace TerminalQuest.Ui
                 Height = 1,
             };
 
-            var inputFrame = new FrameView
+            _inputFrame = new FrameView
             {
-                Title = "command",
+                Title = IdleTitle,
                 X = 0,
                 Y = Pos.Bottom(Narration),
                 Width = Dim.Fill(),
                 Height = InputHeight,
                 BorderStyle = LineStyle.Rounded,
             };
-            inputFrame.Add(_input);
+            _inputFrame.Add(_input);
 
             _input.Accepting += OnInputAccepting;
 
-            Add(Narration, Status, inputFrame);
+            Add(Narration, Status, _inputFrame);
         }
 
         public NarrationView Narration { get; }
@@ -78,35 +82,58 @@ namespace TerminalQuest.Ui
         public event Action<string>? CommandEntered;
 
         /// <summary>
-        /// Blocks input while a turn is in flight, so a second command cannot be submitted into
-        /// a session that is still streaming a reply.
+        /// Asked before a submitted line is taken. Returning false abandons the submission: the
+        /// text is left in the field and nothing is echoed, so the player loses neither what they
+        /// typed nor their place. Whoever says no owns saying why.
         /// </summary>
-        public bool InputEnabled
+        /// <remarks>
+        /// A predicate the host sets rather than a rule this window enforces, because the reasons
+        /// a line cannot be taken - a turn already in flight, and which lines are exempt from that -
+        /// are the host's business. This window still does not know what a command means.
+        /// </remarks>
+        public Func<string, bool>? CanSubmit { get; set; }
+
+        /// <summary>
+        /// Whether a narrator turn is in flight.
+        /// <para>
+        /// The input field deliberately stays live while it is: a turn can take minutes, and
+        /// disabling the field takes the player's own commands - <c>/story</c>, <c>/inventory</c>,
+        /// <c>/quit</c> - away with it, which leaves nothing to press. What a turn in flight
+        /// actually forbids is a second turn, and that is <see cref="CanSubmit"/>'s job.
+        /// </para>
+        /// </summary>
+        public bool IsBusy
         {
-            get => _input.Enabled;
+            get => State.IsBusy;
             set
             {
-                _input.Enabled = value;
-                State.IsBusy = !value;
+                State.IsBusy = value;
                 Status.SetNeedsDraw();
 
-                if (value)
-                {
-                    _input.SetFocus();
-                }
+                _inputFrame.Title = value ? BusyTitle : IdleTitle;
+                _inputFrame.SetNeedsDraw();
+
+                // Nothing re-focuses here, unlike the property this replaced. That one had to,
+                // because disabling the field moved the focus off it; this never disables it, so
+                // the caret stays where the player left it - including mid-word, mid-turn.
             }
         }
 
-        /// <summary>Raised when the player asks to quit. The host owns the actual shutdown.</summary>
-        public event Action? QuitRequested;
+        /// <summary>
+        /// Raised when the player asks to leave this save. The host owns what happens next, which
+        /// is a return to the save menu rather than the end of the program.
+        /// </summary>
+        public event Action? LeaveRequested;
 
         public void FocusInput() => _input.SetFocus();
 
         protected override bool OnKeyDown(Key key)
         {
+            // Both mean the same thing here: leave this save. Quitting the program is the save
+            // menu's to offer, one screen further out.
             if (key == Key.Esc || key == Key.Q.WithCtrl)
             {
-                QuitRequested?.Invoke();
+                LeaveRequested?.Invoke();
                 return true;
             }
 
@@ -127,6 +154,13 @@ namespace TerminalQuest.Ui
 
             var text = _input.Text?.Trim() ?? string.Empty;
             if (text.Length == 0)
+            {
+                return;
+            }
+
+            // Asked before anything is cleared or echoed, so a refused line is left exactly as
+            // the player typed it and Enter can simply be pressed again once it will be taken.
+            if (CanSubmit is { } canSubmit && !canSubmit(text))
             {
                 return;
             }

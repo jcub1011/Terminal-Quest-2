@@ -53,10 +53,23 @@ namespace TerminalQuest.Ui
         private readonly Label _hint;
         private readonly TextField _editor;
 
+        /// <summary>How often the "asking" line advances a frame while a probe is out.</summary>
+        private static readonly TimeSpan SpinnerInterval = TimeSpan.FromMilliseconds(120);
+
+        /// <summary>
+        /// Frames for the "asking" line. Plain ASCII, because this has to read the same in a
+        /// console that has never heard of a braille glyph.
+        /// </summary>
+        private static readonly char[] SpinnerFrames = ['|', '/', '-', '\\'];
+
         private int _editIndex = -1;
-        private bool _probing;
         private bool _discardArmed;
         private CancellationTokenSource? _probe;
+
+        /// <summary>The running spinner's timeout handle, or null when no probe is out.</summary>
+        private object? _spinner;
+
+        private int _spinnerFrame;
 
         public SettingsWindow(IApplication app, AppSettings settings)
         {
@@ -180,7 +193,7 @@ namespace TerminalQuest.Ui
             if (key == Key.Q.WithCtrl)
             {
                 CancelEdit();
-                Cancelled?.Invoke();
+                Leave();
                 return true;
             }
 
@@ -207,7 +220,7 @@ namespace TerminalQuest.Ui
 
             if (key == Key.Q.WithCtrl)
             {
-                Cancelled?.Invoke();
+                Leave();
                 return true;
             }
 
@@ -332,7 +345,7 @@ namespace TerminalQuest.Ui
 
             if (!IsDirty())
             {
-                Cancelled?.Invoke();
+                Leave();
                 return;
             }
 
@@ -343,6 +356,20 @@ namespace TerminalQuest.Ui
                 return;
             }
 
+            Leave();
+        }
+
+        /// <summary>
+        /// Leaves without saving, from wherever the player was standing.
+        /// <para>
+        /// Every exit goes through here so that a probe cannot outlive the screen that asked for
+        /// it - a reply arriving after the window has gone has nowhere to land, and the spinner
+        /// would keep rewriting a hint line nobody is looking at.
+        /// </para>
+        /// </summary>
+        private void Leave()
+        {
+            CancelProbe();
             Cancelled?.Invoke();
         }
 
@@ -439,6 +466,9 @@ namespace TerminalQuest.Ui
                 return;
             }
 
+            // Same reason as Leave: a probe still out has nothing left to report to.
+            CancelProbe();
+
             Chosen = _draft;
             Done?.Invoke();
         }
@@ -484,11 +514,6 @@ namespace TerminalQuest.Ui
         /// </remarks>
         private async Task ProbeAsync(int index)
         {
-            if (_probing)
-            {
-                return;
-            }
-
             var address = _draft.LmStudioBaseUrl?.Trim() ?? string.Empty;
 
             if (!AppSettings.IsAddress(address))
@@ -510,8 +535,7 @@ namespace TerminalQuest.Ui
             var probe = new CancellationTokenSource();
             _probe = probe;
 
-            _probing = true;
-            Fail($"Asking {address}...");
+            StartSpinner(address);
 
             try
             {
@@ -519,21 +543,28 @@ namespace TerminalQuest.Ui
                     .Run(() => LmStudioModels.ListAsync(address, key, ProbeTimeout, probe.Token), probe.Token)
                     .ConfigureAwait(false);
 
-                _app.Invoke(() => ShowModels(origin, index, models));
+                _app.Invoke(() =>
+                {
+                    StopSpinner();
+                    ShowModels(origin, index, models);
+                });
             }
             catch (AgentException ex)
             {
                 // Only the headline: the detail is a response body, and this is one row.
-                _app.Invoke(() => ProbeFailed(origin, index, FirstLine(ex.Message)));
+                _app.Invoke(() =>
+                {
+                    StopSpinner();
+                    ProbeFailed(origin, index, FirstLine(ex.Message));
+                });
             }
             catch (OperationCanceledException)
             {
-                // The player walked away from the page. Nothing left to tell them.
+                // The player walked away from the page, or asked again. Nothing left to tell them,
+                // and the spinner belongs to whoever superseded this - so it is not stopped here.
             }
             finally
             {
-                _probing = false;
-
                 if (ReferenceEquals(_probe, probe))
                 {
                     _probe = null;
@@ -541,6 +572,46 @@ namespace TerminalQuest.Ui
 
                 probe.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Starts the "asking" line ticking, so a slow server looks like a wait rather than a
+        /// hang. Replaces whatever was already running.
+        /// </summary>
+        private void StartSpinner(string address)
+        {
+            StopSpinner();
+
+            _spinnerFrame = 0;
+            Tick();
+
+            _spinner = _app.AddTimeout(SpinnerInterval, () =>
+            {
+                Tick();
+
+                // True keeps the timeout alive; StopSpinner is what ends it.
+                return true;
+            });
+
+            void Tick()
+            {
+                var frame = SpinnerFrames[_spinnerFrame % SpinnerFrames.Length];
+                _spinnerFrame++;
+
+                Fail($"{frame} Asking {address}...  Esc cancels.");
+            }
+        }
+
+        /// <summary>Stops the "asking" line ticking. Safe to call when nothing is running.</summary>
+        private void StopSpinner()
+        {
+            if (_spinner is not { } spinner)
+            {
+                return;
+            }
+
+            _spinner = null;
+            _app.RemoveTimeout(spinner);
         }
 
         private void ShowModels(SettingsPage origin, int index, IReadOnlyList<string> models)
@@ -583,6 +654,8 @@ namespace TerminalQuest.Ui
         /// </summary>
         private void CancelProbe()
         {
+            StopSpinner();
+
             _probe?.Cancel();
             _probe = null;
         }

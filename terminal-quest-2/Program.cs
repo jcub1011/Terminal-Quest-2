@@ -113,6 +113,10 @@ namespace TerminalQuest
             // "ansi" (null picks the platform default). The Windows driver is reported to render
             // 24-bit colour incorrectly under conhost, so set TQ_DRIVER=ansi if colours look
             // wrong in cmd or PowerShell. Windows Terminal handles the default fine.
+            //
+            // This is not a knob for input lag: every driver shares one input loop, which polls
+            // on a fixed 20ms delay, so switching drivers cannot make typing land sooner. What
+            // can is Responsiveness, below.
             var driver = Environment.GetEnvironmentVariable("TQ_DRIVER");
 
             using var app = Application.Create().Init(driver);
@@ -121,18 +125,46 @@ namespace TerminalQuest
             // and with it text selection, right-click copy and right-click paste.
             MouseReporting.Disable(app);
 
-            // The save has to be chosen before the narrator exists: its folder becomes a command
-            // line argument to the state server, which the CLI launches as it starts. The same
-            // screen is where the provider is chosen, for the same reason - both are settled
-            // before anything is built, and neither can be changed once a session is open.
+            // And so that a keystroke is drawn on the next tick rather than up to 25ms later.
+            Responsiveness.Apply(app);
+
+            // Read once and carried across sessions, because the settings screen mutates it in
+            // place. A provider changed between one save and the next takes effect on the next,
+            // since the narrator is built per session.
             var settings = SettingsStore.Read();
 
-            var store = ChooseSave(app, settings);
-            if (store is null)
+            // The menu and a session alternate for as long as the player keeps choosing saves.
+            // Leaving a session comes back here rather than ending the program; the only way out
+            // is Quit on the menu, which is the one screen where there is nothing left to back
+            // out of.
+            while (true)
             {
-                return 0;
-            }
+                // The save has to be chosen before the narrator exists: its folder becomes a
+                // command line argument to the state server, which the CLI launches as it starts.
+                // The same screen is where the provider is chosen, for the same reason - both are
+                // settled before anything is built, and neither can be changed once a session is
+                // open.
+                var store = ChooseSave(app, settings);
+                if (store is null)
+                {
+                    return 0;
+                }
 
+                await RunSessionAsync(app, settings, store);
+            }
+        }
+
+        /// <summary>
+        /// Plays one save, from the character screen to the last turn, and returns when the player
+        /// leaves it.
+        /// </summary>
+        /// <remarks>
+        /// Everything a session owns is scoped to this method - the narrator and its child
+        /// processes above all - so that by the time the save menu is drawn again there is nothing
+        /// of the last save still running.
+        /// </remarks>
+        private static async Task RunSessionAsync(IApplication app, AppSettings settings, SaveStore store)
+        {
             // A save that will not load must not start a turn: the narrator would see an empty
             // world through get_state and cheerfully build a new one on top of the broken files.
             // It must not be seeded with a character either, for the same reason - so this is read
@@ -160,11 +192,11 @@ namespace TerminalQuest
             {
                 var created = CreateCharacter(app, store);
 
-                // Backing out of the character screen means backing out of the game. The save
-                // folder is left as the menu made it - empty, and offered again next time.
+                // Backing out of the character screen means backing out of the save. The folder is
+                // left as the menu made it - empty, and offered again on the menu this returns to.
                 if (created is null)
                 {
-                    return 0;
+                    return;
                 }
 
                 startedFresh = true;
@@ -190,6 +222,15 @@ namespace TerminalQuest
                 }
             }
 
+            // Cancelled when the player leaves, and handed to every call that can take minutes.
+            // Without it, leaving mid-turn would mean waiting out the provider's turn timeout.
+            //
+            // Declared before the narrator so that it is disposed after it: a turn still unwinding
+            // while the narrator shuts down may yet touch this token, and a disposed source is not
+            // safe to register against.
+            using var life = new CancellationTokenSource();
+            var leaving = false;
+
             await using var narrator = AgentSessionFactory.Create(settings, store, SystemPrompt);
 
             using var window = new GameWindow(state) { Title = $"Terminal Quest - {store.Name}" };
@@ -197,18 +238,21 @@ namespace TerminalQuest
 
             narrator.OnTextDelta += pump.Enqueue;
 
-            window.QuitRequested += () => app.RequestStop(window);
+            window.LeaveRequested += Leave;
             window.CommandEntered += OnCommandEntered;
+            window.CanSubmit = CanSubmit;
 
             window.Narration.AddLine($"Terminal Quest - {store.Name}", TextRole.System);
-            window.Narration.AddLine("Type a command and press Enter. /help lists yours. PgUp/PgDn scrolls. Esc quits.", TextRole.System);
+            window.Narration.AddLine(
+                "Type a command and press Enter. /help lists yours. PgUp/PgDn scrolls. Esc returns to the menu.",
+                TextRole.System);
             window.Narration.AddBlankLine();
 
             if (startupError is not null)
             {
                 window.Narration.AddLine(startupError, TextRole.Danger);
                 window.Narration.AddLine(
-                    "This save did not load, so the narrator has not been started. Fix the file, or Esc to quit.",
+                    "This save did not load, so the narrator has not been started. Fix the file, or Esc to go back to the menu.",
                     TextRole.System);
                 window.Narration.AddBlankLine();
             }
@@ -216,16 +260,74 @@ namespace TerminalQuest
             {
                 // The narrator is started here rather than before the UI so that a failure to launch
                 // can be reported into the transcript, on a screen the player is already looking at.
-                window.InputEnabled = false;
+                window.IsBusy = true;
                 window.Narration.AddLine("Waking the narrator...", TextRole.System);
                 _ = Task.Run(OpenAsync);
             }
 
             app.Run(window);
 
+            // Detached before the window goes: a delta still arriving from a turn that has not
+            // finished unwinding would otherwise be pumped into a view that is being disposed.
+            narrator.OnTextDelta -= pump.Enqueue;
+
             // Leave the save stamped with where the player actually got to.
             TryTouch(store, state.Turn);
-            return 0;
+            return;
+
+            // The one way out of a session, whether it was asked for with Esc or with /quit.
+            void Leave()
+            {
+                // Esc during the wind-down would otherwise cancel twice and stop a window that has
+                // already been asked to stop.
+                if (leaving)
+                {
+                    return;
+                }
+
+                leaving = true;
+
+                // Cancel first: it is what actually unblocks a turn in flight, and it gives the
+                // narrator a head start on shutting down before disposal waits for it below.
+                life.Cancel();
+                _ = InterruptAsync();
+
+                app.RequestStop(window);
+            }
+
+            // Asks the narrator to abandon its turn. Best effort - we are leaving either way.
+            async Task InterruptAsync()
+            {
+                try
+                {
+                    await narrator.InterruptAsync();
+                }
+                catch (Exception)
+                {
+                    // Nowhere to report it and nothing to do about it: the session is closing, and
+                    // disposal will take the process down regardless of what this said.
+                }
+            }
+
+            // Whether a submitted line can be taken right now.
+            bool CanSubmit(string text)
+            {
+                // The player's own commands only read the save, and every write goes to a temporary
+                // file that is then renamed over the real one (SaveStore.Write), so a reader never
+                // sees half a document - not even while the narrator is writing through the state
+                // server. They stay available for the whole of a turn, which is the point: a turn
+                // can take minutes, and /story or /quit must not be among the things it takes away.
+                if (PlayerCommands.IsCommand(text) || !window.IsBusy)
+                {
+                    return true;
+                }
+
+                // Refused rather than queued. A line typed against a scene the player has not read
+                // yet is rarely the line they would have written once they had.
+                window.Narration.AddLine("The narrator is still speaking. Esc returns to the menu.", TextRole.System);
+                window.Narration.ScrollToBottom();
+                return false;
+            }
 
             void OnCommandEntered(string text)
             {
@@ -244,7 +346,7 @@ namespace TerminalQuest
                     return;
                 }
 
-                window.InputEnabled = false;
+                window.IsBusy = true;
                 _ = Task.Run(() => RunTurnAsync(text));
             }
 
@@ -262,7 +364,7 @@ namespace TerminalQuest
 
                 if (result.Quit)
                 {
-                    app.RequestStop(window);
+                    Leave();
                 }
             }
 
@@ -270,18 +372,35 @@ namespace TerminalQuest
             {
                 try
                 {
-                    await narrator.StartAsync();
+                    await narrator.StartAsync(life.Token);
                 }
-                catch (AgentException ex)
+                catch (OperationCanceledException)
                 {
+                    // The player left before it finished waking. There is nobody to tell.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Every exception, not only AgentException. This runs on a fire-and-forget
+                    // task, so anything that escapes here is a fault nobody observes - and it
+                    // would leave the session marked busy for good, with no way to take a turn
+                    // and no explanation on screen.
                     app.Invoke(() =>
                     {
-                        window.Narration.AddLine(ex.Message, TextRole.Danger);
-                        window.Narration.AddLine("Your commands still work. Esc quits.", TextRole.System);
+                        if (leaving)
+                        {
+                            return;
+                        }
 
-                        // Input comes back on so the player can still read the save with /story
-                        // and friends; every narrated turn will fail until the game is restarted.
-                        window.InputEnabled = true;
+                        window.Narration.AddLine(ex.Message, TextRole.Danger);
+                        window.Narration.AddLine(
+                            "Your commands still work. Esc returns to the menu.",
+                            TextRole.System);
+
+                        // The session stops being busy so the player can still read the save with
+                        // /story and friends; every narrated turn will fail until the game is
+                        // restarted.
+                        window.IsBusy = false;
                         window.Narration.ScrollToBottom();
                     });
 
@@ -297,11 +416,25 @@ namespace TerminalQuest
             {
                 try
                 {
-                    var turn = await narrator.SendAsync(prompt);
+                    var turn = await narrator.SendAsync(prompt, life.Token);
+
+                    // Checked before anything is drawn: a turn that lands in the instant between
+                    // the player leaving and the window closing has an answer nobody asked for any
+                    // more, and a view that is on its way out to draw it into.
+                    if (leaving)
+                    {
+                        return;
+                    }
+
                     pump.CompleteBlock();
 
                     app.Invoke(() =>
                     {
+                        if (leaving)
+                        {
+                            return;
+                        }
+
                         state.CostUsd += turn.CostUsd;
                         state.LastCacheRead = turn.CacheReadTokens;
                         state.LastDurationMs = turn.DurationMs;
@@ -315,17 +448,27 @@ namespace TerminalQuest
                         // point at which the pane learns what the turn actually changed.
                         RefreshStatus();
 
-                        window.InputEnabled = true;
+                        window.IsBusy = false;
                         window.Narration.ScrollToBottom();
                     });
+                }
+                catch (OperationCanceledException)
+                {
+                    // The player left. Writing "the operation was cancelled" into a transcript
+                    // that is about to be thrown away helps nobody.
                 }
                 catch (Exception ex)
                 {
                     app.Invoke(() =>
                     {
+                        if (leaving)
+                        {
+                            return;
+                        }
+
                         window.Narration.CommitBlock();
                         window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
-                        window.InputEnabled = true;
+                        window.IsBusy = false;
                     });
                 }
             }
