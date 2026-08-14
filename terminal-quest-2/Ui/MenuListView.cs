@@ -19,8 +19,14 @@ namespace TerminalQuest.Ui
         /// <summary>Two columns for the cursor and two for the active marker.</summary>
         private const int MarkerWidth = 4;
 
-        /// <summary>What the chevron on a row that leads deeper costs at the right edge.</summary>
-        private const string Submenu = " >";
+        /// <summary>What sits between the longest label and the column the rest of the row starts in.</summary>
+        private const int Gap = 2;
+
+        /// <summary>
+        /// The chevron on a row that leads deeper. Its width is reserved on every row, so the values
+        /// line up whether or not the row beside them goes anywhere.
+        /// </summary>
+        private const string Submenu = ">";
 
         private IReadOnlyList<MenuRow> _rows = [];
         private int _selectedIndex;
@@ -51,11 +57,15 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Where the value column starts, or 0 to right-align it against the far edge.
+        /// Where the value column starts, or 0 to measure one just past the longest label.
         /// <para>
         /// A page of settings wants its values lined up under each other so they read as a column;
         /// a page of choices wants the aside pushed away from the name it belongs to. Both shapes
         /// come up, so the caller says which it wants.
+        /// </para>
+        /// <para>
+        /// A fixed column is also what lets <see cref="SettingsWindow"/> drop its editor onto a row:
+        /// it needs the number in advance, and a measured column would move under the field.
         /// </para>
         /// </summary>
         public int ValueColumn { get; set; }
@@ -75,18 +85,39 @@ namespace TerminalQuest.Ui
 
             BeginPaint(width, height);
 
+            var drawn = Math.Min(height, _rows.Count);
+
+            // Measured on every draw rather than cached against Rows: a page rebuilds its rows on
+            // every read, so there is no one moment to invalidate on, and a handful of lengths is
+            // cheaper than a stale column.
+            var longest = 0;
+
+            for (var row = 0; row < drawn; row++)
+            {
+                longest = Math.Max(longest, _rows[row].Label.Length);
+            }
+
+            // Clamped rather than allowed to run off: a narrow terminal pulls the column left and
+            // clips the labels, which is legible, where drawing past the viewport is not. Once the
+            // clamp has eaten the gap there is no column left at all, and the labels take the width
+            // back rather than being clipped for a right-hand side that cannot be drawn.
+            var gutter = Math.Min(MarkerWidth + longest + Gap, width - Submenu.Length);
+            var labelWidth = gutter > MarkerWidth + Gap
+                ? gutter - MarkerWidth - Gap
+                : Math.Max(0, width - MarkerWidth);
+
             // No scroll window, unlike the save and class lists: every menu here is a handful of
             // rows, and keeping the drawn row and its index the same number is what lets the
             // settings screen drop an editor onto a row without any arithmetic to get wrong.
-            for (var row = 0; row < height && row < _rows.Count; row++)
+            for (var row = 0; row < drawn; row++)
             {
-                DrawRow(_rows[row], row, width);
+                DrawRow(_rows[row], row, width, gutter, labelWidth);
             }
 
             return true;
         }
 
-        private void DrawRow(MenuRow entry, int row, int width)
+        private void DrawRow(MenuRow entry, int row, int width, int gutter, int labelWidth)
         {
             var isCursor = row == _selectedIndex;
 
@@ -103,18 +134,20 @@ namespace TerminalQuest.Ui
                 : isCursor ? TextRole.Command
                 : TextRole.Normal);
 
-            var label = Fit(entry.Label, Math.Max(0, width - MarkerWidth));
+            var label = Fit(entry.Label, labelWidth);
             AddStr(label);
 
-            // The chevron owns the right edge outright, so a long value is dropped or truncated
-            // before the one mark saying this row leads somewhere is.
-            var edge = width;
-
-            if (entry.HasSubmenu && width > MarkerWidth + Submenu.Length)
+            // The chevron owns the gutter outright, so a long value is dropped or truncated before
+            // the one mark saying this row leads somewhere is. Drawn after the label for the same
+            // reason: a label wide enough to reach the gutter loses the argument.
+            if (gutter <= MarkerWidth)
             {
-                edge = width - Submenu.Length;
+                return;
+            }
 
-                Move(edge, row);
+            if (entry.HasSubmenu)
+            {
+                Move(gutter, row);
                 SetRole(TextRole.System);
                 AddStr(Submenu);
             }
@@ -124,19 +157,19 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            var start = MarkerWidth + label.Length + 1;
-            var column = ValueColumn > 0 ? ValueColumn : edge - entry.Value.Length;
+            var column = ValueColumn > 0 ? ValueColumn : gutter + Submenu.Length + 1;
 
             // Dropped rather than overlapped: a value crushed against its own label is worse than
-            // a value the player can see by widening the terminal.
-            if (column < start || column >= edge)
+            // a value the player can see by widening the terminal. Only a fixed column can land on
+            // a label - a measured one is past every one of them by construction.
+            if (column < MarkerWidth + label.Length + 1 || column >= width)
             {
                 return;
             }
 
             Move(column, row);
             SetRole(TextRole.System);
-            AddStr(Fit(entry.Value, edge - column));
+            AddStr(Fit(entry.Value, width - column));
         }
 
         private int Clamp(int index) => Math.Clamp(index, 0, Math.Max(0, _rows.Count - 1));

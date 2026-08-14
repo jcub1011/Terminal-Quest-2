@@ -14,6 +14,12 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class ClassListView : ThemedView
     {
+        /// <summary>Two columns for the cursor.</summary>
+        private const int NameColumn = 2;
+
+        /// <summary>What sits between the longest name and the column the details start in.</summary>
+        private const int Gap = 2;
+
         private IReadOnlyList<ClassTemplate> _classes = ClassTemplates.All;
         private int _selectedIndex;
 
@@ -59,32 +65,54 @@ namespace TerminalQuest.Ui
 
             // Keep the highlight on screen when the list is longer than the pane.
             var first = ScrollWindowStart(_selectedIndex, _classes.Count, height);
+            var last = Math.Min(height, _classes.Count - first);
 
-            for (var row = 0; row < height && first + row < _classes.Count; row++)
+            // One column for every detail on screen, measured off the longest name and the longest
+            // detail, so they read as a column beside the names instead of ragged against the far
+            // edge. Measured over this pageful only, like the save list's.
+            var longestName = 0;
+            var longestDetail = 0;
+
+            for (var row = 0; row < last; row++)
+            {
+                longestName = Math.Max(longestName, _classes[first + row].Name.Length);
+                longestDetail = Math.Max(longestDetail, Detail(_classes[first + row]).Length);
+            }
+
+            var column = Math.Min(NameColumn + longestName + Gap, width - longestDetail);
+
+            for (var row = 0; row < last; row++)
             {
                 var template = _classes[first + row];
                 var isSelected = first + row == _selectedIndex;
+
+                // A detail with nowhere to go that leaves the name room is dropped rather than
+                // crushed against it: the archetype's name is what is being chosen.
+                var hasDetail = column > NameColumn + template.Name.Length && column < width;
+                var nameWidth = hasDetail ? column - NameColumn - 1 : width - NameColumn;
 
                 Move(0, row);
                 SetRole(TextRole.System);
                 AddStr(isSelected ? "> " : "  ");
 
                 SetRole(isSelected ? TextRole.Command : TextRole.Normal);
-                AddStr(Fit(template.Name, Math.Max(0, width - 2)));
+                AddStr(Fit(template.Name, Math.Max(0, nameWidth)));
 
-                var detail = $"{template.Summary}   HP {template.MaxHealth}";
-
-                var column = width - detail.Length;
-                if (column > template.Name.Length + 3)
+                if (!hasDetail)
                 {
-                    Move(column, row);
-                    SetRole(TextRole.System);
-                    AddStr(detail);
+                    continue;
                 }
+
+                Move(column, row);
+                SetRole(TextRole.System);
+                AddStr(Fit(Detail(template), width - column));
             }
 
             return true;
         }
+
+        private static string Detail(ClassTemplate template) =>
+            $"{template.Summary}   HP {template.MaxHealth}";
 
         private static string Fit(string text, int width) =>
             text.Length <= width ? text : text[..Math.Max(0, width)];

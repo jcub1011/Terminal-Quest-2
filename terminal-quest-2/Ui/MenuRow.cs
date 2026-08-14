@@ -11,8 +11,9 @@ namespace TerminalQuest.Ui
     /// the cursor happens to be resting.
     /// </param>
     /// <param name="HasSubmenu">
-    /// Whether Right goes somewhere from here. Drawn as a chevron at the right edge, so a row that
-    /// leads deeper says so without the player having to try it.
+    /// Whether Right goes somewhere from here. Drawn as a chevron in the column just past the
+    /// longest label, so a row that leads deeper says so without the player having to try it -
+    /// close enough to the name to be read with it rather than stranded at the far edge.
     /// </param>
     internal readonly record struct MenuRow(
         string Label,

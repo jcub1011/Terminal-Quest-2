@@ -19,6 +19,9 @@ namespace TerminalQuest.Ui
         /// <summary>Two columns for the cursor, and one space before the saved-at column.</summary>
         private const int NameColumn = 2;
 
+        /// <summary>What sits between the longest name and the column the asides start in.</summary>
+        private const int Gap = 2;
+
         /// <summary>Widest the size column ever gets: <c>1023.9 KB</c>.</summary>
         private const int SizeWidth = 9;
 
@@ -108,16 +111,31 @@ namespace TerminalQuest.Ui
 
             // Keep the highlight on screen when the list is longer than the pane.
             var first = ScrollWindowStart(_selectedIndex, _saves.Count, height);
+            var last = Math.Min(height, _saves.Count - first);
 
-            for (var row = 0; row < height && first + row < _saves.Count; row++)
+            // Measured over the rows on screen rather than the whole list, so the columns sit where
+            // this pageful needs them and a name far down the list cannot push them off to the right.
+            // Scrolling reflows them, which reads better than a column set by a save nobody can see.
+            var longest = 0;
+
+            for (var row = 0; row < last; row++)
             {
-                DrawRow(_saves[first + row], row, width, first + row == _selectedIndex);
+                longest = Math.Max(longest, _saves[first + row].Name.Length);
+            }
+
+            // Clamped so the asides always fit: past that the names have to give, which is what the
+            // old right-aligned columns did on every width rather than only the tight ones.
+            var savedColumn = Math.Min(NameColumn + longest + Gap, width - (SavedWidth + SizeWidth));
+
+            for (var row = 0; row < last; row++)
+            {
+                DrawRow(_saves[first + row], row, width, savedColumn, first + row == _selectedIndex);
             }
 
             return true;
         }
 
-        private void DrawRow(SaveEntry save, int row, int width, bool isSelected)
+        private void DrawRow(SaveEntry save, int row, int width, int savedColumn, bool isSelected)
         {
             Move(0, row);
             SetRole(TextRole.System);
@@ -133,7 +151,6 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            var savedColumn = width - (SavedWidth + SizeWidth);
             AddStr(Fit(save.Name, Math.Max(0, savedColumn - NameColumn - 1)));
 
             SetRole(TextRole.System);
@@ -141,9 +158,11 @@ namespace TerminalQuest.Ui
             Move(savedColumn, row);
             AddStr(save.LastPlayedText);
 
-            // Right-aligned, so the numbers line up under each other however wide they are.
+            // Right-aligned inside its own field rather than against the far edge, so the numbers
+            // still line up under each other however wide they are without the whole block being
+            // stranded away from the names it belongs to.
             var size = save.SizeText;
-            Move(width - size.Length, row);
+            Move(savedColumn + SavedWidth + SizeWidth - size.Length, row);
             AddStr(size);
         }
 
