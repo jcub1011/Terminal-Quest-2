@@ -45,19 +45,6 @@ namespace TerminalQuest.Ui
             }
         }
 
-        /// <summary>
-        /// The first row a selection list should draw, so that the highlighted row stays on screen
-        /// and sits mid-pane once the list is taller than the pane.
-        /// <para>
-        /// Derived from the selection on every draw rather than carried as a scroll offset - which
-        /// is also why these lists do not use the base class's own content scrolling. There is no
-        /// state to fall out of step with the cursor, and nothing to keep in range when the list is
-        /// replaced underneath it.
-        /// </para>
-        /// </summary>
-        internal static int ScrollWindowStart(int selectedIndex, int count, int height) =>
-            Math.Max(0, Math.Min(selectedIndex - (height / 2), count - height));
-
         /// <summary>A row of spaces <paramref name="width"/> wide, reusing the last one when it fits.</summary>
         private static string Blank(int width)
         {

@@ -1,4 +1,4 @@
-using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace TerminalQuest.Ui
 {
@@ -6,19 +6,16 @@ namespace TerminalQuest.Ui
     /// The commands a half-typed slash could still turn into, floating over the foot of the
     /// transcript while the player types.
     /// <para>
-    /// A third hand-drawn list rather than a fourth caller of <see cref="MenuListView"/>. That one
-    /// deliberately has no scroll window - the settings screen relies on the drawn row and its
-    /// index being the same number so it can drop an editor onto a row - and a bare <c>/</c>
-    /// matches every command there is, which is more rows than the strip above the box can show.
-    /// The scrolling belongs here, where it costs nothing, rather than in a shared control where
-    /// it would cost the settings screen its one invariant.
+    /// A <see cref="ListView"/> with a <see cref="StyledListSource{T}"/>, like the game's other
+    /// lists. A bare <c>/</c> matches every command there is, which is more rows than the strip above
+    /// the box can show, so the scrolling matters here - and it is the library's.
     /// </para>
     /// <para>
     /// It offers and never decides: what is highlighted goes nowhere until the player presses a
     /// key for it, so a suggestion cannot quietly become the command that runs.
     /// </para>
     /// </summary>
-    internal sealed class CommandSuggestionView : ThemedView
+    internal sealed class CommandSuggestionView : ListView
     {
         /// <summary>Two columns for the cursor, matching the menu and save lists.</summary>
         private const int MarkerWidth = 2;
@@ -29,18 +26,27 @@ namespace TerminalQuest.Ui
         /// <summary>What a row needs before the summary is worth drawing at all.</summary>
         private const int MinimumForSummary = SummaryColumn + 12;
 
-        private IReadOnlyList<PlayerCommandInfo> _suggestions = [];
-        private int _selectedIndex;
+        private readonly StyledListSource<PlayerCommandInfo> _source;
+
+        public CommandSuggestionView()
+        {
+            // Focus stays in the command box while this is up - that is the whole point of it - so
+            // the strip must not be in the focus chain.
+            CanFocus = false;
+
+            _source = new StyledListSource<PlayerCommandInfo>(Row);
+            Source = _source;
+        }
 
         /// <summary>What to offer. Setting it puts the cursor back on the first row.</summary>
         public IReadOnlyList<PlayerCommandInfo> Suggestions
         {
-            get => _suggestions;
+            get => _source.Items;
 
             set
             {
-                _suggestions = value ?? [];
-                _selectedIndex = 0;
+                _source.Items = value;
+                SelectedItem = 0;
                 SetNeedsDraw();
             }
         }
@@ -65,38 +71,24 @@ namespace TerminalQuest.Ui
         /// </para>
         /// </summary>
         public PlayerCommandInfo? Selected =>
-            IsChoosing && _selectedIndex >= 0 && _selectedIndex < _suggestions.Count
-                ? _suggestions[_selectedIndex]
-                : null;
+            IsChoosing && Suggestions.Count > 0 ? Suggestions[Index] : null;
+
+        /// <summary>
+        /// The highlight as a plain index. <see cref="ListView.SelectedItem"/> is null for an empty
+        /// list, and every use here wants a number in range of what is currently listed.
+        /// </summary>
+        private int Index => Math.Clamp(SelectedItem ?? 0, 0, Math.Max(0, Suggestions.Count - 1));
 
         /// <summary>Moves the cursor, clamping at both ends rather than wrapping.</summary>
         public void MoveSelection(int delta)
         {
-            _selectedIndex = Math.Clamp(_selectedIndex + delta, 0, Math.Max(0, _suggestions.Count - 1));
-            SetNeedsDraw();
-        }
-
-        protected override bool OnDrawingContent(DrawContext? context)
-        {
-            var width = Viewport.Width;
-            var height = Viewport.Height;
-
-            if (width <= 0 || height <= 0)
+            if (Suggestions.Count == 0)
             {
-                return true;
+                return;
             }
 
-            BeginPaint(width, height);
-
-            // Keep the highlight on screen when there are more commands than rows to show them in.
-            var first = ScrollWindowStart(_selectedIndex, _suggestions.Count, height);
-
-            for (var row = 0; row < height && first + row < _suggestions.Count; row++)
-            {
-                DrawRow(_suggestions[first + row], row, width, IsChoosing && first + row == _selectedIndex);
-            }
-
-            return true;
+            SelectedItem = Math.Clamp(Index + delta, 0, Suggestions.Count - 1);
+            EnsureSelectedItemVisible();
         }
 
         /// <param name="isCursor">
@@ -104,13 +96,13 @@ namespace TerminalQuest.Ui
         /// too - it is the one in play - but without the arrow, which would promise a choice that
         /// is no longer on offer.
         /// </param>
-        private void DrawRow(PlayerCommandInfo command, int row, int width, bool isCursor)
+        private StyledLine Row(PlayerCommandInfo command, int width, bool isCursor)
         {
-            var isSelected = isCursor || !IsChoosing;
+            var cursor = isCursor && IsChoosing;
+            var isSelected = cursor || !IsChoosing;
 
-            Move(0, row);
-            SetRole(TextRole.System);
-            AddStr(isCursor ? "> " : "  ");
+            var line = new StyledLine();
+            line.Append(cursor ? "> " : "  ", TextRole.System);
 
             // The summary is dropped rather than crushed against the name it belongs to: which
             // commands are on offer is the one thing this strip cannot do without.
@@ -120,17 +112,23 @@ namespace TerminalQuest.Ui
             // into a description that belongs to the same row and read as one word.
             var nameWidth = hasSummary ? SummaryColumn - MarkerWidth - 1 : width - MarkerWidth;
 
-            SetRole(isSelected ? TextRole.Command : TextRole.Normal);
-            AddStr(Fit(command.Usage, Math.Max(0, nameWidth)));
+            line.Append(
+                Fit(command.Usage, Math.Max(0, nameWidth)),
+                isSelected ? TextRole.Command : TextRole.Normal);
 
             if (!hasSummary)
             {
-                return;
+                return line;
             }
 
-            Move(SummaryColumn, row);
-            SetRole(TextRole.System);
-            AddStr(Fit(command.Summary, width - SummaryColumn));
+            if (SummaryColumn > line.Length)
+            {
+                line.Append(new string(' ', SummaryColumn - line.Length), TextRole.Normal);
+            }
+
+            line.Append(Fit(command.Summary, width - SummaryColumn), TextRole.System);
+
+            return line;
         }
 
         private static string Fit(string text, int width) =>

@@ -7,10 +7,25 @@ namespace TerminalQuest.Ui
     /// <summary>
     /// The scrolling transcript pane.
     /// <para>
-    /// Terminal.Gui's <c>TextView</c> applies a single scheme to the whole control and cannot
-    /// colour individual words, so this draws itself: it keeps the transcript as unwrapped
-    /// <see cref="StyledLine"/> paragraphs and emits them per-span via
-    /// <see cref="View.SetAttribute"/> / <see cref="View.AddStr(string)"/>.
+    /// Draws itself: it keeps the transcript as unwrapped <see cref="StyledLine"/> paragraphs and
+    /// emits them per-span via <see cref="View.SetAttribute"/> / <see cref="View.AddStr(string)"/>.
+    /// </para>
+    /// <para>
+    /// <b>Not because <c>TextView</c> cannot colour words</b> - it can, and this comment used to say
+    /// otherwise. In v2 a <c>TextView</c> holds <c>Cell</c>s that each carry their own
+    /// <c>Attribute</c>, and <c>TextView.Load(List&lt;List&lt;Cell&gt;&gt;)</c> takes them. What it
+    /// has no way to do is <em>append</em> coloured text: <c>Load</c> is the only door in, and it
+    /// replaces the whole document, clears the undo history, re-wraps every line and calls
+    /// <c>ResetPosition</c>. Streaming a token through it would re-wrap the entire transcript and
+    /// throw the reader back to the top, once per token. There is no public API to add a run of a
+    /// given colour at the end.
+    /// </para>
+    /// <para>
+    /// So this stays a custom <see cref="View"/> - which is the library's own extension point for a
+    /// control it does not have - while the game's <em>lists</em> are stock <c>ListView</c>s with a
+    /// <see cref="StyledListSource{T}"/>, because <c>IListDataSource.Render</c> is exactly the
+    /// per-row colour seam this pane lacks. If <c>TextView</c> ever grows a styled append, this
+    /// should go.
     /// </para>
     /// <para>
     /// Wrapping is cached in two parts. Committed paragraphs are wrapped once and only re-wrapped

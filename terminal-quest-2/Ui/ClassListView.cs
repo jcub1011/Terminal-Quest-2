@@ -1,4 +1,4 @@
-using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 using TerminalQuest.Saves;
 
@@ -7,12 +7,12 @@ namespace TerminalQuest.Ui
     /// <summary>
     /// The archetype picker on the character screen.
     /// <para>
-    /// A near-sibling of <see cref="SaveListView"/> rather than a shared generic control: the two
-    /// draw different columns, and factoring them together would mean a formatter callback for the
-    /// sake of two call sites.
+    /// A <see cref="ListView"/> with a <see cref="StyledListSource{T}"/>, so that everything except
+    /// the shape of a row - the scroll window, the highlight, the keys that move it - belongs to the
+    /// library. All that is left here is which columns an archetype gets.
     /// </para>
     /// </summary>
-    internal sealed class ClassListView : ThemedView
+    internal sealed class ClassListView : ListView
     {
         /// <summary>Two columns for the cursor.</summary>
         private const int NameColumn = 2;
@@ -20,95 +20,95 @@ namespace TerminalQuest.Ui
         /// <summary>What sits between the longest name and the column the details start in.</summary>
         private const int Gap = 2;
 
-        private IReadOnlyList<ClassTemplate> _classes = ClassTemplates.All;
-        private int _selectedIndex;
+        private readonly StyledListSource<ClassTemplate> _source;
+
+        public ClassListView()
+        {
+            // The character screen keeps focus in the name field and drives this from its own key
+            // handler, so the list must not be in the focus chain: a focusable ListView would take
+            // Tab, and would answer Up and Down itself before the window was offered them.
+            CanFocus = false;
+
+            _source = new StyledListSource<ClassTemplate>(Row);
+            Source = _source;
+            Classes = ClassTemplates.All;
+        }
 
         /// <summary>The archetypes to offer, in the order they are listed.</summary>
         public IReadOnlyList<ClassTemplate> Classes
         {
-            get => _classes;
+            get => _source.Items;
+
             set
             {
-                _classes = value;
-                _selectedIndex = Math.Clamp(_selectedIndex, 0, Math.Max(0, value.Count - 1));
+                _source.Items = value;
+
+                // The list is replaced wholesale, so the highlight has to be brought back into range
+                // of what is now there.
+                SelectedItem = Index;
                 SetNeedsDraw();
             }
         }
 
+        /// <summary>
+        /// The highlight as a plain index. <see cref="ListView.SelectedItem"/> is null for an empty
+        /// list, and every use here wants a number in range of what is currently listed.
+        /// </summary>
+        private int Index => Math.Clamp(SelectedItem ?? 0, 0, Math.Max(0, Classes.Count - 1));
+
         /// <summary>The highlighted archetype, or null when there are none to offer.</summary>
-        public ClassTemplate? Selected =>
-            _selectedIndex >= 0 && _selectedIndex < _classes.Count ? _classes[_selectedIndex] : null;
+        public ClassTemplate? Selected => Classes.Count == 0 ? null : Classes[Index];
 
         /// <summary>Moves the highlight, clamping at both ends rather than wrapping.</summary>
         public void MoveSelection(int delta)
         {
-            if (_classes.Count == 0)
+            if (Classes.Count == 0)
             {
                 return;
             }
 
-            _selectedIndex = Math.Clamp(_selectedIndex + delta, 0, _classes.Count - 1);
-            SetNeedsDraw();
+            SelectedItem = Math.Clamp(Index + delta, 0, Classes.Count - 1);
+            EnsureSelectedItemVisible();
         }
 
-        protected override bool OnDrawingContent(DrawContext? context)
+        /// <summary>
+        /// One archetype's row: a cursor, the name, and the detail in a column beside it.
+        /// </summary>
+        /// <remarks>
+        /// The column is measured off this row alone rather than off the longest name on screen, as
+        /// the hand-drawn version did. A data source is asked for one row at a time and is not told
+        /// which others are visible, so a shared column would need a measuring pass the list no
+        /// longer exposes. What it costs is a ragged detail column; what it buys is the whole scroll
+        /// window, which used to be this class's to get right.
+        /// </remarks>
+        private StyledLine Row(ClassTemplate template, int width, bool isSelected)
         {
-            var width = Viewport.Width;
-            var height = Viewport.Height;
+            var line = new StyledLine();
 
-            if (width <= 0 || height <= 0)
+            line.Append(isSelected ? "> " : "  ", TextRole.System);
+
+            var detail = Detail(template);
+            var column = NameColumn + template.Name.Length + Gap;
+
+            // A detail with nowhere to go that leaves the name room is dropped rather than crushed
+            // against it: the archetype's name is what is being chosen.
+            // Trimmed to the room left after the cursor. Where there is a detail the name already
+            // fits by construction, since the column it sits in was measured from the whole name.
+            var hasDetail = column + detail.Length <= width;
+
+            line.Append(
+                Fit(template.Name, Math.Max(0, width - NameColumn)),
+                isSelected ? TextRole.Command : TextRole.Normal);
+
+            if (!hasDetail)
             {
-                return true;
+                return line;
             }
 
-            BeginPaint(width, height);
+            line.Append(new string(' ', Math.Max(0, column - line.Length)), TextRole.Normal);
+            line.Append(Fit(detail, width - column), TextRole.System);
 
-            // Keep the highlight on screen when the list is longer than the pane.
-            var first = ScrollWindowStart(_selectedIndex, _classes.Count, height);
-            var last = Math.Min(height, _classes.Count - first);
-
-            // One column for every detail on screen, measured off the longest name and the longest
-            // detail, so they read as a column beside the names instead of ragged against the far
-            // edge. Measured over this pageful only, like the save list's.
-            var longestName = 0;
-            var longestDetail = 0;
-
-            for (var row = 0; row < last; row++)
-            {
-                longestName = Math.Max(longestName, _classes[first + row].Name.Length);
-                longestDetail = Math.Max(longestDetail, Detail(_classes[first + row]).Length);
-            }
-
-            var column = Math.Min(NameColumn + longestName + Gap, width - longestDetail);
-
-            for (var row = 0; row < last; row++)
-            {
-                var template = _classes[first + row];
-                var isSelected = first + row == _selectedIndex;
-
-                // A detail with nowhere to go that leaves the name room is dropped rather than
-                // crushed against it: the archetype's name is what is being chosen.
-                var hasDetail = column > NameColumn + template.Name.Length && column < width;
-                var nameWidth = hasDetail ? column - NameColumn - 1 : width - NameColumn;
-
-                Move(0, row);
-                SetRole(TextRole.System);
-                AddStr(isSelected ? "> " : "  ");
-
-                SetRole(isSelected ? TextRole.Command : TextRole.Normal);
-                AddStr(Fit(template.Name, Math.Max(0, nameWidth)));
-
-                if (!hasDetail)
-                {
-                    continue;
-                }
-
-                Move(column, row);
-                SetRole(TextRole.System);
-                AddStr(Fit(Detail(template), width - column));
-            }
-
-            return true;
+            return line;
         }
 
         /// <summary>

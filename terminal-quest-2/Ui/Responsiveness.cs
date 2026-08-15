@@ -14,15 +14,26 @@ namespace TerminalQuest.Ui
     /// fast typing feels like: not a steady delay but characters arriving in clumps.
     /// </para>
     /// <para>
-    /// Only the second throttle is ours to move, so this moves it. Raising the cap is close to
-    /// free: an iteration that has nothing to redraw is a no-op, because the loop only draws
-    /// views whose <see cref="Terminal.Gui.ViewBase.View.NeedsDraw"/> is set.
+    /// Only the second throttle is ours to move, so this moves it. An iteration with nothing to
+    /// redraw is nearly free - the loop only draws views whose
+    /// <see cref="Terminal.Gui.ViewBase.View.NeedsDraw"/> is set - but the cap is not a free
+    /// parameter either, because of how the loop honours it:
+    /// <code>
+    /// TimeSpan sleepFor = TimeSpan.FromMilliseconds (timeAllowed) - took;
+    /// if (sleepFor.Milliseconds > 0) { Task.Delay (sleepFor).Wait (); }
+    /// </code>
+    /// An iteration that overruns its budget leaves nothing to sleep for, so the loop stops
+    /// sleeping and spins - redrawing continuously and competing with the input thread it is
+    /// supposed to be draining. The cap therefore has to leave room for the slowest honest draw.
+    /// Little is given up by leaving that room, because <c>Task.Delay</c> cannot resolve finer than
+    /// about 15ms on Windows by default - so 100 and 200 ask for very different things and get
+    /// nearly the same one.
     /// </para>
     /// </summary>
     internal static class Responsiveness
     {
-        /// <summary>One iteration every 5ms, against the framework default of one every 25ms.</summary>
-        private const ushort DefaultIterationsPerSecond = 200;
+        /// <summary>One iteration every 10ms, against the framework default of one every 25ms.</summary>
+        private const ushort DefaultIterationsPerSecond = 100;
 
         /// <summary>The framework's own default, and the floor this will accept.</summary>
         private const ushort MinimumIterationsPerSecond = 20;

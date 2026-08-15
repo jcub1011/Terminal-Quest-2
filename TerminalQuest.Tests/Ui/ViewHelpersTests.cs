@@ -94,63 +94,6 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(0, StatusView.BarFill(used: 500, window: 1000, width: 0));
         }
 
-        // ---- Scroll window --------------------------------------------------------------------
-
-        [Fact]
-        public void A_list_that_fits_never_scrolls()
-        {
-            Assert.Equal(0, ThemedView.ScrollWindowStart(0, count: 3, height: 10));
-            Assert.Equal(0, ThemedView.ScrollWindowStart(2, count: 3, height: 10));
-        }
-
-        [Fact]
-        public void The_selection_sits_mid_pane_once_the_list_is_taller_than_it()
-        {
-            Assert.Equal(45, ThemedView.ScrollWindowStart(50, count: 100, height: 10));
-        }
-
-        [Fact]
-        public void The_window_never_runs_off_the_top()
-        {
-            Assert.Equal(0, ThemedView.ScrollWindowStart(0, count: 100, height: 10));
-            Assert.Equal(0, ThemedView.ScrollWindowStart(3, count: 100, height: 10));
-        }
-
-        [Fact]
-        public void The_window_never_runs_off_the_bottom()
-        {
-            Assert.Equal(90, ThemedView.ScrollWindowStart(99, count: 100, height: 10));
-        }
-
-        [Fact]
-        public void The_selected_row_is_always_inside_the_window()
-        {
-            // The property the whole calculation exists for.
-            for (var count = 1; count <= 40; count++)
-            {
-                for (var height = 1; height <= 20; height++)
-                {
-                    for (var selected = 0; selected < count; selected++)
-                    {
-                        var start = ThemedView.ScrollWindowStart(selected, count, height);
-
-                        Assert.True(start >= 0);
-
-                        if (count > height)
-                        {
-                            Assert.InRange(selected, start, start + height - 1);
-                        }
-                    }
-                }
-            }
-        }
-
-        [Fact]
-        public void An_empty_list_starts_at_the_top()
-        {
-            Assert.Equal(0, ThemedView.ScrollWindowStart(0, count: 0, height: 10));
-        }
-
         // ---- Transcript follow -----------------------------------------------------------------
 
         [Fact]
@@ -304,7 +247,7 @@ namespace TerminalQuest.Tests.Ui
             public void An_unusable_setting_falls_back_to_the_default(string? value)
             {
                 // A typo must not stall the loop or spin it.
-                Assert.Equal(200, CapWith(value));
+                Assert.Equal(100, CapWith(value));
             }
 
             [Theory]

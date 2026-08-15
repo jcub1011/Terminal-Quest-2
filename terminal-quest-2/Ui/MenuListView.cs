@@ -1,20 +1,17 @@
-using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
     /// The rows of whichever menu is open - the start page's options, or a level of the settings.
     /// <para>
-    /// The one hand-drawn list the game does share. <see cref="SaveListView"/> and
-    /// <see cref="ClassListView"/> were deliberately left unfactored because their columns differ
-    /// and a common control would have taken a formatter callback for the sake of two call sites.
-    /// That does not hold here: a menu row is the same shape wherever it appears - a label, a
-    /// value, whether it is in force, and whether it leads deeper - callers hand over plain
-    /// <see cref="MenuRow"/> values rather than a delegate, and the number of call sites grows
-    /// with every setting added.
+    /// A <see cref="ListView"/> with a <see cref="StyledListSource{T}"/>, like the save and class
+    /// lists. A menu row is the same shape wherever it appears - a label, a value, whether it is in
+    /// force, and whether it leads deeper - so callers hand over plain <see cref="MenuRow"/> values
+    /// and this decides the columns.
     /// </para>
     /// </summary>
-    internal sealed class MenuListView : ThemedView
+    internal sealed class MenuListView : ListView
     {
         /// <summary>Two columns for the cursor and two for the active marker.</summary>
         private const int MarkerWidth = 4;
@@ -28,18 +25,26 @@ namespace TerminalQuest.Ui
         /// </summary>
         private const string Submenu = ">";
 
-        private IReadOnlyList<MenuRow> _rows = [];
-        private int _selectedIndex;
+        private readonly StyledListSource<MenuRow> _source;
+
+        public MenuListView()
+        {
+            // Both hosts drive this from their own key handlers, so it stays out of the focus chain.
+            CanFocus = false;
+
+            _source = new StyledListSource<MenuRow>(Row);
+            Source = _source;
+        }
 
         /// <summary>What to draw. Setting it keeps the cursor in range of the new rows.</summary>
         public IReadOnlyList<MenuRow> Rows
         {
-            get => _rows;
+            get => _source.Items;
 
             set
             {
-                _rows = value ?? [];
-                _selectedIndex = Clamp(_selectedIndex);
+                _source.Items = value;
+                SelectedItem = Index;
                 SetNeedsDraw();
             }
         }
@@ -47,12 +52,12 @@ namespace TerminalQuest.Ui
         /// <summary>Where the cursor is resting, which is not the same as what is in force.</summary>
         public int SelectedIndex
         {
-            get => _selectedIndex;
+            get => Index;
 
             set
             {
-                _selectedIndex = Clamp(value);
-                SetNeedsDraw();
+                SelectedItem = Math.Clamp(value, 0, Math.Max(0, Rows.Count - 1));
+                EnsureSelectedItemVisible();
             }
         }
 
@@ -70,91 +75,72 @@ namespace TerminalQuest.Ui
         /// </summary>
         public int ValueColumn { get; set; }
 
+        /// <summary>
+        /// The highlight as a plain index. <see cref="ListView.SelectedItem"/> is null for an empty
+        /// list, and every use here wants a number in range of what is currently listed.
+        /// </summary>
+        private int Index => Math.Clamp(SelectedItem ?? 0, 0, Math.Max(0, Rows.Count - 1));
+
         /// <summary>Moves the cursor, clamping at both ends rather than wrapping.</summary>
-        public void MoveSelection(int delta) => SelectedIndex = _selectedIndex + delta;
+        public void MoveSelection(int delta) => SelectedIndex = Index + delta;
 
-        protected override bool OnDrawingContent(DrawContext? context)
+        /// <summary>
+        /// Which row of this pane an item is drawn on, for a caller placing something over it.
+        /// <para>
+        /// <see cref="SettingsWindow"/> drops its editor onto the row being edited, and needs the
+        /// position on screen rather than the position in the list. The two used to be the same
+        /// number because the hand-drawn version had no scroll window; asking for it outright means
+        /// they no longer have to be.
+        /// </para>
+        /// </summary>
+        public int RowOf(int index) => index - Viewport.Y;
+
+        /// <summary>
+        /// One menu row: a cursor, an in-force marker, the label, a chevron where it leads deeper,
+        /// and the value.
+        /// </summary>
+        private StyledLine Row(MenuRow entry, int width, bool isCursor)
         {
-            var width = Viewport.Width;
-            var height = Viewport.Height;
+            var line = new StyledLine();
 
-            if (width <= 0 || height <= 0)
-            {
-                return true;
-            }
-
-            BeginPaint(width, height);
-
-            var drawn = Math.Min(height, _rows.Count);
-
-            // Measured on every draw rather than cached against Rows: a page rebuilds its rows on
-            // every read, so there is no one moment to invalidate on, and a handful of lengths is
-            // cheaper than a stale column.
-            var longest = 0;
-
-            for (var row = 0; row < drawn; row++)
-            {
-                longest = Math.Max(longest, _rows[row].Label.Length);
-            }
+            line.Append(isCursor ? "> " : "  ", TextRole.System);
+            line.Append(entry.IsActive ? "* " : "  ", TextRole.Place);
 
             // Clamped rather than allowed to run off: a narrow terminal pulls the column left and
             // clips the labels, which is legible, where drawing past the viewport is not. Once the
             // clamp has eaten the gap there is no column left at all, and the labels take the width
             // back rather than being clipped for a right-hand side that cannot be drawn.
-            var gutter = Math.Min(MarkerWidth + longest + Gap, width - Submenu.Length);
+            var gutter = Math.Min(MarkerWidth + LongestVisibleLabel() + Gap, width - Submenu.Length);
             var labelWidth = gutter > MarkerWidth + Gap
                 ? gutter - MarkerWidth - Gap
                 : Math.Max(0, width - MarkerWidth);
 
-            // No scroll window, unlike the save and class lists: every menu here is a handful of
-            // rows, and keeping the drawn row and its index the same number is what lets the
-            // settings screen drop an editor onto a row without any arithmetic to get wrong.
-            for (var row = 0; row < drawn; row++)
-            {
-                DrawRow(_rows[row], row, width, gutter, labelWidth);
-            }
-
-            return true;
-        }
-
-        private void DrawRow(MenuRow entry, int row, int width, int gutter, int labelWidth)
-        {
-            var isCursor = row == _selectedIndex;
-
-            Move(0, row);
-            SetRole(TextRole.System);
-            AddStr(isCursor ? "> " : "  ");
-
-            SetRole(TextRole.Place);
-            AddStr(entry.IsActive ? "* " : "  ");
-
             // Green wins over the cursor's brightness when a row is both: the arrow already says
             // where the cursor is, and nothing else says what is in force.
-            SetRole(entry.IsActive ? TextRole.Place
+            var label = Fit(entry.Label, labelWidth);
+
+            line.Append(
+                label,
+                entry.IsActive ? TextRole.Place
                 : isCursor ? TextRole.Command
                 : TextRole.Normal);
 
-            var label = Fit(entry.Label, labelWidth);
-            AddStr(label);
-
             // The chevron owns the gutter outright, so a long value is dropped or truncated before
-            // the one mark saying this row leads somewhere is. Drawn after the label for the same
-            // reason: a label wide enough to reach the gutter loses the argument.
+            // the one mark saying this row leads somewhere is.
             if (gutter <= MarkerWidth)
             {
-                return;
+                return line;
             }
 
             if (entry.HasSubmenu)
             {
-                Move(gutter, row);
-                SetRole(TextRole.System);
-                AddStr(Submenu);
+                Pad(line, gutter);
+                line.Append(Submenu, TextRole.System);
             }
 
             if (entry.Value.Length == 0)
             {
-                return;
+                return line;
             }
 
             var column = ValueColumn > 0 ? ValueColumn : gutter + Submenu.Length + 1;
@@ -164,15 +150,44 @@ namespace TerminalQuest.Ui
             // a label - a measured one is past every one of them by construction.
             if (column < MarkerWidth + label.Length + 1 || column >= width)
             {
-                return;
+                return line;
             }
 
-            Move(column, row);
-            SetRole(TextRole.System);
-            AddStr(Fit(entry.Value, width - column));
+            Pad(line, column);
+            line.Append(Fit(entry.Value, width - column), TextRole.System);
+
+            return line;
         }
 
-        private int Clamp(int index) => Math.Clamp(index, 0, Math.Max(0, _rows.Count - 1));
+        /// <summary>The longest label among the rows currently on screen.</summary>
+        /// <remarks>
+        /// Measured over the visible window rather than the whole menu, so a long label on a page
+        /// that scrolls cannot push every other row's value off to the right. The window comes from
+        /// the viewport because a data source is asked for one row at a time and is never told which
+        /// others are showing.
+        /// </remarks>
+        private int LongestVisibleLabel()
+        {
+            var first = Math.Clamp(Viewport.Y, 0, Math.Max(0, Rows.Count - 1));
+            var last = Math.Min(Rows.Count, first + Math.Max(0, Viewport.Height));
+
+            var longest = 0;
+            for (var index = first; index < last; index++)
+            {
+                longest = Math.Max(longest, Rows[index].Label.Length);
+            }
+
+            return longest;
+        }
+
+        /// <summary>Blanks a row out to a column, so the next run starts where it belongs.</summary>
+        private static void Pad(StyledLine line, int column)
+        {
+            if (column > line.Length)
+            {
+                line.Append(new string(' ', column - line.Length), TextRole.Normal);
+            }
+        }
 
         private static string Fit(string text, int width) =>
             text.Length <= width ? text : text[..Math.Max(0, width)];

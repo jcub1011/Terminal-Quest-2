@@ -439,7 +439,11 @@ namespace TerminalQuest.Ui
             _editor.Secret = Page.IsSecret(index);
             _editor.Text = text;
             _editor.X = Math.Max(0, Page.ValueColumn);
-            _editor.Y = ListTop + index;
+
+            // Asked for rather than assumed. The row an item is drawn on and its index in the list
+            // are the same number only while the list is not scrolled, and that is the list's business
+            // to know, not this window's.
+            _editor.Y = ListTop + _list.RowOf(index);
             _editor.CanFocus = true;
             _editor.Visible = true;
             _editor.SetFocus();
