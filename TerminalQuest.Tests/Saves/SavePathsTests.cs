@@ -105,6 +105,15 @@ namespace TerminalQuest.Tests.Saves
             Assert.Throws<ArgumentException>(() => SavePaths.Folder(name));
         }
 
+        [Theory]
+        [MemberData(nameof(HostileNames))]
+        public void Resetting_refuses_a_hostile_name(string name)
+        {
+            using var root = new SavesRoot();
+
+            Assert.Throws<ArgumentException>(() => SavePaths.Reset(name));
+        }
+
         [Fact]
         public void A_traversing_delete_leaves_the_target_alone()
         {
@@ -448,6 +457,171 @@ namespace TerminalQuest.Tests.Saves
             using var root = new SavesRoot();
 
             Assert.Throws<SaveException>(() => SavePaths.Duplicate("Missing"));
+        }
+
+        // ---- Resetting ---------------------------------------------------------------------------------
+
+        [Fact]
+        public void Resetting_a_save_that_is_not_there_is_refused()
+        {
+            using var root = new SavesRoot();
+
+            Assert.Throws<SaveException>(() => SavePaths.Reset("Missing"));
+        }
+
+        [Fact]
+        public void Resetting_a_save_with_no_player_character_is_refused()
+        {
+            using var root = new SavesRoot();
+            SavePaths.Open("EmptySave");
+
+            var ex = Assert.Throws<SaveException>(() => SavePaths.Reset("EmptySave"));
+            Assert.Contains("no player character", ex.Message);
+        }
+
+        [Fact]
+        public void Resetting_restores_player_defined_character_and_start_location_and_clears_playthrough_data()
+        {
+            using var root = new SavesRoot();
+            var warrior = ClassTemplates.All.Single(t => t.Name == "Warrior");
+            var store = SavePaths.Open("Campaign");
+
+            NewGame.Create(store, "Rowan", "A wandering veteran", warrior, "The Prancing Pony");
+
+            // Simulate playthrough data
+            store.Touch(15);
+            store.WriteSystemPrompt("Custom instructions for narrator");
+
+            // Damage player, modify attributes, add memory & secret
+            var characters = store.ReadCharacters();
+            var player = SaveStore.Player(characters)!;
+            player.Health = 10;
+            player.Attributes.Add(new CharacterAttribute { Name = "Guild Standing", Score = 18 });
+            player.Memories.Add(new Memory { Turn = 3, Text = "Fought goblins" });
+            player.Secrets.Add(new Secret { Turn = 5, Name = "Hidden key", Text = "The key is hidden under the floor" });
+
+            // Add NPC
+            characters.Characters.Add(new Character
+            {
+                Id = characters.TakeId(),
+                Name = "Gorm",
+                Kind = CharacterKind.Npc,
+                Health = 12,
+                MaxHealth = 12,
+            });
+            store.WriteCharacters(characters);
+
+            // Modify inventory
+            var inventory = store.ReadInventory();
+            inventory.Money = 500;
+            inventory.Items.Add(new Item { Id = inventory.TakeId(), Name = "Magic Ring", Quantity = 1 });
+            store.WriteInventory(inventory);
+
+            // Add locations and events
+            var locations = store.ReadLocations();
+            var startLoc = locations.Locations[0];
+            startLoc.Description = "A busy, smoke-filled inn.";
+            startLoc.Events.Add(new LocationEvent { Turn = 2, Text = "Brawl broke out" });
+            var secondLoc = new Location { Id = locations.TakeId(), Name = "Dark Dungeon" };
+            locations.Locations.Add(secondLoc);
+            store.WriteLocations(locations);
+            store.MoveCharacter(player.Id, secondLoc.Id);
+
+            // Add story events and rolls
+            var story = store.ReadStory();
+            story.Events.Add(new StoryEvent { Turn = 1, Title = "Arrived at inn", Detail = "The tavern was warm" });
+            store.WriteStory(story);
+
+            var rolls = store.ReadRolls();
+            rolls.Rolls.Add(new DiceRoll { Turn = 1, Total = 18 });
+            store.WriteRolls(rolls);
+
+            // Append logs
+            store.Journal.Append(new JournalEntry { Turn = 1, Tool = "get_state", Arguments = JsonDocument.Parse("{}").RootElement });
+            store.Ledger.Append(new LedgerEntry { Turn = 1, Claim = "Hello", Speaker = "Rowan" });
+            store.Transcript.Append(new TranscriptEntry { Turn = 1, Text = "The wind howled." });
+            store.Diagnostics.Append(new DiagnosticEntry { Turn = 1, Finding = Finding.RecordUnwritable, Detail = "Test diagnostic" });
+
+            // Act: Reset save
+            SavePaths.Reset("Campaign");
+
+            // Assert: Metadata
+            var metadata = store.ReadMetadata();
+            Assert.Equal(0, metadata.Turn);
+            Assert.Equal("Campaign", metadata.Name);
+            Assert.Equal(SaveStore.CurrentSchemaVersion, metadata.SchemaVersion);
+
+            // Assert: Player character
+            var resetCharacters = store.ReadCharacters();
+            var resetPlayer = Assert.Single(resetCharacters.Characters);
+            Assert.Equal(CharacterKind.Player, resetPlayer.Kind);
+            Assert.Equal("Rowan", resetPlayer.Name);
+            Assert.Equal(warrior.MaxHealth, resetPlayer.MaxHealth);
+            Assert.Equal(warrior.MaxHealth, resetPlayer.Health);
+            Assert.Empty(resetPlayer.Memories);
+            Assert.Empty(resetPlayer.Secrets);
+            Assert.Equal(6, resetPlayer.Attributes.Count);
+            Assert.Equal(16, resetPlayer.Attributes.Single(a => a.Name == "Strength").Score);
+
+            // Assert: Inventory
+            var resetInventory = store.ReadInventory();
+            Assert.Equal(warrior.StartingMoney, resetInventory.Money);
+            Assert.Equal(warrior.StartingItems.Count, resetInventory.Items.Count);
+            Assert.Equal("iron longsword", resetInventory.Items[0].Name);
+
+            // Assert: Location
+            var resetLocations = store.ReadLocations();
+            var loc = Assert.Single(resetLocations.Locations);
+            Assert.Equal("The Prancing Pony", loc.Name);
+            Assert.Equal(string.Empty, loc.Description);
+            Assert.Empty(loc.Events);
+            Assert.Equal([resetPlayer.Id], loc.CharacterIds);
+
+            // Assert: Story & Rolls
+            Assert.Empty(store.ReadStory().Events);
+            Assert.Empty(store.ReadRolls().Rolls);
+
+            // Assert: Logs deleted
+            Assert.Empty(store.Journal.Read().Entries);
+            Assert.Empty(store.Ledger.Read().Entries);
+            Assert.Empty(store.Transcript.Read().Entries);
+            Assert.Empty(store.Diagnostics.Read().Entries);
+
+            // Assert: Custom system prompt preserved
+            Assert.Equal("Custom instructions for narrator", store.ReadSystemPrompt());
+        }
+
+        [Fact]
+        public void Resetting_a_save_without_player_defined_location_clears_narrator_invented_location()
+        {
+            using var root = new SavesRoot();
+            var mage = ClassTemplates.All.Single(t => t.Name == "Mage");
+            var store = SavePaths.Open("MageCampaign");
+
+            // Created with null starting location
+            NewGame.Create(store, "Elidor", "A studious wizard", mage, null);
+
+            // Turn 1: narrator creates loc_1
+            var locations = store.ReadLocations();
+            var loc1 = new Location { Id = locations.TakeId(), Name = "Old Tower", Description = "A tall tower" };
+            locations.Locations.Add(loc1);
+            store.WriteLocations(locations);
+            var player = SaveStore.Player(store.ReadCharacters())!;
+            store.MoveCharacter(player.Id, loc1.Id);
+
+            store.Journal.Append(new JournalEntry
+            {
+                Turn = 1,
+                Tool = "upsert_location",
+                Arguments = JsonDocument.Parse("{\"name\":\"Old Tower\",\"description\":\"A tall tower\"}").RootElement,
+            });
+
+            // Act: Reset save
+            SavePaths.Reset("MageCampaign");
+
+            // Assert: Locations list should be empty so narrator can invent location anew
+            var resetLocations = store.ReadLocations();
+            Assert.Empty(resetLocations.Locations);
         }
 
         // ---- What must not keep a save out of the menu ---------------------------------------------------

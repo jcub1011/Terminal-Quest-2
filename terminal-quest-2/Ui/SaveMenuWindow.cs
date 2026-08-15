@@ -44,7 +44,7 @@ namespace TerminalQuest.Ui
             "Ctrl+= and Ctrl+- resize your terminal's text.";
 
         private const string SavesHint =
-            "Enter loads.  R renames.  D duplicates.";
+            "Enter loads.  R renames.  D duplicates.  Ctrl+R resets.";
 
         private const string SavesHintMore =
             "F opens the save folder.  X deletes.  Left goes back.";
@@ -82,6 +82,9 @@ namespace TerminalQuest.Ui
         /// </para>
         /// </summary>
         private string? _pendingDelete;
+
+        /// <summary>The save the next Ctrl+R keypress will reset back to start, or null when nothing is half-confirmed.</summary>
+        private string? _pendingReset;
 
         /// <summary>The save being renamed, held by name for the same reason.</summary>
         private string? _renaming;
@@ -247,6 +250,7 @@ namespace TerminalQuest.Ui
             }
 
             CancelPendingDelete();
+            CancelPendingReset();
             _saves.MoveSelection(delta);
             return true;
         }
@@ -365,6 +369,7 @@ namespace TerminalQuest.Ui
             if (key == Key.Esc || key == Key.CursorLeft)
             {
                 CancelPendingDelete();
+                CancelPendingReset();
                 GoToOptions();
                 return true;
             }
@@ -378,14 +383,23 @@ namespace TerminalQuest.Ui
             // Del is kept alongside X, because it is what this screen has always answered to.
             if (Letter(key, Key.X) || key == Key.Delete)
             {
+                CancelPendingReset();
                 Delete();
                 return true;
             }
 
-            // Any key that is not the delete key abandons a half-confirmed delete, so a pending
+            if (key == Key.R.WithCtrl)
+            {
+                CancelPendingDelete();
+                Reset();
+                return true;
+            }
+
+            // Any key that is not the delete or reset key abandons a half-confirmed action, so a pending
             // confirmation cannot survive the player moving on and be triggered by an unrelated
             // press later.
             CancelPendingDelete();
+            CancelPendingReset();
 
             if (key == Key.CursorUp)
             {
@@ -631,6 +645,41 @@ namespace TerminalQuest.Ui
             Fail(failure ?? $"Deleted '{selected.Name}'.");
         }
 
+        /// <summary>
+        /// Ctrl+R once asks, Ctrl+R again resets.
+        /// </summary>
+        private void Reset()
+        {
+            if (_saves.Selected is not { } selected)
+            {
+                Fail("There is no save to reset.");
+                return;
+            }
+
+            if (!SaveStore.Matches(_pendingReset, selected.Name))
+            {
+                _pendingReset = selected.Name;
+                Fail($"Reset '{selected.Name}' back to start?  Ctrl+R again to confirm.");
+                return;
+            }
+
+            _pendingReset = null;
+
+            try
+            {
+                SavePaths.Reset(selected.Name);
+            }
+            catch (Exception ex) when (ex is SaveException or ArgumentException)
+            {
+                Fail(ex.Message);
+                return;
+            }
+
+            Reload(out var failure);
+            _saves.Select(selected.Name);
+            Fail(failure ?? $"Reset '{selected.Name}' to its starting state.");
+        }
+
         private void Duplicate()
         {
             if (_saves.Selected is not { } selected)
@@ -727,6 +776,17 @@ namespace TerminalQuest.Ui
             }
 
             _pendingDelete = null;
+            ShowHint();
+        }
+
+        private void CancelPendingReset()
+        {
+            if (_pendingReset is null)
+            {
+                return;
+            }
+
+            _pendingReset = null;
             ShowHint();
         }
 
