@@ -1,3 +1,5 @@
+using Terminal.Gui.Input;
+using Terminal.Gui.Views;
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
@@ -289,19 +291,38 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void Characters_lists_who_has_been_met()
+        public void Character_lists_who_has_been_met()
         {
             using var save = Seeded();
 
-            Assert.Contains("Rowan", TextOf(PlayerCommands.Execute("/characters", save.Store)), StringComparison.Ordinal);
+            Assert.Contains("Rowan", TextOf(PlayerCommands.Execute("/character", save.Store)), StringComparison.Ordinal);
         }
 
         [Fact]
-        public void Locations_lists_where_the_player_has_been()
+        public void Character_with_argument_shows_details()
         {
             using var save = Seeded();
 
-            Assert.Contains("The Ford", TextOf(PlayerCommands.Execute("/where", save.Store)), StringComparison.Ordinal);
+            var text = TextOf(PlayerCommands.Execute("/character Rowan", save.Store));
+            Assert.Contains("Rowan", text, StringComparison.Ordinal);
+            Assert.Contains("A quiet sort.", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Location_lists_where_the_player_has_been()
+        {
+            using var save = Seeded();
+
+            Assert.Contains("The Ford", TextOf(PlayerCommands.Execute("/location", save.Store)), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Location_with_argument_shows_details()
+        {
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/location The Ford", save.Store));
+            Assert.Contains("The Ford", text, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -325,7 +346,7 @@ namespace TerminalQuest.Tests.Ui
             using var save = Seeded();
             save.WriteRaw("characters.json", "{ not json");
 
-            var result = PlayerCommands.Execute("/characters", save.Store);
+            var result = PlayerCommands.Execute("/character", save.Store);
 
             Assert.NotEmpty(result.Lines);
             Assert.Contains("characters.json", TextOf(result), StringComparison.Ordinal);
@@ -404,6 +425,144 @@ namespace TerminalQuest.Tests.Ui
             Assert.Contains(
                 "system-prompt",
                 PlayerCommands.Matching("/sys").Select(command => command.Name));
+        }
+
+        // ---- Argument suggestions -------------------------------------------------------------------
+
+        [Fact]
+        public void Character_command_suggests_all_characters_when_argument_is_empty()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/character ", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Contains(suggestions, s => s.DisplayText == "Rowan" && s.InsertText == "/character Rowan");
+        }
+
+        [Fact]
+        public void Character_command_narrows_suggestions_by_prefix()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/character Ro", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Single(suggestions);
+            Assert.Equal("Rowan", suggestions[0].DisplayText);
+            Assert.Equal("/character Rowan", suggestions[0].InsertText);
+        }
+
+        [Fact]
+        public void Location_command_suggests_all_locations_when_argument_is_empty()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/location ", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Contains(suggestions, s => s.DisplayText == "The Ford" && s.InsertText == "/location The Ford");
+        }
+
+        [Fact]
+        public void Location_command_narrows_suggestions_by_prefix()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/location The", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Single(suggestions);
+            Assert.Equal("The Ford", suggestions[0].DisplayText);
+            Assert.Equal("/location The Ford", suggestions[0].InsertText);
+        }
+
+        [Fact]
+        public void Command_without_arguments_shows_reminder_when_space_typed()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/inventory ", save.Store);
+
+            Assert.False(isChoosing);
+            Assert.Single(suggestions);
+            Assert.Equal("/inventory", suggestions[0].DisplayText);
+        }
+
+        [Fact]
+        public void Character_aliases_who_and_characters_also_suggest_arguments()
+        {
+            using var save = Seeded();
+
+            var (whoSuggestions, whoChoosing) = PlayerCommands.GetSuggestions("/who ", save.Store);
+            Assert.True(whoChoosing);
+            Assert.Contains(whoSuggestions, s => s.DisplayText == "Rowan" && s.InsertText == "/who Rowan");
+
+            var (charsSuggestions, charsChoosing) = PlayerCommands.GetSuggestions("/characters ", save.Store);
+            Assert.True(charsChoosing);
+            Assert.Contains(charsSuggestions, s => s.DisplayText == "Rowan" && s.InsertText == "/characters Rowan");
+        }
+
+        [Fact]
+        public void Location_aliases_where_and_locations_also_suggest_arguments()
+        {
+            using var save = Seeded();
+
+            var (whereSuggestions, whereChoosing) = PlayerCommands.GetSuggestions("/where ", save.Store);
+            Assert.True(whereChoosing);
+            Assert.Contains(whereSuggestions, s => s.DisplayText == "The Ford" && s.InsertText == "/where The Ford");
+
+            var (locsSuggestions, locsChoosing) = PlayerCommands.GetSuggestions("/locations ", save.Store);
+            Assert.True(locsChoosing);
+            Assert.Contains(locsSuggestions, s => s.DisplayText == "The Ford" && s.InsertText == "/locations The Ford");
+        }
+
+        [Fact]
+        public void Unknown_character_name_returns_no_argument_suggestions_falling_back_to_reminder()
+        {
+            using var save = Seeded();
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/character NonExistent", save.Store);
+
+            Assert.False(isChoosing);
+            Assert.Single(suggestions);
+            Assert.Equal("/character [name]", suggestions[0].DisplayText);
+        }
+
+        [Fact]
+        public void GameWindow_completes_argument_on_tab()
+        {
+            using var save = Seeded();
+            var state = new GameState();
+            using var window = new GameWindow(state) { Store = save.Store };
+
+            var inputField = window.SubViews.OfType<TextField>().First();
+
+            inputField.Text = "/character Ro";
+
+            // Tab completes to "/character Rowan"
+            window.NewKeyDownEvent(Key.Tab);
+
+            Assert.Equal("/character Rowan", inputField.Text);
+        }
+
+        [Fact]
+        public void GameWindow_executes_character_with_no_args_when_enter_pressed_on_empty_arg()
+        {
+            using var save = Seeded();
+            var state = new GameState();
+            using var window = new GameWindow(state) { Store = save.Store };
+
+            string? entered = null;
+            window.CommandEntered += cmd => entered = cmd;
+
+            var inputField = window.SubViews.OfType<TextField>().First();
+            inputField.Text = "/character ";
+
+            // Enter on empty arg executes the command rather than completing suggestion
+            inputField.NewKeyDownEvent(Key.Enter);
+
+            Assert.Equal("/character", entered);
         }
     }
 }

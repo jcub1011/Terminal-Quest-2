@@ -73,10 +73,11 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void A_revealed_roll_finally_shows_its_total()
         {
-            var line = RollWatcher.Line(Roll(1, hidden: true, revealed: true, total: 18), "Rowan");
+            var roll = Roll(1, hidden: true, revealed: true, total: 18);
+            roll.Faces.Add(18);
+            var line = RollWatcher.Line(roll, "Rowan");
 
-            Assert.Contains("18", TextOf(line), StringComparison.Ordinal);
-            Assert.Contains("revealed", TextOf(line), StringComparison.Ordinal);
+            Assert.Equal("Roll -> Rowan | Forcing the door | 1d20 | 18 = (18)", TextOf(line));
         }
 
         [Fact]
@@ -84,11 +85,78 @@ namespace TerminalQuest.Tests.Ui
         {
             var roll = Roll(1, total: 17);
             roll.Faces.Add(14);
+            roll.Attribute = "Strength";
+            roll.Modifier = 3;
 
             var line = RollWatcher.Line(roll, "Rowan");
 
-            Assert.Contains("= 17", TextOf(line), StringComparison.Ordinal);
-            Assert.Contains("(14)", TextOf(line), StringComparison.Ordinal);
+            Assert.Equal("Roll -> Rowan | Strength | 1d20 | 17 = (14) + 3 modifier", TextOf(line));
+        }
+
+        [Fact]
+        public void A_roll_omits_modifier_when_zero()
+        {
+            var roll = Roll(1, total: 14);
+            roll.Faces.Add(14);
+            roll.Attribute = "Strength";
+            roll.Modifier = 0;
+
+            var line = RollWatcher.Line(roll, "Rowan");
+
+            Assert.Equal("Roll -> Rowan | Strength | 1d20 | 14 = (14)", TextOf(line));
+        }
+
+        [Fact]
+        public void A_roll_formats_negative_modifier()
+        {
+            var roll = Roll(1, total: 12);
+            roll.Faces.Add(14);
+            roll.Attribute = "Dexterity";
+            roll.Modifier = -2;
+
+            var line = RollWatcher.Line(roll, "Rowan");
+
+            Assert.Equal("Roll -> Rowan | Dexterity | 1d20 | 12 = (14) - 2 modifier", TextOf(line));
+        }
+
+        [Fact]
+        public void A_roll_includes_situational_modifier_when_positive()
+        {
+            var roll = Roll(1, total: 16);
+            roll.Faces.Add(14);
+            roll.Attribute = "Strength";
+            roll.SituationalModifier = 2;
+
+            var line = RollWatcher.Line(roll, "Rowan");
+
+            Assert.Equal("Roll -> Rowan | Strength | 1d20 | 16 = (14) + 2 situational", TextOf(line));
+        }
+
+        [Fact]
+        public void A_roll_includes_situational_modifier_when_negative()
+        {
+            var roll = Roll(1, total: 9);
+            roll.Faces.Add(14);
+            roll.Attribute = "Strength";
+            roll.SituationalModifier = -5;
+
+            var line = RollWatcher.Line(roll, "Rowan");
+
+            Assert.Equal("Roll -> Rowan | Strength | 1d20 | 9 = (14) - 5 situational", TextOf(line));
+        }
+
+        [Fact]
+        public void A_roll_combines_modifier_and_situational_modifier()
+        {
+            var roll = Roll(1, total: 10);
+            roll.Faces.Add(14);
+            roll.Attribute = "Charisma";
+            roll.Modifier = 1;
+            roll.SituationalModifier = -5;
+
+            var line = RollWatcher.Line(roll, "Rowan");
+
+            Assert.Equal("Roll -> Rowan | Charisma | 1d20 | 10 = (14) + 1 modifier - 5 situational", TextOf(line));
         }
 
         [Fact]

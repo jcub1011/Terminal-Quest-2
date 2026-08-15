@@ -226,6 +226,38 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Option_navigation_works_after_running_player_command()
+        {
+            var state = new GameState();
+            using var window = new GameWindow(state);
+
+            window.Narration.AddLine("What do you do?", TextRole.Normal);
+            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
+            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
+
+            // Simulate executing a player command (/character)
+            window.Narration.AddBlankLine();
+            window.Narration.AddLine("> /character", TextRole.Command);
+            window.Narration.AddLine("Who you know", TextRole.System);
+            window.Narration.AddLine("  Rowan  10/10  (you)", TextRole.Normal);
+            window.Narration.AddBlankLine();
+
+            // Press Down arrow -> should select Option 1 from earlier narration turn
+            var handled = window.NewKeyDownEvent(Key.CursorDown);
+            Assert.True(handled);
+            Assert.Equal(1, window.Narration.HighlightedOption);
+
+            var inputField = window.SubViews.OfType<TextField>().First();
+            Assert.Equal("1", inputField.Text);
+
+            // Press Down arrow again -> Option 2
+            handled = window.NewKeyDownEvent(Key.CursorDown);
+            Assert.True(handled);
+            Assert.Equal(2, window.Narration.HighlightedOption);
+            Assert.Equal("2", inputField.Text);
+        }
+
+        [Fact]
         public void OptionSelection_attribute_is_defined_in_theme()
         {
             Assert.Equal(Color.White, Theme.OptionSelection.Background);

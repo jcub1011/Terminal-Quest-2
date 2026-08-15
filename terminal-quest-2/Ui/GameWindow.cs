@@ -2,6 +2,7 @@ using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
+using TerminalQuest.Saves;
 
 namespace TerminalQuest.Ui
 {
@@ -123,6 +124,11 @@ namespace TerminalQuest.Ui
         public StatusView Status { get; }
 
         public GameState State { get; }
+
+        /// <summary>
+        /// The save store backing the session, used for command argument completions.
+        /// </summary>
+        public SaveStore? Store { get; init; }
 
         /// <summary>
         /// What Ctrl+G hands the command line to, or null where there is nothing to hand it to.
@@ -400,16 +406,11 @@ namespace TerminalQuest.Ui
             }
 
             // Enter is the field's before it is the window's, so the suggestions have to take
-            // their turn at it here. A half-typed name is completed rather than run - /ch is not
-            // a command, and running it would only produce an error the player can see coming.
-            //
-            // A line that already names a command is run instead. The test is whether the typed
-            // word is a command at all, not whether it is the highlighted one: /inv is a command
-            // in its own right and is also a prefix of /inventory, so asking only about the
-            // highlight would answer no and turn a finished command into a completion.
+            // their turn at it here. A half-typed command or incomplete argument is completed
+            // rather than run if the current text is not already a valid command invocation.
             if (_suggestions.Visible
                 && _suggestions.Selected is { } completion
-                && PlayerCommands.Describing(text) is null)
+                && ShouldCompleteOnEnter(text))
             {
                 Complete(completion);
                 return;
@@ -442,6 +443,51 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// Decides whether pressing Enter on the current text should take the highlighted suggestion
+        /// rather than executing the line.
+        /// </summary>
+        private bool ShouldCompleteOnEnter(string text)
+        {
+            if (!PlayerCommands.IsCommand(text))
+            {
+                return false;
+            }
+
+            var parts = text.Split(' ', 2, StringSplitOptions.TrimEntries);
+            var commandName = parts.Length > 0 ? parts[0].TrimStart('/').ToLowerInvariant() : string.Empty;
+            var argument = parts.Length > 1 ? parts[1] : string.Empty;
+
+            // If the command name itself is incomplete (e.g. "/ch"), complete it.
+            if (PlayerCommands.Describing(text) is null)
+            {
+                return true;
+            }
+
+            // If an argument prefix was typed (e.g. "/character Ro" or "/delete Sav"), check if it is
+            // already an exact match for a known entity. If not, complete it.
+            if (argument.Length > 0 && Store is { } store)
+            {
+                switch (commandName)
+                {
+                    case "character":
+                    case "characters":
+                    case "who":
+                        return SaveStore.FindCharacter(store.ReadCharacters(), argument) is null;
+
+                    case "location":
+                    case "locations":
+                    case "where":
+                        return SaveStore.FindLocation(store.ReadLocations(), argument) is null;
+
+                    case "delete":
+                        return !SavePaths.List().Any(s => SaveStore.Matches(s.Name, argument) && !SaveStore.Matches(s.Name, store.Name));
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Puts the list in step with what has been typed, after every keystroke.
         /// <para>
         /// Nothing here looks at whether a turn is in flight. The input field stays live while the
@@ -453,29 +499,19 @@ namespace TerminalQuest.Ui
         {
             var text = _input.Text ?? string.Empty;
 
-            // Two questions in order: which command might this be, and failing that, which command
-            // is it already. The second is what keeps the strip up once the name is settled - it
-            // goes away when the line is submitted or the slash is deleted, not when the player
-            // reaches the argument.
-            var matches = PlayerCommands.Matching(text);
-            var choosing = matches.Count > 0;
+            var (suggestions, choosing) = PlayerCommands.GetSuggestions(text, Store);
 
-            if (!choosing)
-            {
-                matches = PlayerCommands.Describing(text) is { } named ? [named] : [];
-            }
-
-            if (matches.Count == 0)
+            if (suggestions.Count == 0)
             {
                 HideSuggestions();
                 return;
             }
 
-            var height = Math.Min(matches.Count, MaxSuggestionRows);
+            var height = Math.Min(suggestions.Count, MaxSuggestionRows);
 
             // Set before the rows, which is where the cursor is put back to the top.
             _suggestions.IsChoosing = choosing;
-            _suggestions.Suggestions = matches;
+            _suggestions.Suggestions = suggestions;
             _suggestions.Height = height;
 
             // Measured up from the input frame rather than down from the top, so the list always
@@ -502,16 +538,16 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Takes a suggestion: the typed word is replaced outright by the command it stood for,
-        /// with a trailing space so the caret is where an argument would go.
-        /// <para>
-        /// The list does not close, it settles: the space ends the choosing, and what is left is
-        /// the one command, still saying what it takes while the argument is typed.
-        /// </para>
+        /// Takes a suggestion: the input is replaced by the suggestion text.
         /// </summary>
-        private void Complete(PlayerCommandInfo command)
+        private void Complete(SuggestionItem item)
         {
-            _input.Text = $"/{command.Name} ";
+            if (string.IsNullOrEmpty(item.InsertText))
+            {
+                return;
+            }
+
+            _input.Text = item.InsertText;
             _input.InsertionPoint = _input.Text.Length;
 
             // Belt and braces: assigning the text raises the change that refreshes the strip, but

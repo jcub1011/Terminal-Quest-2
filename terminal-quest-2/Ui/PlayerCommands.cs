@@ -13,9 +13,11 @@ namespace TerminalQuest.Ui
             new("rolls", "", "every die the world has thrown"),
             new("inventory", "", "what you are carrying"),
             new("inv", "", "what you are carrying", IsAlias: true),
-            new("characters", "[name]", "who you have met, and what happened with them"),
+            new("character", "[name]", "who you have met, and what happened with them"),
+            new("characters", "[name]", "who you have met, and what happened with them", IsAlias: true),
             new("who", "[name]", "who you have met, and what happened with them", IsAlias: true),
-            new("locations", "[name]", "where you have been, and what happened there"),
+            new("location", "[name]", "where you have been, and what happened there"),
+            new("locations", "[name]", "where you have been, and what happened there", IsAlias: true),
             new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
             new("saves", "", "every save on this machine"),
             new("delete", "<name>", "destroy another save, for good"),
@@ -39,6 +41,146 @@ namespace TerminalQuest.Ui
             return All
                 .Where(command => command.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
+        }
+
+        public static (IReadOnlyList<SuggestionItem> Suggestions, bool IsChoosing) GetSuggestions(
+            string input,
+            SaveStore? store)
+        {
+            if (!IsCommand(input))
+            {
+                return ([], false);
+            }
+
+            if (!input.Contains(' '))
+            {
+                var matches = Matching(input);
+                if (matches.Count > 0)
+                {
+                    var items = matches
+                        .Select(c => new SuggestionItem(
+                            InsertText: $"/{c.Name} ",
+                            DisplayText: c.Usage,
+                            Summary: c.Summary,
+                            Role: TextRole.Command))
+                        .ToArray();
+
+                    return (items, true);
+                }
+
+                var named = Describing(input);
+                if (named is not null)
+                {
+                    return ([
+                        new SuggestionItem(
+                            InsertText: $"/{named.Value.Name} ",
+                            DisplayText: named.Value.Usage,
+                            Summary: named.Value.Summary,
+                            Role: TextRole.Command)
+                    ], false);
+                }
+
+                return ([], false);
+            }
+
+            var parts = input.Split(' ', 2, StringSplitOptions.TrimEntries);
+            var commandName = parts.Length > 0 ? parts[0].TrimStart('/').ToLowerInvariant() : string.Empty;
+            var argPrefix = parts.Length > 1 ? parts[1] : string.Empty;
+
+            var command = All.FirstOrDefault(c => c.Name.Equals(commandName, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(command.Name))
+            {
+                return ([], false);
+            }
+
+            var argMatches = GetArgumentSuggestions(commandName, argPrefix, store);
+            if (argMatches.Count > 0)
+            {
+                return (argMatches, true);
+            }
+
+            return ([
+                new SuggestionItem(
+                    InsertText: string.Empty,
+                    DisplayText: command.Usage,
+                    Summary: command.Summary,
+                    Role: TextRole.Command)
+            ], false);
+        }
+
+        private static IReadOnlyList<SuggestionItem> GetArgumentSuggestions(
+            string commandName,
+            string argPrefix,
+            SaveStore? store)
+        {
+            switch (commandName)
+            {
+                case "character":
+                case "characters":
+                case "who":
+                    if (store is null) return [];
+                    try
+                    {
+                        var chars = store.ReadCharacters().Characters;
+                        return chars
+                            .Where(c => c.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
+                            .Select(c => new SuggestionItem(
+                                InsertText: $"/{commandName} {c.Name}",
+                                DisplayText: c.Name,
+                                Summary: c.Kind == CharacterKind.Player
+                                    ? "(you)"
+                                    : (c.Description.Length > 0 ? c.Description : $"Health {c.Health}/{c.MaxHealth}"),
+                                Role: TextRole.Normal))
+                            .ToArray();
+                    }
+                    catch (SaveException)
+                    {
+                        return [];
+                    }
+
+                case "location":
+                case "locations":
+                case "where":
+                    if (store is null) return [];
+                    try
+                    {
+                        var locs = store.ReadLocations().Locations;
+                        return locs
+                            .Where(l => l.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
+                            .Select(l => new SuggestionItem(
+                                InsertText: $"/{commandName} {l.Name}",
+                                DisplayText: l.Name,
+                                Summary: l.Description,
+                                Role: TextRole.Place))
+                            .ToArray();
+                    }
+                    catch (SaveException)
+                    {
+                        return [];
+                    }
+
+                case "delete":
+                    try
+                    {
+                        var saves = SavePaths.List();
+                        return saves
+                            .Where(s => !SaveStore.Matches(s.Name, store?.Name)
+                                && s.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
+                            .Select(s => new SuggestionItem(
+                                InsertText: $"/{commandName} {s.Name}",
+                                DisplayText: s.Name,
+                                Summary: $"turn {s.Turn}  {s.SizeText}",
+                                Role: TextRole.Normal))
+                            .ToArray();
+                    }
+                    catch
+                    {
+                        return [];
+                    }
+
+                default:
+                    return [];
+            }
         }
 
         public static PlayerCommandInfo? Describing(string input)
@@ -87,10 +229,12 @@ namespace TerminalQuest.Ui
                     case "inv":
                         Inventory(lines, store);
                         break;
+                    case "character":
                     case "characters":
                     case "who":
                         Characters(lines, store, argument);
                         break;
+                    case "location":
                     case "locations":
                     case "where":
                         Locations(lines, store, argument);
@@ -304,7 +448,7 @@ namespace TerminalQuest.Ui
                     lines.Add(line);
                 }
 
-                lines.Add(StyledLine.FromText("/characters <name> for what someone remembers.", TextRole.System));
+                lines.Add(StyledLine.FromText("/character <name> for what someone remembers.", TextRole.System));
                 return;
             }
 
@@ -399,7 +543,7 @@ namespace TerminalQuest.Ui
                     lines.Add(line);
                 }
 
-                lines.Add(StyledLine.FromText("/locations <name> for what happened somewhere.", TextRole.System));
+                lines.Add(StyledLine.FromText("/location <name> for what happened somewhere.", TextRole.System));
                 return;
             }
 

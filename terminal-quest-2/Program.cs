@@ -270,6 +270,7 @@ namespace TerminalQuest
             using var window = new GameWindow(state)
             {
                 Editor = editor,
+                Store = store,
             };
             var pump = new NarrationPump(app, window.Narration);
 

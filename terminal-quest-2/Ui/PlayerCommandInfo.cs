@@ -25,4 +25,18 @@ namespace TerminalQuest.Ui
         /// <summary>The command as it is written down: the slash, the name, and what may follow.</summary>
         public string Usage => Arguments.Length == 0 ? $"/{Name}" : $"/{Name} {Arguments}";
     }
+
+    /// <summary>
+    /// A suggestion shown in the command suggestion strip, for completing a command or argument.
+    /// </summary>
+    /// <param name="InsertText">What replacing the input with this suggestion produces.</param>
+    /// <param name="DisplayText">What appears in the suggestion list (e.g. command usage or argument name).</param>
+    /// <param name="Summary">The description or hint shown beside the suggestion.</param>
+    /// <param name="Role">The text role to use when rendering the suggestion name.</param>
+    internal readonly record struct SuggestionItem(
+        string InsertText,
+        string DisplayText,
+        string Summary = "",
+        TextRole Role = TextRole.Command);
 }
+

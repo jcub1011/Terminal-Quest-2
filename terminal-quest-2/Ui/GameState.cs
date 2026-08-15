@@ -44,7 +44,7 @@ namespace TerminalQuest.Ui
         /// Freeform attributes are deliberately left out. There is no bound on how many the narrator
         /// invents or how long it names them, and the pane is twenty-seven columns wide with an
         /// inventory underneath that would be pushed off the bottom. They are read with
-        /// <c>/characters</c>, which has the width for them.
+        /// <c>/character</c>, which has the width for them.
         /// </para>
         /// </summary>
         public List<AttributeEntry> Attributes { get; } = [];

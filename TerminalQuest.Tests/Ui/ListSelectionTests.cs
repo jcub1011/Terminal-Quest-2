@@ -19,10 +19,10 @@ namespace TerminalQuest.Tests.Ui
     /// </summary>
     public sealed class ListSelectionTests
     {
-        private static readonly PlayerCommandInfo[] Commands =
+        private static readonly SuggestionItem[] Commands =
         [
-            new("look", string.Empty, "Look around."),
-            new("inventory", string.Empty, "What you are carrying."),
+            new("/look ", "/look", "Look around."),
+            new("/inventory ", "/inventory", "What you are carrying."),
         ];
 
         [Fact]

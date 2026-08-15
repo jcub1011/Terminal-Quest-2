@@ -149,21 +149,20 @@ namespace TerminalQuest.Ui
             ArgumentNullException.ThrowIfNull(roll);
 
             var line = new StyledLine();
-            line.Append("roll  ", TextRole.Roll);
+            line.Append("Roll -> ", TextRole.Roll);
 
             line.Append(rollerName is { Length: > 0 } ? rollerName : "the world", TextRole.Normal);
+
+            line.Append(" | ", TextRole.System);
 
             // The attribute when one applied, otherwise what the roll was for. Both are kept in the
             // save, and /rolls has room to show the reason either way.
             var label = roll.Attribute is { Length: > 0 } ? roll.Attribute : roll.Reason;
+            line.Append(label, TextRole.Roll);
 
-            if (label is { Length: > 0 })
-            {
-                line.Append(" — ", TextRole.System);
-                line.Append(label, TextRole.Roll);
-            }
+            line.Append(" | ", TextRole.System);
 
-            line.Append($"  {(roll.Notation is { Length: > 0 } ? roll.Notation : "?")}", TextRole.System);
+            line.Append(roll.Notation is { Length: > 0 } ? roll.Notation : "?", TextRole.System);
 
             if (roll.Hidden && !roll.Revealed)
             {
@@ -171,17 +170,30 @@ namespace TerminalQuest.Ui
                 return line;
             }
 
-            line.Append("  = ", TextRole.System);
+            line.Append(" | ", TextRole.System);
             line.Append(roll.Total.ToString(), TextRole.Item);
+            line.Append(" = ", TextRole.System);
 
-            if (roll.Faces.Count > 0)
+            var rolledValue = roll.Faces.Count > 0
+                ? string.Join(", ", roll.Faces)
+                : (roll.Total - roll.Modifier - roll.SituationalModifier).ToString();
+
+            line.Append($"({rolledValue})", TextRole.System);
+
+            if (roll.Modifier != 0)
             {
-                line.Append($"  ({string.Join(", ", roll.Faces)})", TextRole.System);
+                var modText = roll.Modifier > 0
+                    ? $" + {roll.Modifier} modifier"
+                    : $" - {-roll.Modifier} modifier";
+                line.Append(modText, TextRole.System);
             }
 
-            if (roll.Hidden)
+            if (roll.SituationalModifier != 0)
             {
-                line.Append("  revealed", TextRole.Roll);
+                var sitText = roll.SituationalModifier > 0
+                    ? $" + {roll.SituationalModifier} situational"
+                    : $" - {-roll.SituationalModifier} situational";
+                line.Append(sitText, TextRole.System);
             }
 
             return line;

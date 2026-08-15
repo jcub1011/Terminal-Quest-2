@@ -32,34 +32,9 @@ namespace TerminalQuest.Ui
                 return [];
             }
 
-            var endIndex = rows.Count - 1;
+            var endIndex = FindTrailingNarratorEndIndex(rows);
 
-            // Skip trailing blank rows and system-only notices (such as recall markers and "The narrator is ready.")
-            while (endIndex >= 0)
-            {
-                var row = rows[endIndex];
-                if (row.Length == 0 || string.IsNullOrWhiteSpace(TextOf(row)))
-                {
-                    endIndex--;
-                    continue;
-                }
-
-                if (IsSystemRow(row))
-                {
-                    endIndex--;
-                    continue;
-                }
-
-                break;
-            }
-
-            if (endIndex < 0)
-            {
-                return [];
-            }
-
-            // If the last non-system line is a player command, the choices are in the past.
-            if (IsCommandRow(rows[endIndex]))
+            if (endIndex < 0 || IsWorldCommandEcho(rows[endIndex]))
             {
                 return [];
             }
@@ -167,6 +142,64 @@ namespace TerminalQuest.Ui
             return foundOptions;
         }
 
+        private static int FindTrailingNarratorEndIndex(IReadOnlyList<StyledLine> rows)
+        {
+            var endIndex = rows.Count - 1;
+
+            // Skip trailing blank rows and system-only notices
+            while (endIndex >= 0)
+            {
+                var row = rows[endIndex];
+                if (row.Length == 0 || string.IsNullOrWhiteSpace(TextOf(row)) || IsSystemRow(row))
+                {
+                    endIndex--;
+                    continue;
+                }
+
+                break;
+            }
+
+            if (endIndex < 0)
+            {
+                return -1;
+            }
+
+            // Check if there are trailing player slash command blocks.
+            var lastSlashCommandIndex = -1;
+            for (var i = endIndex; i >= 0; i--)
+            {
+                var row = rows[i];
+                if (IsWorldCommandEcho(row))
+                {
+                    break;
+                }
+
+                if (IsSlashCommandEcho(row))
+                {
+                    lastSlashCommandIndex = i;
+                }
+            }
+
+            if (lastSlashCommandIndex >= 0)
+            {
+                endIndex = lastSlashCommandIndex - 1;
+
+                while (endIndex >= 0)
+                {
+                    var row = rows[endIndex];
+                    if (row.Length == 0 || string.IsNullOrWhiteSpace(TextOf(row)) || IsSystemRow(row))
+                    {
+                        endIndex--;
+                        continue;
+                    }
+
+                    break;
+                }
+            }
+
+            return endIndex;
+        }
+
         private static string TextOf(StyledLine line) =>
             string.Concat(line.Spans.Select(s => s.Text));
 
@@ -175,5 +208,27 @@ namespace TerminalQuest.Ui
 
         private static bool IsCommandRow(StyledLine line) =>
             line.Spans.Count > 0 && line.Spans.Any(s => s.Role == TextRole.Command);
+
+        private static bool IsSlashCommandEcho(StyledLine line)
+        {
+            if (!IsCommandRow(line))
+            {
+                return false;
+            }
+
+            var text = TextOf(line).TrimStart();
+            return text.StartsWith(">/", StringComparison.Ordinal)
+                || text.StartsWith("> /", StringComparison.Ordinal);
+        }
+
+        private static bool IsWorldCommandEcho(StyledLine line)
+        {
+            if (!IsCommandRow(line))
+            {
+                return false;
+            }
+
+            return !IsSlashCommandEcho(line);
+        }
     }
 }

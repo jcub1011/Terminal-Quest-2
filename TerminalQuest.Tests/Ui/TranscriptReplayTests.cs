@@ -118,7 +118,7 @@ namespace TerminalQuest.Tests.Ui
                 [Player(1, "force it"), Narrator(1, "The door gives.")],
                 [Roll(1, turn: 1)]));
 
-            var rollAt = lines.ToList().FindIndex(text => text.StartsWith("roll", StringComparison.Ordinal));
+            var rollAt = lines.ToList().FindIndex(text => text.StartsWith("Roll ->", StringComparison.Ordinal));
             var proseAt = lines.ToList().FindIndex(text => text == "The door gives.");
 
             Assert.True(rollAt >= 0, "the roll should be drawn");
@@ -134,7 +134,7 @@ namespace TerminalQuest.Tests.Ui
                 [Narrator(5, "The door gives.")],
                 [Roll(1, turn: 2)]));
 
-            Assert.DoesNotContain(lines, text => text.StartsWith("roll", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, text => text.StartsWith("Roll ->", StringComparison.Ordinal));
         }
 
         [Fact]
@@ -173,7 +173,7 @@ namespace TerminalQuest.Tests.Ui
                 [Narrator(1, "First."), Narrator(1, "Second.")],
                 [Roll(1, turn: 1)]));
 
-            Assert.Single(lines, text => text.StartsWith("roll", StringComparison.Ordinal));
+            Assert.Single(lines, text => text.StartsWith("Roll ->", StringComparison.Ordinal));
         }
 
         // ---- Whose move it was -----------------------------------------------------------------

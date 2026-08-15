@@ -172,6 +172,64 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Choices_remain_active_after_player_slash_command()
+        {
+            List<StyledLine> rows =
+            [
+                Line("What do you do?"),
+                Line("1. Go north"),
+                Line("2. Go south"),
+                Line(""),
+                Line("> /character", TextRole.Command),
+                Line(""),
+                Line("Who you know", TextRole.System),
+                Line("  Rowan  10/10  (you)", TextRole.Normal),
+                Line(""),
+            ];
+
+            var options = NarrationOptionDetector.Detect(rows);
+
+            Assert.Equal(2, options.Count);
+            Assert.Equal(1, options[0].Number);
+            Assert.Equal("Go north", options[0].Text);
+            Assert.Equal([1], options[0].RowIndices);
+
+            Assert.Equal(2, options[1].Number);
+            Assert.Equal("Go south", options[1].Text);
+            Assert.Equal([2], options[1].RowIndices);
+        }
+
+        [Fact]
+        public void Choices_remain_active_after_multiple_player_slash_commands()
+        {
+            List<StyledLine> rows =
+            [
+                Line("What do you do?"),
+                Line("1. Go north"),
+                Line("2. Go south"),
+                Line(""),
+                Line("> /character", TextRole.Command),
+                Line("Who you know", TextRole.System),
+                Line(""),
+                Line("> /location", TextRole.Command),
+                Line("Where you have been", TextRole.System),
+                Line("  The Ford", TextRole.Place),
+                Line(""),
+            ];
+
+            var options = NarrationOptionDetector.Detect(rows);
+
+            Assert.Equal(2, options.Count);
+            Assert.Equal(1, options[0].Number);
+            Assert.Equal("Go north", options[0].Text);
+            Assert.Equal([1], options[0].RowIndices);
+
+            Assert.Equal(2, options[1].Number);
+            Assert.Equal("Go south", options[1].Text);
+            Assert.Equal([2], options[1].RowIndices);
+        }
+
+        [Fact]
         public void Non_consecutive_numbers_are_ignored()
         {
             List<StyledLine> rows =
