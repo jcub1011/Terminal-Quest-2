@@ -1074,7 +1074,7 @@ namespace TerminalQuest
         {
             while (true)
             {
-                using var menu = new SaveMenuWindow(Describe(settings)) { Editor = editor };
+                using var menu = new SaveMenuWindow(app, Describe(settings)) { Editor = editor };
 
                 var settingsRequested = false;
 

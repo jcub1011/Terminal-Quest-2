@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -9,67 +11,61 @@ using TerminalQuest.Agents.LmStudio;
 using TerminalQuest.Saves;
 using TerminalQuest.Settings;
 
+using Attribute = Terminal.Gui.Drawing.Attribute;
+
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The settings screen: who narrates, and how to reach them.
-    /// <para>
-    /// Reached from <see cref="SaveMenuWindow"/> and only from there, because a session is built
-    /// against one adapter and holds a process or a transcript for as long as it lives. Changing
-    /// the answer partway through a game would mean tearing that down and rebuilding it, and the
-    /// screen that decides it belongs before anything has been built.
-    /// </para>
-    /// <para>
-    /// A navigator rather than a form. Levels of <see cref="SettingsPage"/> stack up - categories,
-    /// then adapters, then one adapter's settings - and only the level the player is standing on
-    /// is on screen. The view tree is built once and never changes; descending swaps the rows and
-    /// nothing else.
-    /// </para>
-    /// <para>
-    /// Owns no game logic beyond writing the file - it collects answers, saves them, and stops.
-    /// </para>
+    /// The settings screen: who narrates, model options, and application preferences.
+    /// Built with Terminal.Gui's built-in <see cref="Tabs"/> for tabbed navigation and
+    /// <see cref="ListView"/> for list selection with explicit cursor selection vs committed picking.
     /// </summary>
     internal sealed class SettingsWindow : Window
     {
-        /// <summary>The first row of the list, in the window's own coordinates.</summary>
-        /// <remarks>
-        /// The editor is dropped onto a row by number, so this has to agree with where the list
-        /// actually starts. It is one because the breadcrumb takes the top line.
-        /// </remarks>
-        private const int ListTop = 1;
-
-        private const string EditHint = "Enter commits.  Ctrl+G opens an editor.  Esc discards the edit.";
-
-        /// <summary>How long the model list may take before the screen gives up on it.</summary>
         private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+
+        private static readonly Attribute PickedAndSelectedAttr = new(new Color("#1b5e20"), Color.White);
+        private static readonly Attribute PickedAttr = new(new Color("#8fb26a"), Color.None);
+        private static readonly Attribute SelectedAttr = new(Color.Black, Color.White);
+        private static readonly Attribute NormalAttr = new(new Color("#d7d2c4"), Color.None);
 
         private readonly IApplication _app;
         private readonly AppSettings _original;
         private readonly AppSettings _draft;
-        private readonly List<(SettingsPage Page, int Cursor)> _trail = [];
 
-        private readonly BreadcrumbView _breadcrumb;
-        private readonly MenuListView _list;
-        private readonly Label _hint;
-        private readonly TextField _editor;
+        private readonly Tabs _tabs;
+        private readonly Label _statusLabel;
 
-        /// <summary>How often the "asking" line advances a frame while a probe is out.</summary>
-        private static readonly TimeSpan SpinnerInterval = TimeSpan.FromMilliseconds(120);
+        // Provider tab controls
+        private readonly ListView _providerList;
 
-        /// <summary>
-        /// Frames for the "asking" line. Plain ASCII, because this has to read the same in a
-        /// console that has never heard of a braille glyph.
-        /// </summary>
-        private static readonly char[] SpinnerFrames = ['|', '/', '-', '\\'];
+        // Claude tab controls
+        private readonly ListView _claudeModelList;
+        private readonly TextField _claudeCustomModel;
 
-        private int _editIndex = -1;
-        private bool _discardArmed;
+        // LM Studio tab controls
+        private readonly TextField _lmStudioBaseUrl;
+        private readonly TextField _lmStudioApiKey;
+        private readonly TextField _lmStudioModel;
+        private readonly ListView _lmStudioModelsList;
+        private readonly Button _probeButton;
+        private readonly Label _probeStatus;
+        private readonly List<string> _probedModels = [];
         private CancellationTokenSource? _probe;
 
-        /// <summary>The running spinner's timeout handle, or null when no probe is out.</summary>
-        private object? _spinner;
+        // Memory tab controls
+        private readonly TextField _recallChars;
 
-        private int _spinnerFrame;
+        // Editor tab controls
+        private readonly TextField _editorCommand;
+        private readonly Button _testEditorButton;
+        private readonly Button _openConfigFolderButton;
+        private readonly Label _editorStatus;
+
+        // Action buttons
+        private readonly Button _saveButton;
+        private readonly Button _cancelButton;
+        private readonly Button _defaultsButton;
 
         public SettingsWindow(IApplication app, AppSettings settings)
         {
@@ -79,8 +75,6 @@ namespace TerminalQuest.Ui
             _app = app;
             _original = settings;
 
-            // Edited on a copy, so backing out leaves the caller's settings as they were and
-            // "discard" needs nothing more than dropping this.
             _draft = new AppSettings();
             _draft.CopyFrom(settings);
 
@@ -90,688 +84,606 @@ namespace TerminalQuest.Ui
             BorderStyle = LineStyle.Rounded;
             SetScheme(Theme.CreateScheme());
 
-            _breadcrumb = new BreadcrumbView
+            _tabs = new Tabs
             {
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
+                Height = Dim.Fill() - 3,
+            };
+            _tabs.SetScheme(Theme.CreateScheme());
+
+            // Remove vertical arrow keys from Tabs so Up/Down navigates lists and controls instead of switching tabs
+            _tabs.KeyBindings.Remove(Key.CursorUp);
+            _tabs.KeyBindings.Remove(Key.CursorDown);
+
+            _statusLabel = new Label
+            {
+                X = 1,
+                Y = Pos.Bottom(_tabs),
+                Width = Dim.Fill() - 2,
                 Height = 1,
+                Text = "Left/Right: Switch Tab | Up/Down: Select Option | Enter: Pick Option | Tab: Next Field | Ctrl+S: Save | Esc: Cancel",
+            };
+            _statusLabel.SetScheme(Theme.CreateScheme());
+
+            // 1. Engine / Provider Tab
+            var providerView = new View
+            {
+                Title = "Engine",
+                Width = Dim.Fill(),
+                Height = Dim.Fill(),
+            };
+            providerView.SetScheme(Theme.CreateScheme());
+
+            var providerLabel = new Label { Text = "Select active narrative provider (Up/Down to select, Enter to pick):", X = 1, Y = 1 };
+            providerLabel.SetScheme(Theme.CreateScheme());
+
+            _providerList = new ListView
+            {
+                X = 1,
+                Y = 3,
+                Width = Dim.Fill() - 2,
+                Height = 3,
+            };
+            _providerList.SetScheme(Theme.CreateScheme());
+            _providerList.SetSource(new ObservableCollection<string>(["Claude Code (Anthropic CLI)", "LM Studio (Local OpenAI-compatible API)"]));
+            _providerList.SelectedItem = _draft.Provider == AgentProvider.ClaudeCode ? 0 : 1;
+
+            _providerList.RowRender += (_, e) =>
+            {
+                var isPicked = (e.Row == 0 && _draft.Provider == AgentProvider.ClaudeCode)
+                            || (e.Row == 1 && _draft.Provider == AgentProvider.LmStudio);
+                var isSelected = e.Row == _providerList.SelectedItem;
+
+                if (isSelected)
+                {
+                    e.RowAttribute = isPicked ? PickedAndSelectedAttr : SelectedAttr;
+                }
+                else
+                {
+                    e.RowAttribute = isPicked ? PickedAttr : NormalAttr;
+                }
             };
 
-            _list = new MenuListView
+            _providerList.Accepting += (_, _) =>
             {
-                X = 0,
-                Y = Pos.Bottom(_breadcrumb),
-                Width = Dim.Fill(),
-                Height = Dim.Fill() - 2,
+                var selected = _providerList.SelectedItem ?? 0;
+                _draft.Provider = selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.LmStudio;
+                _providerList.SetNeedsDraw();
+                _statusLabel.Text = $"Picked provider: {(_draft.Provider == AgentProvider.ClaudeCode ? "Claude Code" : "LM Studio")}";
             };
 
-            _hint = new Label
-            {
-                X = 0,
-                Y = Pos.Bottom(_list),
-                Width = Dim.Fill(),
-                Height = 1,
-            };
-            _hint.SetScheme(Theme.CreateScheme());
+            _providerList.ValueChanged += (_, _) => _providerList.SetNeedsDraw();
 
-            // One editor, moved to whichever row is being typed into, rather than a field per row:
-            // the rows are drawn, not built, so there is nothing to give a permanent field to.
-            _editor = new TextField
+            var providerDesc = new Label
             {
-                X = 0,
-                Y = 0,
+                X = 1,
+                Y = 7,
+                Width = Dim.Fill() - 2,
+                Text = "Claude Code requires the claude CLI to be authenticated on your PATH.\nLM Studio connects over HTTP to a local server instance.\nUse Left/Right to change tabs, Up/Down to select, Enter to pick.",
+            };
+            providerDesc.SetScheme(Theme.CreateScheme());
+
+            providerView.Add(providerLabel, _providerList, providerDesc);
+
+            // 2. Claude Tab
+            var claudeView = new View
+            {
+                Title = "Claude",
                 Width = Dim.Fill(),
-                Height = 1,
+                Height = Dim.Fill(),
+            };
+            claudeView.SetScheme(Theme.CreateScheme());
+
+            var claudeModelLabel = new Label { Text = "Choose a preset Claude model (Up/Down to select, Enter to pick):", X = 1, Y = 1 };
+            claudeModelLabel.SetScheme(Theme.CreateScheme());
+
+            var modelListLabels = ClaudeModels.All
+                .Select(m => string.IsNullOrEmpty(m.Id) ? $"{m.Name} ({m.Detail})" : $"{m.Name} - {m.Id} ({m.Detail})")
+                .ToList();
+
+            _claudeModelList = new ListView
+            {
+                X = 1,
+                Y = 2,
+                Width = Dim.Fill() - 2,
+                Height = 6,
+            };
+            _claudeModelList.SetScheme(Theme.CreateScheme());
+            _claudeModelList.SetSource(new ObservableCollection<string>(modelListLabels));
+
+            var currentModelIndex = ClaudeModels.IndexOf(_draft.ClaudeModel);
+            if (currentModelIndex >= 0)
+            {
+                _claudeModelList.SelectedItem = currentModelIndex;
+            }
+
+            var customModelLabel = new Label { Text = "Or custom model identifier:", X = 1, Y = 9 };
+            customModelLabel.SetScheme(Theme.CreateScheme());
+
+            _claudeCustomModel = new TextField
+            {
+                X = 1,
+                Y = 10,
+                Width = 45,
+                Text = _draft.ClaudeModel,
+            };
+            _claudeCustomModel.SetScheme(Theme.CreateScheme());
+
+            _claudeCustomModel.TextChanged += (_, _) =>
+            {
+                _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
+                var idx = ClaudeModels.IndexOf(_draft.ClaudeModel);
+                if (idx >= 0)
+                {
+                    _claudeModelList.SelectedItem = idx;
+                }
+                _claudeModelList.SetNeedsDraw();
+            };
+
+            _claudeModelList.RowRender += (_, e) =>
+            {
+                var isPicked = e.Row >= 0 && e.Row < ClaudeModels.All.Length
+                    && string.Equals(ClaudeModels.All[e.Row].Id, _draft.ClaudeModel, StringComparison.OrdinalIgnoreCase);
+                var isSelected = e.Row == _claudeModelList.SelectedItem;
+
+                if (isSelected)
+                {
+                    e.RowAttribute = isPicked ? PickedAndSelectedAttr : SelectedAttr;
+                }
+                else
+                {
+                    e.RowAttribute = isPicked ? PickedAttr : NormalAttr;
+                }
+            };
+
+            _claudeModelList.Accepting += (_, _) =>
+            {
+                var selected = _claudeModelList.SelectedItem ?? -1;
+                if (selected >= 0 && selected < ClaudeModels.All.Length)
+                {
+                    _draft.ClaudeModel = ClaudeModels.All[selected].Id;
+                    _claudeCustomModel.Text = _draft.ClaudeModel;
+                    _claudeModelList.SetNeedsDraw();
+                    _statusLabel.Text = $"Picked model: {ClaudeModels.All[selected].Name}";
+                }
+            };
+
+            _claudeModelList.ValueChanged += (_, _) => _claudeModelList.SetNeedsDraw();
+
+            claudeView.Add(claudeModelLabel, _claudeModelList, customModelLabel, _claudeCustomModel);
+
+            // 3. LM Studio Tab
+            var lmView = new View
+            {
+                Title = "LM Studio",
+                Width = Dim.Fill(),
+                Height = Dim.Fill(),
+            };
+            lmView.SetScheme(Theme.CreateScheme());
+
+            var urlLabel = new Label { Text = "Server Base URL:", X = 1, Y = 1 };
+            urlLabel.SetScheme(Theme.CreateScheme());
+
+            _lmStudioBaseUrl = new TextField
+            {
+                X = 1,
+                Y = 2,
+                Width = 45,
+                Text = _draft.LmStudioBaseUrl,
+            };
+            _lmStudioBaseUrl.SetScheme(Theme.CreateScheme());
+
+            var apiKeyLabel = new Label { Text = "API Key (optional):", X = 1, Y = 4 };
+            apiKeyLabel.SetScheme(Theme.CreateScheme());
+
+            _lmStudioApiKey = new TextField
+            {
+                X = 1,
+                Y = 5,
+                Width = 45,
+                Text = _draft.LmStudioApiKey,
+            };
+            _lmStudioApiKey.SetScheme(Theme.CreateScheme());
+
+            var modelLabel = new Label { Text = "Model Name / ID (leave empty for currently loaded model):", X = 1, Y = 7 };
+            modelLabel.SetScheme(Theme.CreateScheme());
+
+            _lmStudioModel = new TextField
+            {
+                X = 1,
+                Y = 8,
+                Width = 45,
+                Text = _draft.LmStudioModel,
+            };
+            _lmStudioModel.SetScheme(Theme.CreateScheme());
+
+            _probeButton = new Button
+            {
+                X = 1,
+                Y = 10,
+                Text = "Probe Models",
+            };
+            _probeButton.SetScheme(Theme.CreateScheme());
+
+            _probeStatus = new Label
+            {
+                X = Pos.Right(_probeButton) + 2,
+                Y = 10,
+                Width = Dim.Fill() - 2,
+                Text = string.Empty,
+            };
+            _probeStatus.SetScheme(Theme.CreateScheme());
+
+            _lmStudioModelsList = new ListView
+            {
+                X = 1,
+                Y = 12,
+                Width = Dim.Fill() - 2,
+                Height = 4,
                 Visible = false,
-                CanFocus = false,
             };
-            _editor.SetScheme(Theme.CreateScheme());
-            _editor.Accepting += OnEditorAccepting;
+            _lmStudioModelsList.SetScheme(Theme.CreateScheme());
 
-            // Added last so it draws over the row it is sitting on.
-            Add(_breadcrumb, _list, _hint, _editor);
+            _lmStudioModelsList.RowRender += (_, e) =>
+            {
+                var isPicked = e.Row >= 0 && e.Row < _probedModels.Count
+                    && string.Equals(_probedModels[e.Row], _draft.LmStudioModel, StringComparison.OrdinalIgnoreCase);
+                var isSelected = e.Row == _lmStudioModelsList.SelectedItem;
 
-            _trail.Add((new SettingsTabsPage(_draft), 0));
-            Refresh();
+                if (isSelected)
+                {
+                    e.RowAttribute = isPicked ? PickedAndSelectedAttr : SelectedAttr;
+                }
+                else
+                {
+                    e.RowAttribute = isPicked ? PickedAttr : NormalAttr;
+                }
+            };
 
-            // The window has no visible focusable child, so it has to hold focus itself for the
-            // keys to arrive at all. Asked for here rather than in the constructor for the same
-            // reason as the character screen: that is too early to stick.
-            Initialized += (_, _) => SetFocus();
+            _lmStudioModelsList.Accepting += (_, _) =>
+            {
+                var selected = _lmStudioModelsList.SelectedItem ?? -1;
+                if (selected >= 0 && selected < _probedModels.Count)
+                {
+                    var modelName = _probedModels[selected];
+                    _lmStudioModel.Text = modelName;
+                    _draft.LmStudioModel = modelName;
+                    _probeStatus.Text = $"Picked: {modelName}";
+                    _lmStudioModelsList.SetNeedsDraw();
+                }
+            };
+
+            _lmStudioModelsList.ValueChanged += (_, _) => _lmStudioModelsList.SetNeedsDraw();
+
+            _probeButton.Accepting += async (_, _) =>
+            {
+                await ProbeLmStudioModelsAsync();
+            };
+
+            lmView.Add(urlLabel, _lmStudioBaseUrl, apiKeyLabel, _lmStudioApiKey, modelLabel, _lmStudioModel, _probeButton, _probeStatus, _lmStudioModelsList);
+
+            // 4. Memory Tab
+            var memoryView = new View
+            {
+                Title = "Memory",
+                Width = Dim.Fill(),
+                Height = Dim.Fill(),
+            };
+            memoryView.SetScheme(Theme.CreateScheme());
+
+            var recallLabel = new Label { Text = "Transcript Recall Characters:", X = 1, Y = 1 };
+            recallLabel.SetScheme(Theme.CreateScheme());
+
+            _recallChars = new TextField
+            {
+                X = 1,
+                Y = 2,
+                Width = 15,
+                Text = _draft.TranscriptRecallCharacters.ToString(),
+            };
+            _recallChars.SetScheme(Theme.CreateScheme());
+
+            var recallDesc = new Label
+            {
+                X = 1,
+                Y = 4,
+                Width = Dim.Fill() - 2,
+                Text = $"Sets how much text from the previous session is re-read when continuing a save.\nBoundaries: {TranscriptRecall.MinCharacters} to {TranscriptRecall.MaxCharacters} characters.\nDefault: {TranscriptRecall.DefaultCharacters} characters.",
+            };
+            recallDesc.SetScheme(Theme.CreateScheme());
+
+            memoryView.Add(recallLabel, _recallChars, recallDesc);
+
+            // 5. Editor Tab
+            var editorView = new View
+            {
+                Title = "Editor",
+                Width = Dim.Fill(),
+                Height = Dim.Fill(),
+            };
+            editorView.SetScheme(Theme.CreateScheme());
+
+            var editorLabel = new Label { Text = "External Editor Command (for Ctrl+G):", X = 1, Y = 1 };
+            editorLabel.SetScheme(Theme.CreateScheme());
+
+            _editorCommand = new TextField
+            {
+                X = 1,
+                Y = 2,
+                Width = 45,
+                Text = _draft.EditorCommand,
+            };
+            _editorCommand.SetScheme(Theme.CreateScheme());
+
+            _testEditorButton = new Button
+            {
+                X = 1,
+                Y = 4,
+                Text = "Test Editor",
+            };
+            _testEditorButton.SetScheme(Theme.CreateScheme());
+
+            _openConfigFolderButton = new Button
+            {
+                X = Pos.Right(_testEditorButton) + 2,
+                Y = 4,
+                Text = "Open Config Folder",
+            };
+            _openConfigFolderButton.SetScheme(Theme.CreateScheme());
+
+            _editorStatus = new Label
+            {
+                X = 1,
+                Y = 6,
+                Width = Dim.Fill() - 2,
+                Text = string.Empty,
+            };
+            _editorStatus.SetScheme(Theme.CreateScheme());
+
+            _testEditorButton.Accepting += (_, _) =>
+            {
+                var cmd = _editorCommand.Text?.Trim() ?? string.Empty;
+                if (EditorCommandLine.TryParse(cmd, out var parsed, out var reason))
+                {
+                    _editorStatus.Text = $"Editor found: {parsed.Display}";
+                }
+                else
+                {
+                    _editorStatus.Text = $"Editor error: {reason}";
+                }
+            };
+
+            _openConfigFolderButton.Accepting += (_, _) =>
+            {
+                var dir = AppDirectory.Root;
+                Directory.CreateDirectory(dir);
+                if (!FileExplorer.TryOpen(dir, out var reason))
+                {
+                    _editorStatus.Text = reason ?? "Could not open folder.";
+                }
+            };
+
+            editorView.Add(editorLabel, _editorCommand, _testEditorButton, _openConfigFolderButton, _editorStatus);
+
+            // Add tabs to Tabs control
+            _tabs.Add(providerView, claudeView, lmView, memoryView, editorView);
+
+            // When switching tabs, automatically focus the active tab's primary control
+            _tabs.ValueChanged += (_, e) =>
+            {
+                if (e.NewValue == providerView) _providerList.SetFocus();
+                else if (e.NewValue == claudeView) _claudeModelList.SetFocus();
+                else if (e.NewValue == lmView) _lmStudioBaseUrl.SetFocus();
+                else if (e.NewValue == memoryView) _recallChars.SetFocus();
+                else if (e.NewValue == editorView) _editorCommand.SetFocus();
+            };
+
+            // Bottom action buttons
+
+            _saveButton = new Button
+            {
+                X = 1,
+                Y = Pos.Bottom(_statusLabel),
+                Text = "Save (Ctrl+S)",
+            };
+            _saveButton.SetScheme(Theme.CreateScheme());
+            _saveButton.Accepting += (_, _) => SaveAndClose();
+
+            _cancelButton = new Button
+            {
+                X = Pos.Right(_saveButton) + 2,
+                Y = Pos.Bottom(_statusLabel),
+                Text = "Cancel (Esc)",
+            };
+            _cancelButton.SetScheme(Theme.CreateScheme());
+            _cancelButton.Accepting += (_, _) => CancelAndClose();
+
+            _defaultsButton = new Button
+            {
+                X = Pos.Right(_cancelButton) + 2,
+                Y = Pos.Bottom(_statusLabel),
+                Text = "Restore Defaults",
+            };
+            _defaultsButton.SetScheme(Theme.CreateScheme());
+            _defaultsButton.Accepting += (_, _) => RestoreDefaults();
+
+            Add(_tabs, _statusLabel, _saveButton, _cancelButton, _defaultsButton);
+
+            Initialized += (_, _) => _providerList.SetFocus();
         }
 
-        /// <summary>What the player settled on and this screen saved, or null when they left.</summary>
         public AppSettings? Chosen { get; private set; }
 
-        /// <summary>
-        /// What Ctrl+G hands a row being typed into.
-        /// </summary>
-        /// <remarks>
-        /// This screen's own, reading the draft rather than the saved settings, so an editor named on
-        /// the Editor page is in force for the very next Ctrl+G - before it has been saved, and even
-        /// on the row that named it.
-        /// </remarks>
-        private ExternalEditor Editor { get; }
+        public ExternalEditor? Editor { get; init; }
 
-        /// <summary>Raised once the settings are saved.</summary>
         public event Action? Done;
 
-        /// <summary>Raised when the player leaves without keeping anything.</summary>
         public event Action? Cancelled;
 
-        private SettingsPage Page => _trail[^1].Page;
+        protected override bool OnKeyDown(Key key)
+        {
+            if (key == Key.Esc)
+            {
+                CancelAndClose();
+                return true;
+            }
 
-        /// <summary>
-        /// Lets go of an edit still open, so its answer is not written into a field that has gone.
-        /// </summary>
+            if (key == Key.S.WithCtrl)
+            {
+                SaveAndClose();
+                return true;
+            }
+
+            return base.OnKeyDown(key);
+        }
+
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                Editor.Abandon();
+                _probe?.Cancel();
+                _probe?.Dispose();
+                _probe = null;
+                Editor?.Abandon();
             }
 
             base.Dispose(disposing);
         }
 
-        protected override bool OnKeyDown(Key key)
+        private async Task ProbeLmStudioModelsAsync()
         {
-            // Two presses of a leaving key in a row is the only thing that discards; anything else
-            // in between means the player was not answering that question.
-            if (key != Key.Esc && key != Key.CursorLeft)
+            var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(baseUrl) || !AppSettings.IsAddress(baseUrl))
             {
-                _discardArmed = false;
+                _probeStatus.Text = "Enter a valid server URL before probing.";
+                return;
             }
 
-            return _editIndex >= 0 ? OnKeyDownEditing(key) : OnKeyDownBrowsing(key);
-        }
+            _probe?.Cancel();
+            _probe?.Dispose();
+            _probe = new CancellationTokenSource(ProbeTimeout);
 
-        /// <summary>
-        /// Keys while a row is being typed into.
-        /// <para>
-        /// The focused editor has already had its turn by the time this runs - Terminal.Gui offers
-        /// a key to the focused subview first - so everything printable, and Enter, is gone before
-        /// we see it. What reaches here is what a text field has no use for, and the important one
-        /// is Esc: it has to close the editor and stop, or a single press would close the editor
-        /// and back out of the page underneath it in one go.
-        /// </para>
-        /// </summary>
-        private bool OnKeyDownEditing(Key key)
-        {
-            // Nothing else happens while the value is in another program - least of all Esc, which
-            // would discard the edit that is still being made.
-            if (Editor.IsBusy)
-            {
-                return true;
-            }
+            _probeButton.Enabled = false;
+            _probeStatus.Text = "Connecting to LM Studio...";
 
-            if (key == ExternalEditor.RequestKey)
+            try
             {
-                // A masked row is masked so that its value is not lying about in the open, and handing
-                // it to an editor means writing it to a plain file for another program to read. The
-                // API key is short enough to type into the box it belongs in.
-                if (Page.IsSecret(_editIndex))
+                var models = await LmStudioModels.ListAsync(baseUrl, _lmStudioApiKey.Text?.Trim(), ProbeTimeout, _probe.Token);
+
+                _app.Invoke(() =>
                 {
-                    Fail("A hidden value is not written out to a file for another program to open.");
-                    return true;
-                }
-
-                return Editor.TryBegin(_editor, SetEditingNotice);
+                    if (models.Count == 0)
+                    {
+                        _probeStatus.Text = "Connected, but no models found.";
+                        _lmStudioModelsList.Visible = false;
+                        _probedModels.Clear();
+                    }
+                    else
+                    {
+                        _probeStatus.Text = $"Found {models.Count} model(s). Select with Up/Down, Enter to pick:";
+                        _probedModels.Clear();
+                        _probedModels.AddRange(models);
+                        _lmStudioModelsList.SetSource(new ObservableCollection<string>(models));
+                        _lmStudioModelsList.Visible = true;
+                        _lmStudioModelsList.Height = Math.Clamp(models.Count, 2, 6);
+                        _lmStudioModelsList.SetFocus();
+                    }
+                });
             }
-
-            if (key == Key.Esc)
+            catch (Exception ex)
             {
-                CancelEdit();
-                return true;
-            }
-
-            // Swallowed: up and down would leave the editor sitting over a row it is no longer
-            // editing. Left and right belong to the text and the editor has already had them -
-            // but a field ignores them at either end of what is typed, and one arriving here
-            // would walk out of the page underneath, so they stop at this line either way.
-            if (key == Key.CursorUp || key == Key.CursorDown
-                || key == Key.CursorLeft || key == Key.CursorRight)
-            {
-                return true;
-            }
-
-            if (key == Key.Q.WithCtrl)
-            {
-                CancelEdit();
-                Leave();
-                return true;
-            }
-
-            if (key == Key.Enter.WithCtrl)
-            {
-                if (CommitEdit())
+                _app.Invoke(() =>
                 {
-                    Save();
-                }
-
-                return true;
+                    var msg = ex is AgentException ? ex.Message : ex.Message;
+                    var firstLine = msg.IndexOf('\n') > 0 ? msg[..msg.IndexOf('\n')] : msg;
+                    _probeStatus.Text = $"Probe failed: {firstLine}";
+                    _lmStudioModelsList.Visible = false;
+                    _probedModels.Clear();
+                });
             }
-
-            return base.OnKeyDown(key);
+            finally
+            {
+                _app.Invoke(() =>
+                {
+                    _probeButton.Enabled = true;
+                });
+            }
         }
 
-        private bool OnKeyDownBrowsing(Key key)
+        private void RestoreDefaults()
         {
-            if (key == Key.Esc)
-            {
-                GoBack();
-                return true;
-            }
+            var defaults = new AppSettings();
+            _draft.CopyFrom(defaults);
 
-            if (key == Key.Q.WithCtrl)
-            {
-                Leave();
-                return true;
-            }
+            _providerList.SelectedItem = defaults.Provider == AgentProvider.ClaudeCode ? 0 : 1;
+            _providerList.SetNeedsDraw();
 
-            if (key == Key.Enter.WithCtrl)
+            var modelIdx = ClaudeModels.IndexOf(defaults.ClaudeModel);
+            if (modelIdx >= 0)
             {
-                Save();
-                return true;
+                _claudeModelList.SelectedItem = modelIdx;
             }
+            _claudeCustomModel.Text = defaults.ClaudeModel;
+            _claudeModelList.SetNeedsDraw();
 
-            if (key == Key.CursorUp)
-            {
-                _list.MoveSelection(-1);
-                return true;
-            }
+            _lmStudioBaseUrl.Text = defaults.LmStudioBaseUrl;
+            _lmStudioApiKey.Text = defaults.LmStudioApiKey;
+            _lmStudioModel.Text = defaults.LmStudioModel;
 
-            if (key == Key.CursorDown)
-            {
-                _list.MoveSelection(1);
-                return true;
-            }
+            _recallChars.Text = defaults.TranscriptRecallCharacters.ToString();
+            _editorCommand.Text = defaults.EditorCommand;
 
-            // Left and Esc both walk up a level, and the settings screen is itself one level below
-            // the start page - so from the top of the trail they leave, guarded by the same
-            // unsaved-changes prompt either way. Nothing here can walk a player out of settings
-            // they have not saved without asking.
-            if (key == Key.CursorLeft)
-            {
-                GoBack();
-                return true;
-            }
-
-            if (key == Key.CursorRight)
-            {
-                Open(_list.SelectedIndex);
-                return true;
-            }
-
-            if (key == Key.Enter)
-            {
-                Activate(_list.SelectedIndex);
-                return true;
-            }
-
-            if (key == Key.L.WithCtrl)
-            {
-                Reprobe();
-                return true;
-            }
-
-            return base.OnKeyDown(key);
+            _statusLabel.Text = "Restored all settings to defaults. Press Ctrl+S to save.";
         }
 
-        /// <summary>
-        /// What Enter means, which depends on what the row is: a row that can be chosen is chosen,
-        /// and a row that cannot is opened.
-        /// </summary>
-        private void Activate(int index)
+        private void SaveAndClose()
         {
-            if (Page.CanSelect(index))
+            // Collect and validate values
+            _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
+
+            var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(baseUrl) && !AppSettings.IsAddress(baseUrl))
             {
-                SelectRow(index);
+                _statusLabel.Text = "LM Studio Base URL must be a valid http:// or https:// address.";
                 return;
             }
+            _draft.LmStudioBaseUrl = baseUrl;
+            _draft.LmStudioApiKey = _lmStudioApiKey.Text?.Trim() ?? string.Empty;
+            _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
 
-            Open(index);
-        }
-
-        /// <summary>
-        /// What Right means: go into this row, whatever going in amounts to here - a deeper page,
-        /// a list the server has to be asked for, or the editor for a row that is typed into.
-        /// </summary>
-        private void Open(int index)
-        {
-            var page = Page;
-
-            // Asked first: whether there is a list to open is the server's answer to give.
-            if (page.NeedsProbe(index))
+            var recallText = _recallChars.Text?.Trim() ?? string.Empty;
+            if (!int.TryParse(recallText, out var recall)
+                || recall < TranscriptRecall.MinCharacters
+                || recall > TranscriptRecall.MaxCharacters)
             {
-                _ = ProbeAsync(index);
+                _statusLabel.Text = $"Transcript Recall must be an integer between {TranscriptRecall.MinCharacters} and {TranscriptRecall.MaxCharacters}.";
                 return;
             }
+            _draft.TranscriptRecallCharacters = recall;
 
-            if (page.TryBeginEdit(index, out var text))
-            {
-                BeginEdit(index, text);
-                return;
-            }
+            var editorCmd = _editorCommand.Text?.Trim() ?? string.Empty;
+            _draft.EditorCommand = editorCmd;
 
-            if (page.Enter(index) is { } child)
-            {
-                Push(child);
-            }
-        }
-
-        private void SelectRow(int index)
-        {
-            if (Page.Select(index))
-            {
-                RefreshRows();
-            }
-        }
-
-        private void Push(SettingsPage child)
-        {
-            _trail[^1] = (_trail[^1].Page, _list.SelectedIndex);
-            _trail.Add((child, 0));
-            Refresh();
-        }
-
-        /// <summary>
-        /// Esc: off one layer, never two. The editor is a layer, then each page, then the screen.
-        /// </summary>
-        private void GoBack()
-        {
-            if (_trail.Count > 1)
-            {
-                CancelProbe();
-                _trail.RemoveAt(_trail.Count - 1);
-                Refresh();
-                return;
-            }
-
-            if (!IsDirty())
-            {
-                Leave();
-                return;
-            }
-
-            if (!_discardArmed)
-            {
-                _discardArmed = true;
-                Fail("Unsaved changes.  Ctrl+Enter saves, Esc or Left again discards.");
-                return;
-            }
-
-            Leave();
-        }
-
-        /// <summary>
-        /// Leaves without saving, from wherever the player was standing.
-        /// <para>
-        /// Every exit goes through here so that a probe cannot outlive the screen that asked for
-        /// it - a reply arriving after the window has gone has nowhere to land, and the spinner
-        /// would keep rewriting a hint line nobody is looking at.
-        /// </para>
-        /// </summary>
-        private void Leave()
-        {
-            CancelProbe();
-            Cancelled?.Invoke();
-        }
-
-        private bool IsDirty() =>
-            _draft.Provider != _original.Provider
-            || !string.Equals(_draft.ClaudeModel, _original.ClaudeModel, StringComparison.Ordinal)
-            || !string.Equals(_draft.LmStudioBaseUrl, _original.LmStudioBaseUrl, StringComparison.Ordinal)
-            || !string.Equals(_draft.LmStudioModel, _original.LmStudioModel, StringComparison.Ordinal)
-            || !string.Equals(_draft.LmStudioApiKey, _original.LmStudioApiKey, StringComparison.Ordinal)
-            || !string.Equals(_draft.EditorCommand, _original.EditorCommand, StringComparison.Ordinal);
-
-        private void BeginEdit(int index, string text)
-        {
-            _editIndex = index;
-
-            // One field serves every row, so anything a previous row's external edit left behind has
-            // to go - otherwise a row whose value happens to match that one line would be committed
-            // as the other row's text.
-            Editor.Forget(_editor);
-
-            _editor.Secret = Page.IsSecret(index);
-            _editor.Text = text;
-            _editor.X = Math.Max(0, Page.ValueColumn);
-
-            // Asked for rather than assumed. The row an item is drawn on and its index in the list
-            // are the same number only while the list is not scrolled, and that is the list's business
-            // to know, not this window's.
-            _editor.Y = ListTop + _list.RowOf(index);
-            _editor.CanFocus = true;
-            _editor.Visible = true;
-            _editor.SetFocus();
-
-            SetHint(EditHint);
-        }
-
-        /// <summary>Puts the editor away, taking the focus off it before it goes.</summary>
-        private void EndEdit()
-        {
-            SetFocus();
-            _editor.Visible = false;
-            _editor.CanFocus = false;
-            _editor.Secret = false;
-            _editIndex = -1;
-            _list.SetNeedsDraw();
-        }
-
-        private void CancelEdit()
-        {
-            EndEdit();
-            ShowHint();
-        }
-
-        /// <summary>
-        /// Says where the value has gone while an external editor holds it, and puts the editing hint
-        /// back once it is done.
-        /// </summary>
-        private void SetEditingNotice(string? notice) => SetHint(notice ?? EditHint);
-
-        /// <summary>Takes what was typed. False when the page refused it and the editor stays open.</summary>
-        private bool CommitEdit()
-        {
-            if (_editIndex < 0)
-            {
-                return true;
-            }
-
-            var index = _editIndex;
-
-            // Read through the external editor, so a value written in one arrives whole. Nothing on
-            // these pages wants more than a line, but a value that came back with newlines in it is
-            // better refused by the page's own validation than silently flattened here.
-            var typed = Editor.Resolve(_editor).Trim();
-
-            if (Page.Commit(index, typed) is { } error)
-            {
-                Fail(error);
-                return false;
-            }
-
-            EndEdit();
-            RefreshRows();
-            ShowHint();
-            return true;
-        }
-
-        /// <summary>Enter inside the editor. Handled either way, so it never reaches the window.</summary>
-        private void OnEditorAccepting(object? sender, CommandEventArgs e)
-        {
-            e.Handled = true;
-            CommitEdit();
-        }
-
-        private void Save()
-        {
-            var address = _draft.LmStudioBaseUrl?.Trim() ?? string.Empty;
-
-            // Only checked for the adapter that will actually use it: a half-typed address left
-            // behind on the Claude side is not a reason to refuse to save.
-            if (_draft.Provider == AgentProvider.LmStudio && !AppSettings.IsAddress(address))
-            {
-                GoToAddress();
-                Fail("The LM Studio address needs to be a full URL, such as http://localhost:1234/v1");
-                return;
-            }
-
-            // Written here rather than by the host, so a disk that will not take it is reported on
-            // the screen the player is standing on and can do something about.
+            // Commit and save to disk
             try
             {
                 SettingsStore.Write(_draft);
             }
-            catch (SaveException ex)
+            catch (Exception ex)
             {
-                Fail(ex.Message);
+                _statusLabel.Text = $"Could not save settings file: {ex.Message}";
                 return;
             }
-
-            // Same reason as Leave: a probe still out has nothing left to report to.
-            CancelProbe();
 
             Chosen = _draft;
             Done?.Invoke();
         }
 
-        /// <summary>
-        /// Puts the player in front of the address, wherever they were when they tried to save.
-        /// </summary>
-        private void GoToAddress()
+        private void CancelAndClose()
         {
-            CancelProbe();
-            EndEdit();
-
-            _trail.Clear();
-            _trail.Add((new SettingsTabsPage(_draft), 0));
-            _trail.Add((new SettingsAdaptersPage(_draft), 1));
-            _trail.Add((new SettingsLmStudioPage(_draft), SettingsLmStudioPage.AddressRow));
-            Refresh();
-        }
-
-        /// <summary>Ctrl+L: ask the server again, replacing any list already on screen.</summary>
-        private void Reprobe()
-        {
-            if (Page is SettingsLmModelsPage)
-            {
-                _trail.RemoveAt(_trail.Count - 1);
-                Refresh();
-            }
-
-            if (Page is SettingsLmStudioPage)
-            {
-                _ = ProbeAsync(SettingsLmStudioPage.ModelRow);
-            }
-        }
-
-        /// <summary>
-        /// Asks the configured address what it is serving, and opens the answer as a list.
-        /// </summary>
-        /// <remarks>
-        /// This is the screen's connection test as much as it is a convenience. A player who came
-        /// here to switch to LM Studio finds out now whether the server is up, rather than on a
-        /// first turn that fails into the transcript - and when it is not up, they are handed the
-        /// editor so the model can still be typed in by hand.
-        /// </remarks>
-        private async Task ProbeAsync(int index)
-        {
-            var address = _draft.LmStudioBaseUrl?.Trim() ?? string.Empty;
-
-            if (!AppSettings.IsAddress(address))
-            {
-                BeginEdit(SettingsLmStudioPage.AddressRow, address);
-                Fail("Fill in the LM Studio address first.");
-                return;
-            }
-
-            var origin = Page;
-            var key = _draft.LmStudioApiKey?.Trim() ?? string.Empty;
-
-            CancelProbe();
-
-            // Owned by this call and disposed by it. Backing out of the page cancels the token but
-            // deliberately does not dispose the source, because the request is still holding it -
-            // tearing it down underneath a live HttpClient is how that turns into an
-            // ObjectDisposedException on a background thread nobody is catching.
-            var probe = new CancellationTokenSource();
-            _probe = probe;
-
-            StartSpinner(address);
-
-            try
-            {
-                var models = await Task
-                    .Run(() => LmStudioModels.ListAsync(address, key, ProbeTimeout, probe.Token), probe.Token)
-                    .ConfigureAwait(false);
-
-                _app.Invoke(() =>
-                {
-                    StopSpinner();
-                    ShowModels(origin, index, models);
-                });
-            }
-            catch (AgentException ex)
-            {
-                // Only the headline: the detail is a response body, and this is one row.
-                _app.Invoke(() =>
-                {
-                    StopSpinner();
-                    ProbeFailed(origin, index, FirstLine(ex.Message));
-                });
-            }
-            catch (OperationCanceledException)
-            {
-                // The player walked away from the page, or asked again. Nothing left to tell them,
-                // and the spinner belongs to whoever superseded this - so it is not stopped here.
-            }
-            finally
-            {
-                if (ReferenceEquals(_probe, probe))
-                {
-                    _probe = null;
-                }
-
-                probe.Dispose();
-            }
-        }
-
-        /// <summary>
-        /// Starts the "asking" line ticking, so a slow server looks like a wait rather than a
-        /// hang. Replaces whatever was already running.
-        /// </summary>
-        private void StartSpinner(string address)
-        {
-            StopSpinner();
-
-            _spinnerFrame = 0;
-            Tick();
-
-            _spinner = _app.AddTimeout(SpinnerInterval, () =>
-            {
-                Tick();
-
-                // True keeps the timeout alive; StopSpinner is what ends it.
-                return true;
-            });
-
-            void Tick()
-            {
-                var frame = SpinnerFrames[_spinnerFrame % SpinnerFrames.Length];
-                _spinnerFrame++;
-
-                Fail($"{frame} Asking {address}...  Esc cancels.");
-            }
-        }
-
-        /// <summary>Stops the "asking" line ticking. Safe to call when nothing is running.</summary>
-        private void StopSpinner()
-        {
-            if (_spinner is not { } spinner)
-            {
-                return;
-            }
-
-            _spinner = null;
-            _app.RemoveTimeout(spinner);
-        }
-
-        private void ShowModels(SettingsPage origin, int index, IReadOnlyList<string> models)
-        {
-            // The answer can arrive after the player has gone somewhere else, and dropping a list
-            // of models onto whatever page they are on now would be worse than saying nothing.
-            if (!ReferenceEquals(Page, origin))
-            {
-                return;
-            }
-
-            if (models.Count == 0)
-            {
-                ProbeFailed(origin, index, "The server answered but listed no models. Load one in LM Studio.");
-                return;
-            }
-
-            Push(new SettingsLmModelsPage(_draft, models));
-        }
-
-        private void ProbeFailed(SettingsPage origin, int index, string message)
-        {
-            if (!ReferenceEquals(Page, origin))
-            {
-                return;
-            }
-
-            // No list to offer, so fall back to letting them type it - the same thing this screen
-            // asked for before it learned to go and look.
-            if (origin.TryBeginEdit(index, out var text))
-            {
-                BeginEdit(index, text);
-            }
-
-            Fail(message);
-        }
-
-        /// <summary>
-        /// Tells an in-flight probe to stop. Disposing it is the job of whoever started it.
-        /// </summary>
-        private void CancelProbe()
-        {
-            StopSpinner();
-
-            _probe?.Cancel();
-            _probe = null;
-        }
-
-        /// <summary>Redraws everything after the trail has changed.</summary>
-        private void Refresh()
-        {
-            var page = Page;
-            var crumbs = new string[_trail.Count];
-
-            for (var index = 0; index < _trail.Count; index++)
-            {
-                crumbs[index] = _trail[index].Page.Title;
-            }
-
-            _breadcrumb.Crumbs = crumbs;
-            _list.ValueColumn = page.ValueColumn;
-            _list.Rows = page.Rows;
-            _list.SelectedIndex = _trail[^1].Cursor;
-            ShowHint();
-        }
-
-        /// <summary>Redraws the rows after a change on this page, leaving the cursor where it is.</summary>
-        private void RefreshRows()
-        {
-            var cursor = _list.SelectedIndex;
-            _list.Rows = Page.Rows;
-            _list.SelectedIndex = cursor;
-        }
-
-        private void ShowHint() => SetHint(Page.Hint);
-
-        private void Fail(string message) => SetHint(message);
-
-        private void SetHint(string text)
-        {
-            if (_hint.Text == text)
-            {
-                return;
-            }
-
-            _hint.Text = text;
-            _hint.SetNeedsDraw();
-        }
-
-        private static string FirstLine(string message)
-        {
-            var end = message.IndexOf('\n');
-            return end < 0 ? message : message[..end].TrimEnd();
+            Cancelled?.Invoke();
         }
     }
 }

@@ -1,4 +1,13 @@
-using TerminalQuest.Saves;
+using System.Collections.ObjectModel;
+using System.Data;
+
+using Terminal.Gui.App;
+using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
+
+using TerminalQuest.Agents;
+using TerminalQuest.Settings;
 using TerminalQuest.Ui;
 
 using Xunit;
@@ -6,17 +15,7 @@ using Xunit;
 namespace TerminalQuest.Tests.Ui
 {
     /// <summary>
-    /// Where the highlight goes when a list is refilled - and, the reason this exists, where it goes
-    /// when a list is refilled with nothing.
-    /// <para>
-    /// Terminal.Gui refuses an index into an empty list, zero included, so every one of these
-    /// setters used to throw the moment its collection came back empty. The suggestion strip did it
-    /// on every keystroke that closed it; the save list would have done it the first time the player
-    /// opened the load menu with no saves.
-    /// </para>
-    /// <para>
-    /// These construct views but never draw them, so none of this needs a terminal.
-    /// </para>
+    /// Tests for list and suggestion selection handling.
     /// </summary>
     public sealed class ListSelectionTests
     {
@@ -24,18 +23,6 @@ namespace TerminalQuest.Tests.Ui
         [
             new("look", string.Empty, "Look around."),
             new("inventory", string.Empty, "What you are carrying."),
-        ];
-
-        private static readonly MenuRow[] Rows =
-        [
-            new("Adapter", "Claude"),
-            new("Model", "opus"),
-        ];
-
-        private static readonly SaveEntry[] Saves =
-        [
-            new("Alice", DateTimeOffset.UnixEpoch, 3, 1024),
-            new("Bob", DateTimeOffset.UnixEpoch, 7, 2048),
         ];
 
         [Fact]
@@ -67,63 +54,118 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void An_empty_save_list_has_no_highlight_to_move_or_place()
+        public void Suggestion_strip_selection_clamps_at_boundaries()
         {
-            using var view = new SaveListView { Saves = Saves };
-            view.SelectedIndex = 1;
-
-            view.Saves = [];
-
-            Assert.Null(view.SelectedItem);
-            Assert.Null(view.Selected);
-
-            // The save menu keeps driving the list whether or not there is anything in it.
-            view.MoveSelection(1);
-            view.SelectedIndex = 0;
-            view.Select("Alice");
-
-            Assert.Null(view.SelectedItem);
-        }
-
-        [Fact]
-        public void An_empty_menu_page_has_no_highlight_to_move_or_place()
-        {
-            using var view = new MenuListView { Rows = Rows };
-            view.SelectedIndex = 1;
-
-            view.Rows = [];
-
-            Assert.Null(view.SelectedItem);
-
-            // SettingsWindow restores the remembered cursor straight after replacing the rows.
-            view.SelectedIndex = 1;
-            view.MoveSelection(-1);
-
-            Assert.Null(view.SelectedItem);
-            Assert.Equal(0, view.SelectedIndex);
-        }
-
-        [Fact]
-        public void An_empty_class_list_has_no_highlight()
-        {
-            using var view = new ClassListView();
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            view.MoveSelection(-5);
             Assert.Equal(0, view.SelectedItem);
 
-            view.Classes = [];
-
-            Assert.Null(view.SelectedItem);
-            Assert.Null(view.Selected);
+            view.MoveSelection(10);
+            Assert.Equal(1, view.SelectedItem);
         }
 
         [Fact]
-        public void A_highlight_past_the_end_of_a_shrunken_list_comes_back_into_range()
+        public void ListView_navigates_up_and_down_with_keys()
         {
-            using var view = new MenuListView { Rows = Rows };
-            view.SelectedIndex = 1;
+            using var list = new ListView();
+            list.SetSource(new ObservableCollection<string>(["First", "Second", "Third"]));
+            list.SelectedItem = 0;
 
-            view.Rows = [Rows[0]];
+            list.NewKeyDownEvent(Key.CursorDown);
+            Assert.Equal(1, list.SelectedItem);
 
-            Assert.Equal(0, view.SelectedItem);
+            list.NewKeyDownEvent(Key.CursorDown);
+            Assert.Equal(2, list.SelectedItem);
+
+            list.NewKeyDownEvent(Key.CursorUp);
+            Assert.Equal(1, list.SelectedItem);
+        }
+
+        [Fact]
+        public void TableView_navigates_up_and_down_with_keys()
+        {
+            using var table = new TableView();
+            var dt = new DataTable();
+            dt.Columns.Add("Col1");
+            dt.Rows.Add("Row0");
+            dt.Rows.Add("Row1");
+            dt.Rows.Add("Row2");
+            table.Table = new DataTableSource(dt);
+            table.SetSelection(0, 0, false);
+
+            Assert.Equal(0, table.Value?.SelectedCell.Y);
+
+            table.NewKeyDownEvent(Key.CursorDown);
+            Assert.Equal(1, table.Value?.SelectedCell.Y);
+
+            table.NewKeyDownEvent(Key.CursorDown);
+            Assert.Equal(2, table.Value?.SelectedCell.Y);
+
+            table.NewKeyDownEvent(Key.CursorUp);
+            Assert.Equal(1, table.Value?.SelectedCell.Y);
+        }
+
+        [Fact]
+        public void NewCharacterWindow_tab_cycles_through_all_controls()
+        {
+            var window = new NewCharacterWindow("TestSave");
+            
+            var sequence = new System.Collections.Generic.List<Type>();
+            window.SetFocus();
+
+            for (var i = 0; i < 9; i++)
+            {
+                sequence.Add(window.MostFocused!.GetType());
+                window.AdvanceFocus(NavigationDirection.Forward, TabBehavior.TabStop);
+            }
+
+            Assert.Equal(
+                new[]
+                {
+                    typeof(ListView),
+                    typeof(Markdown),
+                    typeof(TextField),
+                    typeof(TextField),
+                    typeof(TextField),
+                    typeof(Button),
+                    typeof(Button),
+                    typeof(Button),
+                    typeof(ListView),
+                },
+                sequence);
+        }
+
+        [Fact]
+        public void SettingsWindow_selection_vs_picking_behavior()
+        {
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var window = new SettingsWindow(app, settings);
+
+            // Find the provider list view (has 2 options: Claude Code & LM Studio)
+            var providerList = window.SubViews
+                .OfType<Tabs>()
+                .Single()
+                .SubViews
+                .SelectMany(t => t.SubViews)
+                .OfType<ListView>()
+                .First(lv => lv.Source?.Count == 2);
+
+            Assert.Equal(0, providerList.SelectedItem);
+
+            // Move selection down to LM Studio (1)
+            providerList.SelectedItem = 1;
+
+            // Notice: window.Chosen is still null and draft provider has not been saved until picked
+            Assert.Null(window.Chosen);
+
+            // Simulate Enter key / Accepting on the provider list to commit pick
+            providerList.NewKeyDownEvent(Key.Enter);
+
+            // Save settings via Ctrl+S
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(AgentProvider.LmStudio, window.Chosen.Provider);
         }
     }
 }

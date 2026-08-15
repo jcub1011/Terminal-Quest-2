@@ -1,163 +1,242 @@
+using System.Collections.ObjectModel;
+
+using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The fixed status pane. Like <see cref="NarrationView"/> it draws itself so that each field
-    /// can carry its own colour, and it borrows that view's word wrap so an item name wider than
-    /// the pane runs onto a second row instead of being cut off at the margin.
+    /// The game status pane.
+    /// Modernized to use Terminal.Gui built-in <see cref="ProgressBar"/>, <see cref="ListView"/>,
+    /// <see cref="FrameView"/>, and <see cref="Label"/> controls.
     /// </summary>
-    internal sealed class StatusView : ThemedView
+    internal sealed class StatusView : View
     {
-        /// <summary>
-        /// Where the context gauge turns red. Chosen to leave a turn or two of warning rather than to
-        /// mark the wall: the point of the gauge is to be acted on before the session runs out, and
-        /// what the player does about it - leave and reopen the save - costs them a turn.
-        /// </summary>
-        private const int ContextDangerPercent = 85;
-
         private readonly GameState _state;
+
+        private readonly FrameView _vitalsFrame;
+        private readonly Label _hpLabel;
+        private readonly ProgressBar _hpBar;
+        private readonly Label _turnLabel;
+
+        private readonly FrameView _attributesFrame;
+        private readonly Label _attributesLabel;
+
+        private readonly FrameView _inventoryFrame;
+        private readonly Label _moneyLabel;
+        private readonly ListView _inventoryListView;
+
+        private readonly FrameView _sessionFrame;
+        private readonly Label _contextLabel;
+        private readonly ProgressBar _contextBar;
+        private readonly Label _metricsLabel;
 
         public StatusView(GameState state)
         {
             _state = state;
+            CanFocus = false;
+            SetScheme(Theme.CreateScheme());
+
+            // 1. Vitals Frame
+            _vitalsFrame = new FrameView
+            {
+                Title = "Vitals",
+                X = 0,
+                Y = 0,
+                Width = Dim.Fill(),
+                Height = 5,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _vitalsFrame.SetScheme(Theme.CreateScheme());
+
+            _hpLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "HP: -" };
+            _hpLabel.SetScheme(Theme.CreateScheme());
+
+            _hpBar = new ProgressBar
+            {
+                X = 1,
+                Y = 1,
+                Width = Dim.Fill() - 2,
+                Height = 1,
+                Fraction = 0f,
+            };
+            _hpBar.SetScheme(Theme.CreateScheme());
+
+            _turnLabel = new Label { X = 1, Y = 2, Width = Dim.Fill() - 2, Text = "Turn: 0" };
+            _turnLabel.SetScheme(Theme.CreateScheme());
+
+            _vitalsFrame.Add(_hpLabel, _hpBar, _turnLabel);
+
+            // 2. Attributes Frame
+            _attributesFrame = new FrameView
+            {
+                Title = "Attributes",
+                X = 0,
+                Y = Pos.Bottom(_vitalsFrame),
+                Width = Dim.Fill(),
+                Height = 5,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _attributesFrame.SetScheme(Theme.CreateScheme());
+
+            _attributesLabel = new Label
+            {
+                X = 1,
+                Y = 0,
+                Width = Dim.Fill() - 2,
+                Height = 3,
+                Text = string.Empty,
+            };
+            _attributesLabel.SetScheme(Theme.CreateScheme());
+            _attributesFrame.Add(_attributesLabel);
+
+            // 3. Inventory Frame
+            _inventoryFrame = new FrameView
+            {
+                Title = "Pack & Purse",
+                X = 0,
+                Y = Pos.Bottom(_attributesFrame),
+                Width = Dim.Fill(),
+                Height = Dim.Fill() - 7,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _inventoryFrame.SetScheme(Theme.CreateScheme());
+
+            _moneyLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "Gold: 0" };
+            _moneyLabel.SetScheme(Theme.CreateScheme());
+
+            _inventoryListView = new ListView
+            {
+                X = 1,
+                Y = 1,
+                Width = Dim.Fill() - 2,
+                Height = Dim.Fill(),
+                CanFocus = false,
+            };
+            _inventoryListView.SetScheme(Theme.CreateScheme());
+
+            _inventoryFrame.Add(_moneyLabel, _inventoryListView);
+
+            // 4. Session & Context Frame
+            _sessionFrame = new FrameView
+            {
+                Title = "Session",
+                X = 0,
+                Y = Pos.Bottom(_inventoryFrame),
+                Width = Dim.Fill(),
+                Height = 7,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _sessionFrame.SetScheme(Theme.CreateScheme());
+
+            _contextLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "Context: 0" };
+            _contextLabel.SetScheme(Theme.CreateScheme());
+
+            _contextBar = new ProgressBar
+            {
+                X = 1,
+                Y = 1,
+                Width = Dim.Fill() - 2,
+                Height = 1,
+                Fraction = 0f,
+            };
+            _contextBar.SetScheme(Theme.CreateScheme());
+
+            _metricsLabel = new Label { X = 1, Y = 3, Width = Dim.Fill() - 2, Text = "$0.0000 | 0ms" };
+            _metricsLabel.SetScheme(Theme.CreateScheme());
+
+            _sessionFrame.Add(_contextLabel, _contextBar, _metricsLabel);
+
+            Add(_vitalsFrame, _attributesFrame, _inventoryFrame, _sessionFrame);
+
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            // Update Vitals
+            var hasPlayer = _state.MaxHealth > 0;
+            _hpLabel.Text = hasPlayer ? $"HP: {_state.Health} / {_state.MaxHealth}" : "HP: -";
+            if (hasPlayer)
+            {
+                _hpBar.Fraction = Math.Clamp((float)_state.Health / _state.MaxHealth, 0f, 1f);
+            }
+            _turnLabel.Text = $"Turn: {_state.Turn}";
+
+            // Update Attributes (2 columns)
+            if (_state.Attributes.Count > 0)
+            {
+                var lines = new List<string>();
+                for (var i = 0; i < _state.Attributes.Count; i += 2)
+                {
+                    var a1 = _state.Attributes[i];
+                    var col1 = $"{a1.Label}: {a1.Score,2}";
+                    if (i + 1 < _state.Attributes.Count)
+                    {
+                        var a2 = _state.Attributes[i + 1];
+                        var col2 = $"{a2.Label}: {a2.Score,2}";
+                        lines.Add($"{col1.PadRight(10)} {col2}");
+                    }
+                    else
+                    {
+                        lines.Add(col1);
+                    }
+                }
+                _attributesLabel.Text = string.Join("\n", lines);
+            }
+            else
+            {
+                _attributesLabel.Text = "(No attributes)";
+            }
+
+            // Update Inventory
+            _moneyLabel.Text = $"Gold: {_state.Money} gp";
+            if (_state.Inventory.Count > 0)
+            {
+                _inventoryListView.SetSource(new ObservableCollection<string>(_state.Inventory.Select(i => $"{i.Quantity}x {i.Name}").ToList()));
+            }
+            else
+            {
+                _inventoryListView.SetSource(new ObservableCollection<string>(new[] { "(empty pack)" }));
+            }
+
+            // Update Session & Context
+            if (_state.ContextTokens > 0)
+            {
+                if (_state.ContextWindowTokens > 0)
+                {
+                    var pct = (int)Math.Clamp(_state.ContextTokens * 100L / _state.ContextWindowTokens, 0, 100);
+                    _contextLabel.Text = $"Context: {FormatTokens(_state.ContextTokens)} ({pct}%)";
+                    _contextBar.Fraction = Math.Clamp((float)_state.ContextTokens / _state.ContextWindowTokens, 0f, 1f);
+                }
+                else
+                {
+                    _contextLabel.Text = $"Context: {FormatTokens(_state.ContextTokens)}";
+                    _contextBar.Fraction = 0f;
+                }
+            }
+            else
+            {
+                _contextLabel.Text = "Context: -";
+                _contextBar.Fraction = 0f;
+            }
+
+            var costStr = $"${_state.CostUsd:F4}";
+            var durationStr = _state.LastDurationMs > 0 ? $"{_state.LastDurationMs}ms" : "-";
+            _metricsLabel.Text = $"Cost: {costStr} | Latency: {durationStr}";
+
+            SetNeedsDraw();
         }
 
         protected override bool OnDrawingContent(DrawContext? context)
         {
-            var width = Viewport.Width;
-            var height = Viewport.Height;
-
-            if (width <= 0 || height <= 0)
-            {
-                return true;
-            }
-
-            BeginPaint(width, height);
-
-            var row = 0;
-
-            // Health is the one field that changes meaning as it drops, so it changes colour too.
-            // A save with no player character yet has no bar to draw rather than a misleading 0/0.
-            var hasPlayer = _state.MaxHealth > 0;
-            var healthRole = hasPlayer && _state.Health <= _state.MaxHealth / 4 ? TextRole.Danger : TextRole.Normal;
-            DrawField(ref row, width, height, "HP", hasPlayer ? $"{_state.Health}/{_state.MaxHealth}" : "-", healthRole);
-            DrawField(ref row, width, height, "Turn", _state.Turn.ToString(), TextRole.Normal);
-
-            // Two to a row, so the six take three rows rather than six and leave the pack its space.
-            // Scores without their modifiers: the modifier is derivable, /characters spells it out,
-            // and the roll line already shows the one that actually applied.
-            for (var index = 0; index < _state.Attributes.Count; index += 2)
-            {
-                var line = new StyledLine();
-
-                for (var column = 0; column < 2 && index + column < _state.Attributes.Count; column++)
-                {
-                    var attribute = _state.Attributes[index + column];
-
-                    if (column > 0)
-                    {
-                        line.Append("  ", TextRole.System);
-                    }
-
-                    line.Append($"{attribute.Label} ", TextRole.System);
-                    line.Append($"{attribute.Score,2}", TextRole.Normal);
-                }
-
-                DrawWrapped(ref row, width, height, line);
-            }
-
-            DrawSeparator(ref row, width, height);
-
-            // Above the item list rather than below it, so a full pack cannot push the purse off
-            // the bottom of the pane. Shown at nought too - "no money" is worth knowing.
-            DrawField(ref row, width, height, "Money", _state.Money.ToString(), TextRole.Item);
-
-            if (_state.Inventory.Count == 0)
-            {
-                DrawWrapped(ref row, width, height, StyledLine.FromText("(empty)", TextRole.System));
-            }
-            else
-            {
-                foreach (var entry in _state.Inventory)
-                {
-                    // Quantity first: it reads as a tally of what is carried, and it lines the
-                    // names up down the left of the pane whatever the counts are.
-                    var line = new StyledLine();
-                    line.Append($"{entry.Quantity}x ", TextRole.System);
-                    line.Append(entry.Name, TextRole.Item);
-                    DrawWrapped(ref row, width, height, line);
-                }
-            }
-
-            DrawSeparator(ref row, width, height);
-
-            DrawContextGauge(ref row, width, height);
-
-            DrawWrapped(ref row, width, height, StyledLine.FromText($"${_state.CostUsd:F4}", TextRole.System));
-
-            if (_state.LastDurationMs > 0)
-            {
-                DrawWrapped(ref row, width, height, StyledLine.FromText($"{_state.LastDurationMs}ms", TextRole.System));
-            }
-
-            return true;
+            Refresh();
+            return base.OnDrawingContent(context);
         }
 
         /// <summary>
-        /// Draws how full the narrator's context is - the count, the share of the window, and a bar
-        /// underneath for reading without reading a number.
-        /// </summary>
-        /// <remarks>
-        /// Down here with the cost and the turn time because it is a fact about the sitting rather than
-        /// about the character, and because putting it above the pack would push the pack down.
-        /// <para>
-        /// Nothing is drawn until a turn has reported a figure. A gauge at nought before the first turn
-        /// would claim an empty context, when in truth the system prompt and the tool schemas are
-        /// already in there and simply have not been counted yet.
-        /// </para>
-        /// </remarks>
-        private void DrawContextGauge(ref int row, int width, int height)
-        {
-            var used = _state.ContextTokens;
-            if (used <= 0)
-            {
-                return;
-            }
-
-            // A window nobody could establish leaves the count standing on its own. It still tells a
-            // player who knows their own model something, which an invented denominator would not.
-            var window = _state.ContextWindowTokens;
-            if (window <= 0)
-            {
-                DrawField(ref row, width, height, "Context", FormatTokens(used), TextRole.Normal);
-                return;
-            }
-
-            var percent = (int)Math.Clamp(used * 100L / window, 0, 100);
-            var role = percent >= ContextDangerPercent ? TextRole.Danger : TextRole.Normal;
-
-            DrawField(ref row, width, height, "Context", $"{FormatTokens(used)}  {percent}%", role);
-
-            if (row >= height)
-            {
-                return;
-            }
-
-            var fill = BarFill(used, window, width);
-
-            Move(0, row);
-            SetRole(role);
-            AddStr(new string('█', fill));
-            SetRole(TextRole.System);
-            AddStr(new string('░', width - fill));
-
-            row++;
-        }
-
-        /// <summary>
-        /// Abbreviates a token count to five columns at most, which is all the pane can spare beside a
-        /// label and a percentage.
+        /// Abbreviates a token count to five columns at most.
         /// </summary>
         internal static string FormatTokens(int tokens)
         {
@@ -171,22 +250,14 @@ namespace TerminalQuest.Ui
                 return $"{tokens / 1_000}k";
             }
 
-            // The decimal is worth a column while the leading digit is alone, and costs one too many
-            // once it is not: a context of 2,147,483,647 would otherwise format to seven.
             return tokens < 10_000_000
                 ? $"{tokens / 1_000_000.0:F1}M"
                 : $"{tokens / 1_000_000}M";
         }
 
         /// <summary>
-        /// How many of <paramref name="width"/> cells to fill for <paramref name="used"/> tokens of
-        /// <paramref name="window"/>.
+        /// How many of <paramref name="width"/> cells to fill for <paramref name="used"/> tokens of <paramref name="window"/>.
         /// </summary>
-        /// <remarks>
-        /// Rounded, then held off both ends. A bar that reads empty while there is something in the
-        /// context, or full while there is still room, misleads about the one thing it exists to say;
-        /// keeping a cell back at each end costs a percent of accuracy and buys that.
-        /// </remarks>
         internal static int BarFill(int used, int window, int width)
         {
             if (used <= 0 || window <= 0 || width <= 0)
@@ -199,7 +270,6 @@ namespace TerminalQuest.Ui
                 return width;
             }
 
-            // One column has no room for a partial reading, and "full" is already taken above.
             if (width == 1)
             {
                 return 0;
@@ -209,74 +279,5 @@ namespace TerminalQuest.Ui
 
             return Math.Clamp(fill, 1, width - 1);
         }
-
-        /// <summary>Draws a left-aligned label with its value pushed to the right margin.</summary>
-        private void DrawField(ref int row, int width, int height, string label, string value, TextRole valueRole)
-        {
-            if (row >= height)
-            {
-                return;
-            }
-
-            Move(0, row);
-            SetRole(TextRole.System);
-            AddStr(Fit(label, width));
-
-            var valueText = Fit(value, width);
-            var col = width - valueText.Length;
-            if (col > label.Length)
-            {
-                Move(col, row);
-                SetRole(valueRole);
-                AddStr(valueText);
-            }
-
-            row++;
-        }
-
-        /// <summary>
-        /// Draws one logical line, wrapped to the pane width. Continuation rows are not indented:
-        /// the wrap is there so nothing is lost, and a hanging indent would cost the columns that
-        /// made the wrap unnecessary.
-        /// </summary>
-        private void DrawWrapped(ref int row, int width, int height, StyledLine line)
-        {
-            foreach (var wrapped in NarrationView.Wrap(line.Spans, width))
-            {
-                if (row >= height)
-                {
-                    return;
-                }
-
-                Move(0, row);
-                foreach (var span in wrapped.Spans)
-                {
-                    SetRole(span.Role);
-                    AddStr(span.Text);
-                }
-
-                row++;
-            }
-        }
-
-        private void DrawSeparator(ref int row, int width, int height)
-        {
-            if (row >= height)
-            {
-                return;
-            }
-
-            Move(0, row);
-            SetRole(TextRole.System);
-            AddStr(new string('─', width));
-            row++;
-        }
-
-        /// <summary>
-        /// Truncates to the pane width. Only the right-aligned fields need this - they are short
-        /// values with nowhere to wrap to, and a two-row "HP" would read worse than a clipped one.
-        /// </summary>
-        private static string Fit(string text, int width) =>
-            text.Length <= width ? text : text[..Math.Max(0, width)];
     }
 }

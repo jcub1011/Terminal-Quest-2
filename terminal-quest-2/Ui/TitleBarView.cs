@@ -1,66 +1,75 @@
+using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// The one-row title bar: what is being played on the left, where the player is standing on
-    /// the right.
-    /// <para>
-    /// Drawn here rather than left to the window's border title because Terminal.Gui paints a
-    /// border title with a single attribute, and the place name has to stay green while the rest
-    /// of the row does not. The location belongs at the top instead of in the status pane: it is
-    /// the one fact the player checks constantly, and prose-length place names never fitted the
-    /// pane's width.
-    /// </para>
+    /// The top title bar showing the game/save title on the left and the current location on the right.
+    /// Built using Terminal.Gui built-in <see cref="Label"/> controls.
     /// </summary>
-    internal sealed class TitleBarView : ThemedView
+    internal sealed class TitleBarView : View
     {
-        /// <summary>Blank columns kept between the two halves so they never read as one phrase.</summary>
-        private const int Gap = 2;
-
         private readonly GameState _state;
+        private readonly Label _titleLabel;
+        private readonly Label _locationLabel;
 
         public TitleBarView(GameState state)
         {
             _state = state;
+            CanFocus = false;
+            Height = 1;
+            SetScheme(Theme.CreateScheme());
+
+            _titleLabel = new Label
+            {
+                X = 0,
+                Y = 0,
+                Width = Dim.Percent(50),
+                Height = 1,
+                Text = "Terminal Quest",
+            };
+            _titleLabel.SetScheme(Theme.CreateScheme());
+
+            _locationLabel = new Label
+            {
+                X = Pos.Percent(50),
+                Y = 0,
+                Width = Dim.Percent(50),
+                Height = 1,
+                TextAlignment = Alignment.End,
+                Text = "nowhere",
+            };
+            var locationScheme = new Scheme
+            {
+                Normal = Theme.Attr(TextRole.Place),
+                Focus = Theme.Attr(TextRole.Place),
+                HotNormal = Theme.Attr(TextRole.Place),
+                HotFocus = Theme.Attr(TextRole.Place),
+            };
+            _locationLabel.SetScheme(locationScheme);
+
+            Add(_titleLabel, _locationLabel);
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            _titleLabel.Text = _state.SaveName.Length > 0
+                ? $"Terminal Quest - {_state.SaveName}"
+                : "Terminal Quest";
+
+            _locationLabel.Text = _state.Location.Length > 0
+                ? _state.Location
+                : "nowhere";
+
+            SetNeedsDraw();
         }
 
         protected override bool OnDrawingContent(DrawContext? context)
         {
-            var width = Viewport.Width;
-
-            if (width <= 0 || Viewport.Height <= 0)
-            {
-                return true;
-            }
-
-            BeginPaint(width, Viewport.Height);
-
-            // The place name wins the room when the row is too narrow for both: the save name is
-            // the same on every turn and the location is not.
-            var place = _state.Location.Length > 0 ? _state.Location : "nowhere";
-            if (place.Length > width)
-            {
-                place = place[..width];
-            }
-
-            var name = _state.SaveName.Length > 0
-                ? $"Terminal Quest - {_state.SaveName}"
-                : "Terminal Quest";
-
-            var room = width - place.Length - Gap;
-            if (room > 0)
-            {
-                Move(0, 0);
-                SetRole(TextRole.System);
-                AddStr(name.Length <= room ? name : name[..room]);
-            }
-
-            Move(width - place.Length, 0);
-            SetRole(TextRole.Place);
-            AddStr(place);
-
-            return true;
+            Refresh();
+            return base.OnDrawingContent(context);
         }
     }
 }

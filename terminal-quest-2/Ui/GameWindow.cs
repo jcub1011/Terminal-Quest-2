@@ -19,11 +19,11 @@ namespace TerminalQuest.Ui
         /// </summary>
         private const int StatusWidth = 28;
 
-        private const int InputHeight = 3;
+        private const int CommandAreaHeight = 3;
         private const int TitleHeight = 1;
 
-        private const string IdleTitle = "command";
-        private const string BusyTitle = "command - narrator speaking";
+        private const string IdleTitle = "Command";
+        private const string BusyTitle = "Command - narrator speaking";
 
         /// <summary>
         /// How much of the transcript the suggestions may cover. A bare <c>/</c> matches every
@@ -33,7 +33,7 @@ namespace TerminalQuest.Ui
         private const int MaxSuggestionRows = 8;
 
         private readonly TextField _input;
-        private readonly FrameView _inputFrame;
+        private readonly Label _commandTitleLabel;
         private readonly CommandSuggestionView _suggestions;
 
         public GameWindow(GameState state)
@@ -65,7 +65,7 @@ namespace TerminalQuest.Ui
                 X = 0,
                 Y = Pos.Bottom(TitleBar),
                 Width = Dim.Fill() - StatusWidth,
-                Height = Dim.Fill() - InputHeight,
+                Height = Dim.Fill() - CommandAreaHeight,
             };
 
             Status = new StatusView(state)
@@ -73,27 +73,27 @@ namespace TerminalQuest.Ui
                 X = Pos.Right(Narration) + 1,
                 Y = Pos.Bottom(TitleBar),
                 Width = StatusWidth - 1,
-                Height = Dim.Fill() - InputHeight,
+                Height = Dim.Fill() - CommandAreaHeight,
             };
+
+            _commandTitleLabel = new Label
+            {
+                Text = IdleTitle,
+                X = 0,
+                Y = Pos.Bottom(Narration) + 1,
+                Width = Dim.Fill(),
+                Height = 1,
+            };
+            _commandTitleLabel.SetScheme(Theme.CreateScheme());
 
             _input = new TextField
             {
                 X = 0,
-                Y = 0,
+                Y = Pos.Bottom(_commandTitleLabel),
                 Width = Dim.Fill(),
                 Height = 1,
             };
-
-            _inputFrame = new FrameView
-            {
-                Title = IdleTitle,
-                X = 0,
-                Y = Pos.Bottom(Narration),
-                Width = Dim.Fill(),
-                Height = InputHeight,
-                BorderStyle = LineStyle.Rounded,
-            };
-            _inputFrame.Add(_input);
+            _input.SetScheme(Theme.CreateScheme());
 
             // Sized and placed only when there is something to show, since both depend on how many
             // commands the half-typed word still matches.
@@ -109,7 +109,7 @@ namespace TerminalQuest.Ui
 
             // The suggestions are added last so they draw over the foot of the transcript, the
             // same layering the settings screen uses to drop its editor onto a drawn row.
-            Add(TitleBar, Narration, Status, _inputFrame, _suggestions);
+            Add(TitleBar, Narration, Status, _commandTitleLabel, _input, _suggestions);
         }
 
         public TitleBarView TitleBar { get; }
@@ -160,8 +160,8 @@ namespace TerminalQuest.Ui
                 // off to the side in the status pane.
                 Narration.IsWaiting = value;
 
-                _inputFrame.Title = value ? BusyTitle : IdleTitle;
-                _inputFrame.SetNeedsDraw();
+                _commandTitleLabel.Text = value ? BusyTitle : IdleTitle;
+                _commandTitleLabel.SetNeedsDraw();
 
                 // Nothing re-focuses here, unlike the property this replaced. That one had to,
                 // because disabling the field moved the focus off it; this never disables it, so
@@ -209,8 +209,8 @@ namespace TerminalQuest.Ui
         /// </summary>
         public void RefreshState()
         {
-            TitleBar.SetNeedsDraw();
-            Status.SetNeedsDraw();
+            TitleBar.Refresh();
+            Status.Refresh();
         }
 
         /// <summary>
@@ -236,8 +236,8 @@ namespace TerminalQuest.Ui
         /// </summary>
         private void ShowEditingNotice(string? notice)
         {
-            _inputFrame.Title = notice ?? (IsBusy ? BusyTitle : IdleTitle);
-            _inputFrame.SetNeedsDraw();
+            _commandTitleLabel.Text = notice ?? (IsBusy ? BusyTitle : IdleTitle);
+            _commandTitleLabel.SetNeedsDraw();
 
             // The command box stops taking text for as long as an editor is open, and this is the only
             // place that can be said for both kinds of edit. Ctrl+G's own edit is of this field and the
