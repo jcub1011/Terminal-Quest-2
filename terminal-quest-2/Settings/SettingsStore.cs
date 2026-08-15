@@ -53,8 +53,14 @@ namespace TerminalQuest.Settings
                     return new AppSettings();
                 }
 
-                return JsonSerializer.Deserialize(text, SettingsJsonContext.Default.AppSettings)
-                    ?? new AppSettings();
+                var settings = JsonSerializer.Deserialize(text, SettingsJsonContext.Default.AppSettings);
+                if (settings is null)
+                {
+                    return new AppSettings();
+                }
+
+                settings.Normalize();
+                return settings;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {

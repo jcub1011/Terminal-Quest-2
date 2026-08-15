@@ -15,7 +15,9 @@ namespace TerminalQuest.Settings
     [JsonSourceGenerationOptions(
         WriteIndented = true,
         PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-        UseStringEnumConverter = true)]
+        PropertyNameCaseInsensitive = true,
+        UseStringEnumConverter = false)]
     [JsonSerializable(typeof(AppSettings))]
+    [JsonSerializable(typeof(AgentProvider))]
     internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 }

@@ -372,15 +372,42 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Fact]
-        public void An_unknown_provider_costs_every_other_setting_too()
+        public void An_unknown_provider_falls_back_to_default_without_costing_the_rest_of_the_file()
         {
-            // Worth pinning: recovery is whole-document, so one unreadable field discards the
-            // player's editor command and model choice along with it. That is the deliberate cost
-            // of never throwing here, but it is not obvious from the call site.
             using var temp = new TempSettings();
             temp.Write("""{"provider":"Nonsense","editorCommand":"code -w"}""");
 
-            Assert.Equal(AppSettings.DefaultEditorCommand, SettingsStore.Read(temp.Path_).EditorCommand);
+            var settings = SettingsStore.Read(temp.Path_);
+            Assert.Equal("code -w", settings.EditorCommand);
+            Assert.Equal(AgentProvider.ClaudeCode, settings.Provider);
+        }
+
+        [Theory]
+        [InlineData("openai", AgentProvider.OpenAiApi)]
+        [InlineData("OpenAI", AgentProvider.OpenAiApi)]
+        [InlineData("OpenAiApi", AgentProvider.OpenAiApi)]
+        [InlineData("openAiApi", AgentProvider.OpenAiApi)]
+        [InlineData("lm-studio", AgentProvider.OpenAiApi)]
+        [InlineData("LmStudio", AgentProvider.OpenAiApi)]
+        [InlineData("google", AgentProvider.OpenAiApi)]
+        [InlineData("gemini", AgentProvider.OpenAiApi)]
+        [InlineData("claude", AgentProvider.ClaudeCode)]
+        [InlineData("claude-code", AgentProvider.ClaudeCode)]
+        [InlineData("ClaudeCode", AgentProvider.ClaudeCode)]
+        [InlineData("claudeCode", AgentProvider.ClaudeCode)]
+        [InlineData("0", AgentProvider.ClaudeCode)]
+        [InlineData("1", AgentProvider.OpenAiApi)]
+        internal void Provider_deserializes_various_formats_resiliently(string providerJson, AgentProvider expected)
+        {
+            using var temp = new TempSettings();
+            var json = providerJson is "0" or "1"
+                ? $$"""{"provider": {{providerJson}}, "editorCommand": "code -w"}"""
+                : $$"""{"provider": "{{providerJson}}", "editorCommand": "code -w"}""";
+            temp.Write(json);
+
+            var settings = SettingsStore.Read(temp.Path_);
+            Assert.Equal(expected, settings.Provider);
+            Assert.Equal("code -w", settings.EditorCommand);
         }
 
         [Fact]
@@ -433,17 +460,15 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Fact]
-        public void A_null_string_in_the_file_is_worth_knowing_about()
+        public void A_null_string_in_the_file_is_normalized_to_safe_value()
         {
-            // The properties are non-nullable but the serializer will happily write null into one.
-            // Pinned so the behaviour is at least deliberate: today the whole document is discarded
-            // only if it fails to parse, and "claudeModel": null parses.
             using var temp = new TempSettings();
-            temp.Write("""{"claudeModel":null}""");
+            temp.Write("""{"claudeModel":null,"editorCommand":null}""");
 
             var settings = SettingsStore.Read(temp.Path_);
 
-            Assert.Null((object?)settings.ClaudeModel);
+            Assert.Equal(string.Empty, settings.ClaudeModel);
+            Assert.Equal(AppSettings.DefaultEditorCommand, settings.EditorCommand);
         }
 
         [Fact]
@@ -477,7 +502,7 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Fact]
-        public void Test_reading_actual_settings()
+        public void User_configured_settings_file_loads_accurately()
         {
             using var temp = new TempSettings();
             temp.Write("""
@@ -487,7 +512,7 @@ namespace TerminalQuest.Tests.Settings
               "openAiPreset": "Google",
               "lmStudioBaseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
               "lmStudioModel": "gemini-flash-lite-latest",
-              "lmStudioApiKey": "AIzaSyB81j5sV3SfyZvS-Q7_Nsa1iqboy3-qbrE",
+              "lmStudioApiKey": "placeholder-api-key",
               "editorCommand": "notepad.exe",
               "transcriptRecallCharacters": 4000
             }
@@ -497,7 +522,9 @@ namespace TerminalQuest.Tests.Settings
             Assert.Equal("Google", read.OpenAiPreset);
             Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", read.LmStudioBaseUrl);
             Assert.Equal("gemini-flash-lite-latest", read.LmStudioModel);
-            Assert.Equal("AIzaSyB81j5sV3SfyZvS-Q7_Nsa1iqboy3-qbrE", read.LmStudioApiKey);
+            Assert.Equal("placeholder-api-key", read.LmStudioApiKey);
+            Assert.Equal("notepad.exe", read.EditorCommand);
+            Assert.Equal(4000, read.TranscriptRecallCharacters);
         }
     }
 }

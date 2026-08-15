@@ -124,5 +124,20 @@ namespace TerminalQuest.Settings
             EditorCommand = other.EditorCommand;
             TranscriptRecallCharacters = other.TranscriptRecallCharacters;
         }
+
+        /// <summary>Ensures string properties and bounds are valid and never null.</summary>
+        public void Normalize()
+        {
+            ClaudeModel ??= string.Empty;
+            OpenAiPreset = string.IsNullOrWhiteSpace(OpenAiPreset) ? OpenAiPresets.Custom.Name : OpenAiPreset.Trim();
+            LmStudioBaseUrl = string.IsNullOrWhiteSpace(LmStudioBaseUrl) ? DefaultLmStudioBaseUrl : LmStudioBaseUrl.Trim();
+            LmStudioModel ??= string.Empty;
+            LmStudioApiKey = string.IsNullOrWhiteSpace(LmStudioApiKey) ? DefaultLmStudioApiKey : LmStudioApiKey.Trim();
+            EditorCommand = string.IsNullOrWhiteSpace(EditorCommand) ? DefaultEditorCommand : EditorCommand.Trim();
+            if (TranscriptRecallCharacters < Saves.TranscriptRecall.MinCharacters || TranscriptRecallCharacters > Saves.TranscriptRecall.MaxCharacters)
+            {
+                TranscriptRecallCharacters = Saves.TranscriptRecall.DefaultCharacters;
+            }
+        }
     }
 }
