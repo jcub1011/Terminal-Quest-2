@@ -45,7 +45,7 @@ namespace TerminalQuest.Ui
 
                 // The list is replaced wholesale, so the highlight has to be brought back into range
                 // of what is now there.
-                SelectedItem = Index;
+                this.Highlight(_source.Count, Index);
                 SetNeedsDraw();
             }
         }

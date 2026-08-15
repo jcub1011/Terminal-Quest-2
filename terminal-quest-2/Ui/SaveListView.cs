@@ -53,7 +53,7 @@ namespace TerminalQuest.Ui
             set
             {
                 _source.Items = value;
-                SelectedItem = Index;
+                this.Highlight(_source.Count, Index);
                 SetNeedsDraw();
             }
         }
@@ -71,7 +71,7 @@ namespace TerminalQuest.Ui
 
             set
             {
-                SelectedItem = Math.Clamp(value, 0, Math.Max(0, Saves.Count - 1));
+                this.Highlight(Saves.Count, value);
                 EnsureSelectedItemVisible();
             }
         }

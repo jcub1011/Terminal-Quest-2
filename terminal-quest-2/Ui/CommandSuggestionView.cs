@@ -46,7 +46,7 @@ namespace TerminalQuest.Ui
             set
             {
                 _source.Items = value;
-                SelectedItem = 0;
+                this.Highlight(_source.Count, 0);
                 SetNeedsDraw();
             }
         }
