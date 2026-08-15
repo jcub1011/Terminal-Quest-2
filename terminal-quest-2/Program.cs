@@ -233,6 +233,12 @@ namespace TerminalQuest
                 {
                     state.Turn = store.ReadMetadata().Turn;
 
+                    if (!startedFresh)
+                    {
+                        var player = SaveStore.Player(store.ReadCharacters());
+                        hasStartLocation = SaveStore.WhereIs(store.ReadLocations(), player?.Id) is not null;
+                    }
+
                     // Read after seeding, so the pane opens showing the health and kit the player
                     // just chose rather than filling in once the first turn lands.
                     state.RefreshFrom(store);
@@ -707,19 +713,77 @@ namespace TerminalQuest
                     return;
                 }
 
-                // The scene-setting turn is a turn: it reads the world, it narrates, and the narrator
-                // will date memories and events to it. Left sharing a number with the last session's
-                // final turn, those writes are misdated - and anything that asks what happened "this
-                // turn" is answered with the end of the previous sitting as well as this one.
-                app.Invoke(() =>
+                if (startedFresh)
                 {
-                    state.Turn++;
-                    TryTouch(store, state.Turn);
-                });
+                    // The scene-setting turn is a turn: it reads the world, it narrates, and the narrator
+                    // will date memories and events to it. Left sharing a number with the last session's
+                    // final turn, those writes are misdated - and anything that asks what happened "this
+                    // turn" is answered with the end of the previous sitting as well as this one.
+                    app.Invoke(() =>
+                    {
+                        state.Turn++;
+                        TryTouch(store, state.Turn);
+                    });
 
-                await RunTurnAsync(startedFresh
-                    ? hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace
-                    : ContinuePrompt);
+                    await RunTurnAsync(hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace);
+                    return;
+                }
+
+                var awaitingNarrator = false;
+                var hasTranscript = false;
+
+                try
+                {
+                    var entries = store.Transcript.Read().Entries;
+                    hasTranscript = entries.Count > 0;
+                    awaitingNarrator = TranscriptRecall.AwaitingNarrator(entries);
+                }
+                catch (SaveException)
+                {
+                    // Leave defaults if transcript is unreadable
+                }
+
+                if (!hasTranscript)
+                {
+                    // An existing save with no recorded transcript at all needs an opening scene.
+                    app.Invoke(() =>
+                    {
+                        state.Turn++;
+                        TryTouch(store, state.Turn);
+                    });
+
+                    await RunTurnAsync(hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace);
+                }
+                else if (awaitingNarrator)
+                {
+                    // The last session ended while the narrator was speaking (e.g. interrupted mid-turn).
+                    // The player is owed an answer to their last command.
+                    app.Invoke(() =>
+                    {
+                        state.Turn++;
+                        TryTouch(store, state.Turn);
+                    });
+
+                    await RunTurnAsync(ContinuePrompt);
+                }
+                else
+                {
+                    // The last session was waiting for the player to respond.
+                    // The recalled scene was already drawn by ShowRecalledScene.
+                    // The narrator is awake and ready, but we wait for player input before taking a turn.
+                    app.Invoke(() =>
+                    {
+                        if (leaving)
+                        {
+                            return;
+                        }
+
+                        window.Narration.AddLine("The narrator is ready.", TextRole.System);
+                        window.Narration.AddBlankLine();
+                        window.Narration.ScrollToBottom();
+                        window.IsBusy = false;
+                    });
+                }
             }
 
             async Task RunTurnAsync(string prompt)

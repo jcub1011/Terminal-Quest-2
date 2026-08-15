@@ -247,5 +247,28 @@ namespace TerminalQuest.Tests.Saves
 
             Assert.True(TranscriptRecall.AwaitingNarrator(TranscriptRecall.Tail(entries, 1000)));
         }
+
+        [Fact]
+        public void Resumed_session_waiting_for_player_input_reports_not_awaiting_narrator()
+        {
+            // When a session completed normally, the last entry is the narrator's prose/choices.
+            // On resume, the session is waiting for player input rather than owing a narrator reply.
+            var entries = Conversation(10);
+
+            Assert.False(TranscriptRecall.AwaitingNarrator(entries));
+            Assert.False(TranscriptRecall.AwaitingNarrator(TranscriptRecall.Tail(entries, 1000)));
+        }
+
+        [Fact]
+        public void Resumed_session_interrupted_mid_turn_reports_awaiting_narrator()
+        {
+            // When a session died mid-turn, the player's command was logged but the narrator's reply
+            // was never written. On resume, the narrator owes an answer to that line.
+            var entries = Conversation(10);
+            entries.Add(Player(11, "open the chest"));
+
+            Assert.True(TranscriptRecall.AwaitingNarrator(entries));
+            Assert.True(TranscriptRecall.AwaitingNarrator(TranscriptRecall.Tail(entries, 1000)));
+        }
     }
 }
