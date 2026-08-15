@@ -170,6 +170,117 @@ namespace TerminalQuest.Tests.Mcp
             Assert.Equal(12, CharacterAttributes.Find(bess, "Dexterity")!.Score);
         }
 
+        // ---- Health -----------------------------------------------------------------------------
+
+        [Fact]
+        public void Health_is_set_to_the_number_it_was_given()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"health","value":"9"}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Equal(9, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+        }
+
+        [Fact]
+        public void Health_may_go_above_the_maximum()
+        {
+            // Overhealing is a mechanic. Clamping it away used to leave a reply that read exactly
+            // like a successful write, which is what taught a local model to send the same call
+            // twenty times in one turn.
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"health","value":"20"}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Equal(20, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+        }
+
+        [Fact]
+        public void Health_above_the_maximum_says_so()
+        {
+            // The whole point of allowing it: the narrator has to be able to tell that this landed
+            // somewhere unusual, or it cannot tell the call worked at all.
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"health","value":"20"}""");
+
+            Assert.Contains("above", outcome.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("14", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Ordinary_health_is_reported_without_a_note()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"health","value":"9"}""");
+
+            Assert.DoesNotContain("above", outcome.Text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Health_still_has_a_floor_at_zero()
+        {
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"health","value":"-5"}""");
+
+            Assert.Equal(0, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+            Assert.Contains("at 0", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Upserting_health_agrees_with_updating_it()
+        {
+            // The two tools write the same field; disagreeing about whether overhealing is legal
+            // would make the answer depend on which one the narrator happened to reach for.
+            using var save = Seeded();
+
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14,"health":20}""");
+
+            Assert.Equal(20, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+        }
+
+        [Fact]
+        public void Lowering_the_maximum_leaves_health_where_it_is()
+        {
+            // Dragging health down would spend an overheal as a side effect of a call that never
+            // mentioned health.
+            using var save = Seeded();
+            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14,"health":20}""");
+
+            Call(
+                save.Store,
+                "update_character",
+                """{"name":"Bess","property":"maxHealth","value":"16"}""");
+
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            Assert.Equal(16, bess.MaxHealth);
+            Assert.Equal(20, bess.Health);
+        }
+
         [Fact]
         public void One_unreadable_score_does_not_cost_the_whole_character()
         {

@@ -417,6 +417,139 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task The_same_call_twice_in_a_turn_is_only_run_once()
+        {
+            // Measured in a real session: twenty byte-identical update_character calls in a single
+            // turn, because the reply did not read like anything had happened. Running the write again
+            // is the part that has to stop - the model repeating itself is a model to be answered, not
+            // an instruction to write the memory twice.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""")
+                .Calls("mcp__quest__add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""")
+                .Says("Rowan crosses.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Cross the ford.", Token);
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            Assert.Single(rowan.Memories);
+        }
+
+        [Fact]
+        public async Task A_suppressed_repeat_is_answered_with_what_the_first_call_said()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__get_state", "{}")
+                .Calls("mcp__quest__get_state", "{}")
+                .Says("Rowan stands at the ford.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Look around.", Token);
+
+            // The third request is the one carrying the answer to the repeated call.
+            Assert.Contains("already called get_state", handler.Bodies[^1], StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task A_suppressed_repeat_is_still_journalled()
+        {
+            // The journal answers "what did the narrator do", and doing this twice is a thing it did.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__get_state", "{}")
+                .Calls("mcp__quest__get_state", "{}")
+                .Says("Rowan stands at the ford.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Look around.", Token);
+
+            var calls = save.Store.Journal.Read().Entries
+                .Where(entry => entry.Tool == "get_state")
+                .ToList();
+
+            Assert.Equal(2, calls.Count);
+            Assert.False(calls[0].Failed);
+            Assert.True(calls[1].Failed);
+        }
+
+        [Fact]
+        public async Task Arguments_written_two_ways_are_still_the_same_call()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__get_character", """{"name":"Rowan"}""")
+                .Calls("mcp__quest__get_character", "{ \"name\" : \"Rowan\" }")
+                .Says("Rowan.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Who is Rowan?", Token);
+
+            Assert.Contains("already called get_character", handler.Bodies[^1], StringComparison.Ordinal);
+        }
+
+        [Theory]
+        [InlineData("random_noun")]
+        [InlineData("random_adjective")]
+        [InlineData("roll")]
+        public async Task A_tool_that_is_meant_to_answer_differently_is_never_suppressed(string tool)
+        {
+            // Two rolls for two blows are not one roll, and a narrator drawing seeds again wants seeds
+            // it has not already had. Suppressing these would be a regression dressed as a fix.
+            using var save = Seeded();
+            var arguments = tool == "roll"
+                ? """{"notation":"1d20","reason":"the leap"}"""
+                : """{"count":3}""";
+
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls($"mcp__quest__{tool}", arguments)
+                .Calls($"mcp__quest__{tool}", arguments)
+                .Says("Done.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Go.", Token);
+
+            var calls = save.Store.Journal.Read().Entries.Where(entry => entry.Tool == tool).ToList();
+
+            Assert.Equal(2, calls.Count);
+            Assert.DoesNotContain(calls, entry => entry.Failed);
+        }
+
+        [Fact]
+        public async Task A_repeat_on_the_next_turn_is_run_again()
+        {
+            // A new turn is a new situation; the world has moved since the last answer.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__get_state", "{}")
+                .Says("First.")
+                .Calls("mcp__quest__get_state", "{}")
+                .Says("Second.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Look around.", Token);
+            await session.SendAsync("Look again.", Token);
+
+            var calls = save.Store.Journal.Read().Entries.Where(entry => entry.Tool == "get_state").ToList();
+
+            Assert.Equal(2, calls.Count);
+            Assert.DoesNotContain(calls, entry => entry.Failed);
+        }
+
+        [Fact]
         public async Task A_model_that_only_ever_calls_tools_is_stopped()
         {
             using var save = Seeded();

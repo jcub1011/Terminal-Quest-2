@@ -134,6 +134,71 @@ namespace TerminalQuest.Tests.Mcp
             Assert.Empty(entry.SpeakerId);
         }
 
+        [Theory]
+        [InlineData("Narrator")]
+        [InlineData("Narration")]
+        [InlineData("narrator")]
+        [InlineData("  DM  ")]
+        [InlineData("Game Master")]
+        [InlineData("you")]
+        public void The_narrator_naming_itself_is_the_same_as_naming_nobody(string speaker)
+        {
+            // Measured in a real session: four of eleven calls were refused outright because a small
+            // model filled in the optional speaker field with "Narrator", and the whole turn's ledger
+            // went with them. The refusal named no way forward, so the model sent it again unchanged.
+            using var save = Scene();
+
+            var outcome = Call(save.Store, $$"""
+                {"claims":[{"claim":"The hall smells of wet ash.","speaker":"{{speaker}}"}]}
+                """);
+
+            Assert.False(outcome.IsError);
+
+            var entry = Assert.Single(save.Store.Ledger.Read().Entries);
+
+            Assert.Empty(entry.Speaker);
+            Assert.Empty(entry.SpeakerId);
+        }
+
+        [Fact]
+        public void A_character_actually_called_Narrator_still_answers_to_their_own_name()
+        {
+            // The lookup runs first, so the alias list can never take a name away from somebody who
+            // has it.
+            using var save = Scene();
+
+            var file = save.Store.ReadCharacters();
+            file.Characters.Add(new Character
+            {
+                Id = file.TakeId(),
+                Name = "Narrator",
+                Kind = CharacterKind.Npc,
+                Health = 10,
+                MaxHealth = 10,
+            });
+            save.Store.WriteCharacters(file);
+
+            Call(save.Store, """{"claims":[{"claim":"I saw nothing.","speaker":"Narrator"}]}""");
+
+            var entry = Assert.Single(save.Store.Ledger.Read().Entries);
+
+            Assert.Equal("Narrator", entry.Speaker);
+            Assert.NotEmpty(entry.SpeakerId);
+        }
+
+        [Fact]
+        public void A_speaker_nobody_answers_to_is_still_refused()
+        {
+            // Widening this to the narrator's own names must not turn every misspelling into a
+            // silently unattributed claim.
+            using var save = Scene();
+
+            var outcome = Call(save.Store, """{"claims":[{"claim":"I saw nothing.","speaker":"Narratorr"}]}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Empty(save.Store.Ledger.Read().Entries);
+        }
+
         [Fact]
         public void The_speaker_is_recorded_by_name_and_by_id()
         {

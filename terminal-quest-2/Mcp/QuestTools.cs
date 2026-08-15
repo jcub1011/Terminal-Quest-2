@@ -41,6 +41,18 @@ namespace TerminalQuest.Mcp
         /// </summary>
         private const int TranscriptTailBytes = 8 * 1024;
 
+        /// <summary>
+        /// What a narrator calls itself when it names a speaker it should have left unnamed.
+        /// <para>
+        /// Not an alias table the model is told about - see <see cref="IsNarration"/> for why these
+        /// are read as no speaker at all rather than refused.
+        /// </para>
+        /// </summary>
+        private static readonly string[] NarrationNames =
+        [
+            "narrator", "narration", "dm", "gm", "game master", "dungeon master", "system", "self", "you",
+        ];
+
         public static IReadOnlyList<QuestTool> Definitions { get; } =
         [
             new("get_state",
@@ -93,7 +105,7 @@ namespace TerminalQuest.Mcp
                  "properties":{
                    "name":{"type":"string","description":"Who to change, by their current name."},
                    "property":{"type":"string","enum":["name","health","maxHealth","description","kind"]},
-                   "value":{"type":"string","description":"The new value. Numbers may be given as digits."}},
+                   "value":{"type":"string","description":"The new value, absolute rather than a change: to take 3 off 17, send 14, not -3. Health may go above maxHealth - that is overhealing and it stands."}},
                  "required":["name","property","value"]}
                 """),
 
@@ -630,10 +642,13 @@ namespace TerminalQuest.Mcp
                 character.MaxHealth = 20;
             }
 
+            // Not capped at MaxHealth: overhealing is a mechanic, and a value above the ceiling
+            // stands. Only the floor is enforced, because nothing that reads health knows what a
+            // negative one would mean.
             var health = Number(arguments, "health");
             if (health is { } current)
             {
-                character.Health = Math.Clamp(current, 0, character.MaxHealth);
+                character.Health = Math.Max(0, current);
             }
             else if (isNew)
             {
@@ -669,7 +684,8 @@ namespace TerminalQuest.Mcp
             store.WriteCharacters(file);
 
             return ToolOutcome.Ok(
-                $"{(isNew ? "Created" : "Updated")}: {QuestRender.CharacterLine(character)}");
+                $"{(isNew ? "Created" : "Updated")}: {QuestRender.CharacterLine(character)}"
+              + HealthNote(character));
         }
 
         private static ToolOutcome UpdateCharacter(SaveStore store, JsonElement arguments)
@@ -702,7 +718,10 @@ namespace TerminalQuest.Mcp
                         return ToolOutcome.Fail($"'{value}' is not a number.");
                     }
 
-                    character.Health = Math.Clamp(health, 0, Math.Max(1, character.MaxHealth));
+                    // Deliberately uncapped - see UpsertCharacter. The narrator is told about a
+                    // value above the ceiling rather than having it taken away silently, because a
+                    // reply that reads like nothing happened is one the model will send again.
+                    character.Health = Math.Max(0, health);
                     break;
 
                 case "maxhealth":
@@ -711,8 +730,10 @@ namespace TerminalQuest.Mcp
                         return ToolOutcome.Fail($"'{value}' is not a number.");
                     }
 
+                    // Health is left where it is. Lowering the ceiling under someone who is
+                    // overhealed would spend the overheal as a side effect of a call that never
+                    // mentioned it.
                     character.MaxHealth = Math.Max(1, maxHealth);
-                    character.Health = Math.Min(character.Health, character.MaxHealth);
                     break;
 
                 case "description":
@@ -784,7 +805,30 @@ namespace TerminalQuest.Mcp
             }
 
             store.WriteCharacters(file);
-            return ToolOutcome.Ok(QuestRender.CharacterLine(character));
+            return ToolOutcome.Ok(QuestRender.CharacterLine(character) + HealthNote(character));
+        }
+
+        /// <summary>
+        /// What to add to a character line when their health has landed somewhere worth remarking on.
+        /// </summary>
+        /// <remarks>
+        /// Overhealing is legal, so this is not a warning that something was refused - the write
+        /// stands either way. It exists because the alternative is a reply the narrator cannot tell
+        /// apart from an ordinary one, and a narrator that cannot see what its call did will make the
+        /// call again. Empty for the ordinary case, so the common reply stays one line.
+        /// </remarks>
+        private static string HealthNote(Character character)
+        {
+            if (character.Health > character.MaxHealth)
+            {
+                return $"{Environment.NewLine}That is above {character.Name}'s maximum of "
+                     + $"{character.MaxHealth}. Overhealing is allowed and it stands - set maxHealth "
+                     + "as well only if that should become their new ceiling.";
+            }
+
+            return character.Health == 0
+                ? $"{Environment.NewLine}{character.Name} is at 0."
+                : string.Empty;
         }
 
         private static ToolOutcome AddMemory(SaveStore store, JsonElement arguments)
@@ -1799,7 +1843,9 @@ namespace TerminalQuest.Mcp
                 var speaker = Text(claim, "speaker");
                 var character = speaker is { Length: > 0 } ? SaveStore.FindCharacter(file, speaker) : null;
 
-                if (speaker is { Length: > 0 } && character is null)
+                // Looked up first, so a character genuinely called Narrator still answers to their
+                // own name; the alias list is only consulted for a name nobody has.
+                if (speaker is { Length: > 0 } && character is null && !IsNarration(speaker))
                 {
                     return ToolOutcome.Fail(
                         $"There is no character named '{speaker}'. Use list_characters to see who exists, "
@@ -1849,6 +1895,19 @@ namespace TerminalQuest.Mcp
 
             return ToolOutcome.Ok(result.ToString());
         }
+
+        /// <summary>
+        /// Whether a speaker name is the narrator naming itself, which is the same as naming nobody.
+        /// </summary>
+        /// <remarks>
+        /// The schema asks for the field to be left out for plain narration, and a model that fills
+        /// every field it is shown writes "Narrator" instead. That used to refuse the whole call, so a
+        /// turn's entire ledger was lost over a courtesy value - and because the refusal named no way
+        /// forward the model could act on, it retried unchanged. Read as no speaker instead: the empty
+        /// speaker is exactly what the field being absent already means.
+        /// </remarks>
+        private static bool IsNarration(string speaker) =>
+            NarrationNames.Contains(speaker.Trim(), StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Turns a named secret spent for everybody holding it live, and says what happened.

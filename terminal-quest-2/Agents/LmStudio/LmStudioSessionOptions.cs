@@ -51,7 +51,7 @@ namespace TerminalQuest.Agents.LmStudio
         /// iterations: read the state, create what is missing, then narrate.
         /// </para>
         /// </summary>
-        public int MaxToolIterations { get; init; } = 12;
+        public int MaxToolIterations { get; init; } = 50;
 
         /// <summary>
         /// Strips <c>&lt;think&gt;...&lt;/think&gt;</c> spans out of the response text.

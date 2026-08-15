@@ -47,6 +47,12 @@ namespace TerminalQuest.Agents.LmStudio
 
         private static readonly MediaTypeHeaderValue Json = new("application/json");
 
+        /// <summary>
+        /// What the journal says about a call that was answered from earlier in the same turn rather
+        /// than run a second time.
+        /// </summary>
+        private const string DuplicateSuppressed = "Duplicate call within the turn; answered from the first.";
+
         /// <summary>How Claude Code names these same tools, and the one wrong name worth forgiving.</summary>
         private static readonly string McpPrefix = $"mcp__{QuestTools.ServerName}__";
 
@@ -190,6 +196,10 @@ namespace TerminalQuest.Agents.LmStudio
             {
                 _history.Add(ChatMessage.User(prompt));
 
+                // Per turn, not per session: the same question asked next turn is a fair question,
+                // because the world has moved since.
+                var answered = new Dictionary<string, string>(StringComparer.Ordinal);
+
                 var inputTokens = 0;
                 var outputTokens = 0;
 
@@ -217,7 +227,7 @@ namespace TerminalQuest.Agents.LmStudio
 
                     foreach (var call in reply.ToolCalls)
                     {
-                        _history.Add(ChatMessage.Tool(call.Id, Run(call)));
+                        _history.Add(ChatMessage.Tool(call.Id, Run(call, answered)));
                     }
                 }
 
@@ -309,7 +319,12 @@ namespace TerminalQuest.Agents.LmStudio
         /// and correct than as a failed turn, which is the same bargain <see cref="ToolOutcome"/>
         /// already strikes for ordinary refusals.
         /// </remarks>
-        private string Run(ToolCall call)
+        /// <param name="call">What the model asked for.</param>
+        /// <param name="answered">
+        /// What this turn has already been asked and told, so a call made twice is answered from here
+        /// rather than run again. See <see cref="Repeatable"/>.
+        /// </param>
+        private string Run(ToolCall call, Dictionary<string, string> answered)
         {
             // Tools are advertised under their bare names, but a model that has seen the MCP form
             // somewhere will occasionally reach for it. Answering is cheaper than a wasted turn.
@@ -333,15 +348,66 @@ namespace TerminalQuest.Agents.LmStudio
                     ? document.RootElement
                     : default;
 
+                // Keyed on the re-emitted arguments rather than the raw string, so the same call
+                // formatted two ways is still the same call.
+                var key = Repeatable(name) ? null : $"{name} {Canonical(document.RootElement)}";
+
+                if (key is not null && answered.TryGetValue(key, out var previous))
+                {
+                    // Journalled anyway, and as a failure, so the file still shows the loop happening -
+                    // the journal answers "what did the narrator do", and doing this twice is a thing
+                    // it did. Failed rather than not, so a suppressed record_claims cannot stand in for
+                    // the real one in Program.ClaimsMissing, which counts only calls that succeeded.
+                    QuestJournal.Record(_store, name, arguments, failed: true, error: DuplicateSuppressed);
+
+                    return $"You already called {name} with exactly these arguments this turn, and it "
+                         + $"answered:{Environment.NewLine}{previous}{Environment.NewLine}That is still "
+                         + "true and calling again will not change it. Act on it, or move on.";
+                }
+
+                string text;
                 try
                 {
-                    return QuestTools.Invoke(_store, name, arguments).Text;
+                    text = QuestTools.Invoke(_store, name, arguments).Text;
                 }
                 catch (SaveException ex)
                 {
-                    return $"That could not be written to the save: {ex.Message}";
+                    text = $"That could not be written to the save: {ex.Message}";
                 }
+
+                // Refusals are remembered too, and deliberately: a call the world turned down is the
+                // one a small model is likeliest to send again unchanged.
+                if (key is not null)
+                {
+                    answered[key] = text;
+                }
+
+                return text;
             }
+        }
+
+        /// <summary>
+        /// Whether asking this tool the same thing twice is supposed to give a different answer.
+        /// </summary>
+        /// <remarks>
+        /// The word draws and the dice are the whole of it. Everything else is a read of the save or a
+        /// write to it, and repeating one inside a single turn is a model that has stopped reading its
+        /// replies rather than a model that wants a second opinion. Suppressing these three instead
+        /// would break them: two rolls for two blows are not one roll.
+        /// </remarks>
+        private static bool Repeatable(string tool) =>
+            tool is "roll" or "random_noun" or "random_adjective";
+
+        /// <summary>Re-emits arguments without insignificant whitespace, so they compare as text.</summary>
+        private static string Canonical(JsonElement arguments)
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                arguments.WriteTo(writer);
+            }
+
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
         /// <summary>

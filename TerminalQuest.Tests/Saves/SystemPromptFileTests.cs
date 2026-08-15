@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
+using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 
@@ -246,6 +248,49 @@ namespace TerminalQuest.Tests.Saves
             Assert.True(
                 SystemPromptFile.Default.Length < SystemPromptFile.WarnAboveCharacters,
                 $"the default prompt is {SystemPromptFile.Default.Length} characters");
+        }
+
+        [Fact]
+        public void Every_tool_the_default_names_is_a_tool_that_exists()
+        {
+            // The third pairing between this text and code it cannot see, and the one that had already
+            // gone wrong: the brief spent a long time telling the narrator to "call roll or hidden",
+            // and hidden is a parameter of roll rather than a tool of its own.
+            //
+            // Only the underscored names can be checked, which is twenty-seven of the twenty-eight.
+            // A one-word tool name is indistinguishable from prose - this would not have caught
+            // "hidden", and cannot be made to without a list of English words. What it does catch is a
+            // tool renamed or misspelled in one place and not the other, which is the way this drifts.
+            var known = QuestTools.Definitions.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+
+            var named = Regex
+                .Matches(SystemPromptFile.Default, @"\b[a-z]+(?:_[a-z]+)+\b")
+                .Select(match => match.Value)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            // Guards the guard: a prompt that stopped naming tools would pass vacuously.
+            Assert.NotEmpty(named);
+            Assert.DoesNotContain(named, name => !known.Contains(name));
+        }
+
+        [Fact]
+        public void The_default_still_names_the_one_tool_this_cannot_spell_check()
+        {
+            // roll is the only tool whose name carries no underscore, so the check above is blind to
+            // it. It is also the tool the old brief got wrong. Assert at least that it is still spoken
+            // of, and that the parameter it was once confused with is described as one.
+            Assert.Contains("call roll", SystemPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("Set hidden true", SystemPromptFile.Default, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_default_is_plain_ascii()
+        {
+            // This file held four CP1252 em dashes once, with no byte order mark to say so. It compiled
+            // to the right characters only because Roslyn falls back to the machine's ANSI code page,
+            // which is a property of the machine rather than of the repository.
+            Assert.DoesNotContain(SystemPromptFile.Default, character => character > '\x7f');
         }
     }
 }
