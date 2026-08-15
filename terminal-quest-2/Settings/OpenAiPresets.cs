@@ -18,8 +18,8 @@ namespace TerminalQuest.Settings
         public static readonly OpenAiPreset Google = new(
             "Google",
             "https://generativelanguage.googleapis.com/v1beta/openai",
-            "gemini-2.0-flash",
-            "Google AI Studio (Gemini 2.0 Flash / Pro). Get a free API key at aistudio.google.com");
+            "gemini-flash-lite-latest",
+            "Google AI Studio (Gemini Flash Lite / Flash / Pro). Get a free API key at aistudio.google.com");
 
         public static readonly OpenAiPreset OpenAI = new(
             "OpenAI",

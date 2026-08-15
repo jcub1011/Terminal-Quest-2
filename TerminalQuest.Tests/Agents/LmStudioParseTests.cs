@@ -285,5 +285,42 @@ namespace TerminalQuest.Tests.Agents
                 calls.Count < 1000,
                 $"the server asked for index 20,000,000 and got a list of {calls.Count}");
         }
+
+        [Fact]
+        public void Thought_signature_on_tool_call_delta_is_captured()
+        {
+            var calls = new List<LmStudioSession.PartialToolCall>();
+
+            LmStudioSession.Accumulate(
+                calls,
+                Deltas("""[{"index":0,"id":"c1","thought_signature":"sig_123","function":{"name":"roll","arguments":"{}"}}]"""));
+
+            var call = Assert.Single(calls).Build(0);
+            Assert.Equal("sig_123", call.ThoughtSignature);
+        }
+
+        [Fact]
+        public void Thought_signature_in_extra_content_is_captured()
+        {
+            var calls = new List<LmStudioSession.PartialToolCall>();
+
+            LmStudioSession.Accumulate(
+                calls,
+                Deltas("""[{"index":0,"id":"c1","extra_content":{"google":{"thought_signature":"sig_google"}},"function":{"name":"roll","arguments":"{}"}}]"""));
+
+            var call = Assert.Single(calls).Build(0);
+            Assert.Equal("sig_google", call.ThoughtSignature);
+        }
+
+        [Fact]
+        public void Models_parse_strips_models_prefix()
+        {
+            var json = """{"data":[{"id":"models/gemini-2.0-flash"},{"id":"gemini-1.5-pro"}]}""";
+            var models = LmStudioModels.Parse(json);
+
+            Assert.Equal(2, models.Count);
+            Assert.Equal("gemini-2.0-flash", models[0]);
+            Assert.Equal("gemini-1.5-pro", models[1]);
+        }
     }
 }

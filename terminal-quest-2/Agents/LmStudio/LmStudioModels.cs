@@ -39,6 +39,7 @@ namespace TerminalQuest.Agents.LmStudio
             if (apiKey is { Length: > 0 } key)
             {
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+                client.DefaultRequestHeaders.TryAddWithoutValidation("x-goog-api-key", key);
             }
 
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -258,7 +259,10 @@ namespace TerminalQuest.Agents.LmStudio
                         && id.ValueKind == JsonValueKind.String
                         && id.GetString() is { Length: > 0 } value)
                     {
-                        models.Add(value);
+                        var normalized = value.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+                            ? value["models/".Length..]
+                            : value;
+                        models.Add(normalized);
                     }
                 }
 

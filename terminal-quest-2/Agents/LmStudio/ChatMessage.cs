@@ -19,14 +19,18 @@ namespace TerminalQuest.Agents.LmStudio
         string Role,
         string Content,
         IReadOnlyList<ToolCall>? ToolCalls = null,
-        string? ToolCallId = null)
+        string? ToolCallId = null,
+        string? ThoughtSignature = null)
     {
         public static ChatMessage System(string content) => new("system", content);
 
         public static ChatMessage User(string content) => new("user", content);
 
-        public static ChatMessage Assistant(string content, IReadOnlyList<ToolCall> toolCalls) =>
-            new("assistant", content, toolCalls.Count == 0 ? null : toolCalls);
+        public static ChatMessage Assistant(
+            string content,
+            IReadOnlyList<ToolCall> toolCalls,
+            string? thoughtSignature = null) =>
+            new("assistant", content, toolCalls.Count == 0 ? null : toolCalls, ThoughtSignature: thoughtSignature);
 
         public static ChatMessage Tool(string toolCallId, string content) =>
             new("tool", content, ToolCallId: toolCallId);
@@ -38,5 +42,8 @@ namespace TerminalQuest.Agents.LmStudio
     /// has to go back that way in the next request - parsing it is only worth doing once, at the
     /// point of the call.
     /// </param>
-    internal sealed record ToolCall(string Id, string Name, string Arguments);
+    /// <param name="ThoughtSignature">
+    /// Gemini thought signature token preserved for function calling.
+    /// </param>
+    internal sealed record ToolCall(string Id, string Name, string Arguments, string? ThoughtSignature = null);
 }

@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
@@ -104,6 +104,7 @@ namespace TerminalQuest.Agents.LmStudio
             if (_options.ApiKey is { Length: > 0 } key)
             {
                 _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+                _client.DefaultRequestHeaders.TryAddWithoutValidation("x-goog-api-key", key);
             }
 
             _history.Add(ChatMessage.System(_options.SystemPrompt));
@@ -145,7 +146,8 @@ namespace TerminalQuest.Agents.LmStudio
             // server answered in a shape this does not read, which is not evidence of anything.
             if (_options.Model is { Length: > 0 } model
                 && models.Count > 0
-                && !models.Contains(model, StringComparer.OrdinalIgnoreCase))
+                && !models.Contains(model, StringComparer.OrdinalIgnoreCase)
+                && !models.Contains(model.StartsWith("models/", StringComparison.OrdinalIgnoreCase) ? model["models/".Length..] : $"models/{model}", StringComparer.OrdinalIgnoreCase))
             {
                 throw new AgentException($"'{model}' is not one of the models {_options.BaseUrl} is offering.");
             }
@@ -218,7 +220,7 @@ namespace TerminalQuest.Agents.LmStudio
                     outputTokens += reply.OutputTokens;
                     lastOutputTokens = reply.OutputTokens;
 
-                    _history.Add(ChatMessage.Assistant(reply.Text, reply.ToolCalls));
+                    _history.Add(ChatMessage.Assistant(reply.Text, reply.ToolCalls, reply.ThoughtSignature));
 
                     if (reply.ToolCalls.Count == 0)
                     {
@@ -463,6 +465,7 @@ namespace TerminalQuest.Agents.LmStudio
             var calls = new List<PartialToolCall>();
             var inputTokens = 0;
             var outputTokens = 0;
+            string? thoughtSignature = null;
 
             while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
@@ -494,27 +497,37 @@ namespace TerminalQuest.Agents.LmStudio
                 }
 
                 // Some servers report a mid-stream failure as an event rather than a status code,
-                // by which point the headers have long since said 200.
-                if (root.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("error", out var error)
+                    && error.ValueKind != JsonValueKind.Null)
                 {
                     throw new AgentException(
                         $"{_options.BaseUrl} failed partway through the reply.",
                         ReadString(error, "message") ?? Quote(error.ToString()));
                 }
 
-                if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+                if (root.ValueKind == JsonValueKind.Object
+                    && root.TryGetProperty("usage", out var usage)
+                    && usage.ValueKind == JsonValueKind.Object)
                 {
                     inputTokens = ReadInt32(usage, "prompt_tokens");
                     outputTokens = ReadInt32(usage, "completion_tokens");
                 }
 
-                if (!root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
+                if (root.ValueKind != JsonValueKind.Object
+                    || !root.TryGetProperty("choices", out var choices)
+                    || choices.ValueKind != JsonValueKind.Array)
                 {
                     continue;
                 }
 
                 foreach (var choice in choices.EnumerateArray())
                 {
+                    if (choice.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
                     if (!choice.TryGetProperty("delta", out var delta) || delta.ValueKind != JsonValueKind.Object)
                     {
                         continue;
@@ -533,6 +546,19 @@ namespace TerminalQuest.Agents.LmStudio
                     {
                         Accumulate(calls, toolCalls);
                     }
+
+                    if (ReadString(delta, "thought_signature") is { Length: > 0 } deltaSig)
+                    {
+                        thoughtSignature = deltaSig;
+                    }
+                    else if (delta.TryGetProperty("extra_content", out var ec)
+                        && ec.ValueKind == JsonValueKind.Object
+                        && ec.TryGetProperty("google", out var google)
+                        && google.ValueKind == JsonValueKind.Object
+                        && ReadString(google, "thought_signature") is { Length: > 0 } gsig)
+                    {
+                        thoughtSignature = gsig;
+                    }
                 }
             }
 
@@ -541,11 +567,20 @@ namespace TerminalQuest.Agents.LmStudio
                 Emit(filter.Flush(), text);
             }
 
+            if (thoughtSignature is { Length: > 0 })
+            {
+                foreach (var call in calls)
+                {
+                    call.ThoughtSignature ??= thoughtSignature;
+                }
+            }
+
             return new Reply(
                 text.ToString(),
                 [.. calls.Select(static (call, index) => call.Build(index)).Where(static call => call.Name.Length > 0)],
                 inputTokens,
-                outputTokens);
+                outputTokens,
+                thoughtSignature);
         }
 
         private void Emit(string visible, StringBuilder text)
@@ -604,6 +639,19 @@ namespace TerminalQuest.Agents.LmStudio
                     call.Id = id;
                 }
 
+                if (ReadString(delta, "thought_signature") is { Length: > 0 } sig)
+                {
+                    call.ThoughtSignature = sig;
+                }
+                else if (delta.TryGetProperty("extra_content", out var ec)
+                    && ec.ValueKind == JsonValueKind.Object
+                    && ec.TryGetProperty("google", out var google)
+                    && google.ValueKind == JsonValueKind.Object
+                    && ReadString(google, "thought_signature") is { Length: > 0 } gsig)
+                {
+                    call.ThoughtSignature = gsig;
+                }
+
                 if (!delta.TryGetProperty("function", out var function) || function.ValueKind != JsonValueKind.Object)
                 {
                     continue;
@@ -612,6 +660,11 @@ namespace TerminalQuest.Agents.LmStudio
                 if (ReadString(function, "name") is { Length: > 0 } name)
                 {
                     call.Name = name;
+                }
+
+                if (ReadString(function, "thought_signature") is { Length: > 0 } fnSig)
+                {
+                    call.ThoughtSignature = fnSig;
                 }
 
                 if (ReadString(function, "arguments") is { Length: > 0 } arguments)
@@ -636,11 +689,14 @@ namespace TerminalQuest.Agents.LmStudio
 
                 writer.WriteBoolean("stream", true);
 
-                // Without this the usage block never arrives on a streamed response, and the status
-                // pane has nothing to show.
-                writer.WriteStartObject("stream_options");
-                writer.WriteBoolean("include_usage", true);
-                writer.WriteEndObject();
+                // Google's OpenAI-compatible endpoint does not support stream_options and rejects
+                // requests containing unrecognized fields with a 400 Bad Request.
+                if (!_options.BaseUrl.Contains("googleapis.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    writer.WriteStartObject("stream_options");
+                    writer.WriteBoolean("include_usage", true);
+                    writer.WriteEndObject();
+                }
 
                 if (_options.Temperature is { } temperature)
                 {
@@ -690,7 +746,19 @@ namespace TerminalQuest.Agents.LmStudio
         {
             writer.WriteStartObject();
             writer.WriteString("role", message.Role);
-            writer.WriteString("content", message.Content);
+
+            if (!string.IsNullOrEmpty(message.Content))
+            {
+                writer.WriteString("content", message.Content);
+            }
+            else if (message.ToolCalls is not { Count: > 0 })
+            {
+                writer.WriteString("content", string.Empty);
+            }
+            else
+            {
+                writer.WriteNull("content");
+            }
 
             if (message.ToolCallId is { Length: > 0 } toolCallId)
             {
@@ -715,6 +783,16 @@ namespace TerminalQuest.Agents.LmStudio
                 writer.WriteString("arguments", call.Arguments);
                 writer.WriteEndObject();
 
+                var sig = call.ThoughtSignature ?? message.ThoughtSignature;
+                if (sig is { Length: > 0 })
+                {
+                    writer.WriteStartObject("extra_content");
+                    writer.WriteStartObject("google");
+                    writer.WriteString("thought_signature", sig);
+                    writer.WriteEndObject();
+                    writer.WriteEndObject();
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -724,8 +802,79 @@ namespace TerminalQuest.Agents.LmStudio
 
         private string Endpoint(string path) => $"{_options.BaseUrl.TrimEnd('/')}/{path}";
 
-        private static string? Quote(string? body) =>
-            body is null || body.Length <= MaxQuotedErrorChars ? body : body[..MaxQuotedErrorChars];
+        private static string? Quote(string? body)
+        {
+            if (body is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object
+                    && doc.RootElement.TryGetProperty("error", out var errorObj)
+                    && errorObj.ValueKind == JsonValueKind.Object)
+                {
+                    var msg = ReadString(errorObj, "message");
+                    if (errorObj.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Array)
+                    {
+                        var parts = new List<string>();
+                        if (!string.IsNullOrEmpty(msg))
+                        {
+                            parts.Add(msg);
+                        }
+
+                        foreach (var item in details.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.Object)
+                            {
+                                continue;
+                            }
+
+                            if (ReadString(item, "description") is { Length: > 0 } desc)
+                            {
+                                parts.Add(desc);
+                            }
+                            else if (ReadString(item, "reason") is { Length: > 0 } reason)
+                            {
+                                parts.Add(reason);
+                            }
+                            else if (item.TryGetProperty("fieldViolations", out var fvs) && fvs.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var fv in fvs.EnumerateArray())
+                                {
+                                    if (fv.ValueKind != JsonValueKind.Object)
+                                    {
+                                        continue;
+                                    }
+
+                                    var field = ReadString(fv, "field");
+                                    var fvDesc = ReadString(fv, "description");
+                                    parts.Add($"{field}: {fvDesc}");
+                                }
+                            }
+                        }
+
+                        if (parts.Count > 0)
+                        {
+                            var full = string.Join(" - ", parts);
+                            return full.Length <= MaxQuotedErrorChars ? full : full[..MaxQuotedErrorChars];
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(msg))
+                    {
+                        return msg;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+            return body.Length <= MaxQuotedErrorChars ? body : body[..MaxQuotedErrorChars];
+        }
 
         private static string? ReadString(JsonElement owner, string propertyName) =>
             owner.ValueKind == JsonValueKind.Object
@@ -747,7 +896,8 @@ namespace TerminalQuest.Agents.LmStudio
             string Text,
             IReadOnlyList<ToolCall> ToolCalls,
             int InputTokens,
-            int OutputTokens);
+            int OutputTokens,
+            string? ThoughtSignature = null);
 
         /// <summary>A tool call still being assembled out of stream fragments.</summary>
         internal sealed class PartialToolCall
@@ -755,6 +905,8 @@ namespace TerminalQuest.Agents.LmStudio
             public string Id { get; set; } = string.Empty;
 
             public string Name { get; set; } = string.Empty;
+
+            public string? ThoughtSignature { get; set; }
 
             public StringBuilder Arguments { get; } = new();
 
@@ -764,7 +916,7 @@ namespace TerminalQuest.Agents.LmStudio
             /// has nothing else to pair on either.
             /// </summary>
             public ToolCall Build(int index) =>
-                new(Id.Length > 0 ? Id : $"call_{index}", Name, Arguments.ToString());
+                new(Id.Length > 0 ? Id : $"call_{index}", Name, Arguments.ToString(), ThoughtSignature);
         }
     }
 }

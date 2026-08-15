@@ -156,7 +156,12 @@ namespace TerminalQuest.Ui
                 _statusLabel.Text = $"Picked provider: {(_draft.Provider == AgentProvider.ClaudeCode ? "Claude Code" : "OpenAI API")}";
             };
 
-            _providerList.ValueChanged += (_, _) => _providerList.SetNeedsDraw();
+            _providerList.ValueChanged += (_, _) =>
+            {
+                var selected = _providerList.SelectedItem ?? 0;
+                _draft.Provider = selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
+                _providerList.SetNeedsDraw();
+            };
 
             var providerDesc = new Label
             {
@@ -754,7 +759,20 @@ namespace TerminalQuest.Ui
         private void SaveAndClose()
         {
             // Collect and validate values
+            var providerIdx = _providerList.SelectedItem ?? 0;
+            _draft.Provider = providerIdx == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
+
             _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
+
+            var presetIdx = _openAiPresetList.SelectedItem ?? -1;
+            if (presetIdx >= 0 && presetIdx < OpenAiPresets.All.Length)
+            {
+                _draft.OpenAiPreset = OpenAiPresets.All[presetIdx].Name;
+            }
+            else
+            {
+                _draft.OpenAiPreset = OpenAiPresets.DetectPreset(_lmStudioBaseUrl.Text?.Trim()).Name;
+            }
 
             var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
             if (!string.IsNullOrEmpty(baseUrl) && !AppSettings.IsAddress(baseUrl))

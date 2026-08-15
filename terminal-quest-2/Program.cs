@@ -1113,6 +1113,15 @@ namespace TerminalQuest
             }
 
             settings.CopyFrom(chosen);
+
+            try
+            {
+                SettingsStore.Write(settings);
+            }
+            catch
+            {
+                // Ignored - SettingsWindow already attempted write
+            }
         }
 
         /// <summary>The one-line summary of who will be narrating, for the save menu.</summary>

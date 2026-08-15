@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 
 using TerminalQuest.Saves;
@@ -90,7 +90,7 @@ namespace TerminalQuest.Mcp
                    "health":{"type":"integer"},
                    "maxHealth":{"type":"integer"},
                    "description":{"type":"string","description":"Background and aptitude: who they are, what they are good at. For somebody already on record, only what is newly known - this is added to what it says."},
-                   "attributes":{"type":"object","additionalProperties":{"type":"integer"},"description":"Starting scores, e.g. {\"Strength\":15,\"Dexterity\":12}. Any of the six you do not name start at 10, which is unremarkable."}},
+                   "attributes":{"type":"object","description":"Starting scores, e.g. {\"Strength\":15,\"Dexterity\":12}. Any of the six you do not name start at 10, which is unremarkable."}},
                  "required":["name"]}
                 """),
 
