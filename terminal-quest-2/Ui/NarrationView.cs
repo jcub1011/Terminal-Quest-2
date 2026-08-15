@@ -65,6 +65,43 @@ namespace TerminalQuest.Ui
         private bool _stickToBottom = true;
 
         private bool _isWaiting;
+        private int? _highlightedOption;
+
+        /// <summary>
+        /// The 1-based option number currently selected and highlighted in the UI, or null if none.
+        /// </summary>
+        public int? HighlightedOption
+        {
+            get => _highlightedOption;
+            set
+            {
+                if (_highlightedOption == value)
+                {
+                    return;
+                }
+
+                _highlightedOption = value;
+                SetNeedsDraw();
+            }
+        }
+
+        /// <summary>
+        /// The active numbered choices currently present at the end of the transcript.
+        /// </summary>
+        public IReadOnlyList<NarrationOption> GetActiveOptions()
+        {
+            if (_committedRows.Count > 0)
+            {
+                return NarrationOptionDetector.Detect(_committedRows);
+            }
+
+            if (_committed.Count > 0)
+            {
+                return NarrationOptionDetector.Detect(_committed);
+            }
+
+            return [];
+        }
 
         /// <summary>
         /// Whether a narrator turn is in flight with nothing streamed back yet. While it is, a
@@ -122,6 +159,7 @@ namespace TerminalQuest.Ui
                 return;
             }
 
+            _highlightedOption = null;
             _current ??= new StyledLine();
             _parser.Append(text, _current);
 
@@ -157,6 +195,7 @@ namespace TerminalQuest.Ui
         /// <summary>Adds a complete paragraph that is not part of the narration stream.</summary>
         public void AddLine(StyledLine line)
         {
+            _highlightedOption = null;
             _committed.Add(line);
             _committedRows.AddRange(Wrap(line.Spans, _wrapWidth));
             AfterContentChanged();
@@ -315,6 +354,16 @@ namespace TerminalQuest.Ui
             // bottom without going through any of the callers that would have re-synced it.
             SyncContentSize();
 
+            HashSet<int>? highlightedRows = null;
+            if (_highlightedOption is { } optionNum)
+            {
+                var option = GetActiveOptions().FirstOrDefault(o => o.Number == optionNum);
+                if (option is not null)
+                {
+                    highlightedRows = [.. option.RowIndices];
+                }
+            }
+
             for (var y = 0; y < height; y++)
             {
                 var index = Viewport.Y + y;
@@ -331,10 +380,35 @@ namespace TerminalQuest.Ui
                 }
 
                 Move(0, y);
-                foreach (var span in row.Spans)
+
+                if (highlightedRows is not null && highlightedRows.Contains(index))
                 {
-                    SetRole(span.Role);
-                    AddStr(span.Text);
+                    SetAttribute(Theme.OptionSelection);
+                    var drawn = 0;
+                    foreach (var span in row.Spans)
+                    {
+                        if (drawn >= width)
+                        {
+                            break;
+                        }
+
+                        var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                        AddStr(text);
+                        drawn += text.Length;
+                    }
+
+                    if (drawn < width)
+                    {
+                        AddStr(new string(' ', width - drawn));
+                    }
+                }
+                else
+                {
+                    foreach (var span in row.Spans)
+                    {
+                        SetRole(span.Role);
+                        AddStr(span.Text);
+                    }
                 }
             }
 

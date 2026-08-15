@@ -53,6 +53,11 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// The attribute used to highlight the currently selected choice/option in the transcript.
+        /// </summary>
+        public static readonly Attribute OptionSelection = new(Color.Black, Color.White);
+
+        /// <summary>
         /// The scheme applied to the window and every stock control inside it.
         /// <para>
         /// Every role is pinned explicitly with a <see cref="Color.None"/> background. That matters

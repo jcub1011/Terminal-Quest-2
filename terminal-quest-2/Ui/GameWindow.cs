@@ -105,7 +105,11 @@ namespace TerminalQuest.Ui
             };
 
             _input.Accepting += OnInputAccepting;
-            _input.ValueChanged += (_, _) => RefreshSuggestions();
+            _input.ValueChanged += (_, _) =>
+            {
+                RefreshSuggestions();
+                SyncOptionHighlight();
+            };
 
             // The suggestions are added last so they draw over the foot of the transcript, the
             // same layering the settings screen uses to drop its editor onto a drawn row.
@@ -159,6 +163,15 @@ namespace TerminalQuest.Ui
                 // The wait is shown in the transcript, where the narration will land, rather than
                 // off to the side in the status pane.
                 Narration.IsWaiting = value;
+
+                if (value)
+                {
+                    Narration.HighlightedOption = null;
+                }
+                else
+                {
+                    SyncOptionHighlight();
+                }
 
                 _commandTitleLabel.Text = value ? BusyTitle : IdleTitle;
                 _commandTitleLabel.SetNeedsDraw();
@@ -310,6 +323,14 @@ namespace TerminalQuest.Ui
                 }
             }
 
+            if (!_suggestions.Visible && !IsBusy && (key == Key.CursorUp || key == Key.CursorDown))
+            {
+                if (NavigateOptions(key == Key.CursorUp ? -1 : 1))
+                {
+                    return true;
+                }
+            }
+
             // Both mean the same thing here: leave this save. Quitting the program is the save
             // menu's to offer, one screen further out.
             if (key == Key.Esc || key == Key.Q.WithCtrl)
@@ -410,6 +431,7 @@ namespace TerminalQuest.Ui
             Editor?.Forget(_input);
 
             HideSuggestions();
+            Narration.HighlightedOption = null;
 
             Narration.AddBlankLine();
             Narration.AddLine(StyledLine.FromText($"> {text}", TextRole.Command));
@@ -495,6 +517,67 @@ namespace TerminalQuest.Ui
             // Belt and braces: assigning the text raises the change that refreshes the strip, but
             // this must not depend on that having happened.
             RefreshSuggestions();
+        }
+
+        /// <summary>
+        /// Moves the selection through the numbered choices currently offered by the narrator,
+        /// populating the input field with the chosen option number and highlighting it in the transcript.
+        /// </summary>
+        private bool NavigateOptions(int delta)
+        {
+            var options = Narration.GetActiveOptions();
+            if (options.Count == 0)
+            {
+                return false;
+            }
+
+            var currentIndex = -1;
+            if (int.TryParse(_input.Text?.Trim(), out var parsed) && parsed >= 1 && parsed <= options.Count)
+            {
+                currentIndex = parsed - 1;
+            }
+
+            int nextIndex;
+            if (currentIndex < 0)
+            {
+                nextIndex = delta < 0 ? options.Count - 1 : 0;
+            }
+            else
+            {
+                nextIndex = Math.Clamp(currentIndex + delta, 0, options.Count - 1);
+            }
+
+            var selected = options[nextIndex];
+            _input.Text = selected.Number.ToString();
+            _input.InsertionPoint = _input.Text.Length;
+            Narration.HighlightedOption = selected.Number;
+            return true;
+        }
+
+        /// <summary>
+        /// Keeps the highlighted choice in step with whatever the player types into the command box.
+        /// A number corresponding to an active option highlights that option; anything else clears the highlight.
+        /// </summary>
+        private void SyncOptionHighlight()
+        {
+            if (IsBusy)
+            {
+                Narration.HighlightedOption = null;
+                return;
+            }
+
+            var text = _input.Text?.Trim() ?? string.Empty;
+            if (int.TryParse(text, out var parsed))
+            {
+                var options = Narration.GetActiveOptions();
+                if (options.Any(o => o.Number == parsed))
+                {
+                    Narration.HighlightedOption = parsed;
+                    return;
+                }
+            }
+
+            Narration.HighlightedOption = null;
         }
     }
 }
