@@ -267,6 +267,43 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
+        public void A_situational_modifier_modifies_the_roll_total()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(
+                save.Store,
+                "roll",
+                """{"notation":"1d20","reason":"Slippery ledge","situational_modifier":-4}""");
+
+            Assert.False(outcome.IsError);
+            var roll = Assert.Single(save.Store.Rolls.Read().Entries);
+            Assert.Equal(-4, roll.SituationalModifier);
+            Assert.InRange(roll.Total, -3, 16);
+            Assert.Contains("-4 situational", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void A_situational_modifier_combines_with_an_attribute_modifier()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Jock Wae","attributes":{"Charisma":13}}""");
+
+            var outcome = Call(
+                save.Store,
+                "roll",
+                """{"notation":"1d20","reason":"Being obnoxious","character":"Jock Wae","attribute":"Charisma","situational_modifier":-5}""");
+
+            Assert.False(outcome.IsError);
+            var roll = Assert.Single(save.Store.Rolls.Read().Entries);
+            Assert.Equal("Charisma", roll.Attribute);
+            Assert.Equal(1, roll.Modifier);
+            Assert.Equal(-5, roll.SituationalModifier);
+            Assert.InRange(roll.Total, -3, 16);
+            Assert.Contains("+1 Charisma -5 situational", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public void A_hidden_roll_is_stored_hidden()
         {
             using var save = Seeded();

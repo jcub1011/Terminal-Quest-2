@@ -50,6 +50,7 @@ namespace TerminalQuest.Saves
           + "If something happened this turn and you called no writing tool, you have made a mistake.\n\n"
 
           + "### ARGUMENTS THAT ARE EASY TO GET WRONG\n"
+          + "- roll with attribute or situational modifier: pass plain dice in notation (e.g. \"1d20\", \"2d20kh1\" for advantage, \"2d20kl1\" for disadvantage) without +/- numbers. The attribute modifier is added automatically. To apply situational difficulty or bonuses, use the situational modifier field (e.g. -5 for severe difficulty, 2 for an edge).\n"
           + "- record_claims: leave the speaker field OUT for your own narration. Never send a speaker of \"Narrator\", \"Narration\", \"DM\", \"GM\" or \"you\" - name a speaker only when a character on record said it aloud.\n"
           + "- record_claims: one entry per separate assertion, not one per turn.\n"
           + "- set_character health delta: send negative numbers for damage (e.g. -3) and positive for healing (e.g. 5).\n"

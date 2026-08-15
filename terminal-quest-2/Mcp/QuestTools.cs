@@ -172,10 +172,11 @@ namespace TerminalQuest.Mcp
                 """
                 {"type":"object",
                  "properties":{
-                   "notation":{"type":"string","description":"Standard dice notation: 1d20, 2d6+3, 2d20kh1 for advantage, 2d20kl1 for disadvantage."},
+                   "notation":{"type":"string","description":"Standard dice notation: 1d20, 2d20kh1 for advantage, 2d20kl1 for disadvantage. (Only include flat numbers like 2d6+3 if NO attribute is specified)."},
                    "reason":{"type":"string","description":"What is being decided, e.g. 'leaping the chasm'."},
                    "character":{"type":"string","description":"Who is rolling, by name. Omit for traps or the world."},
-                   "attribute":{"type":"string","description":"Attribute supplying the modifier, e.g. Dexterity."},
+                   "attribute":{"type":"string","description":"Attribute supplying the modifier, e.g. Dexterity or Charisma. Its modifier is added automatically — do NOT include +/- numbers in notation when using this."},
+                   "situational_modifier":{"type":"integer","description":"Optional situational bonus or penalty (e.g. 2 for favorable conditions, -5 for severe distraction/hostility) applied on top of the roll."},
                    "hidden":{"type":"boolean","description":"True keeps the total from the player."}},
                  "required":["notation","reason"]}
                 """),
@@ -949,12 +950,22 @@ namespace TerminalQuest.Mcp
 
                 if (CarriesFlatTerm(notation))
                 {
-                    return ToolOutcome.Fail($"{notation} already carries a flat bonus and you also named {found.Name}.");
+                    var mod = CharacterAttributes.Modifier(found.Score);
+                    var sign = CharacterAttributes.Sign(mod);
+                    return ToolOutcome.Fail(
+                        $"When specifying attribute '{found.Name}', the character's modifier ({sign}) is calculated and added automatically. "
+                      + $"Notation must not contain +/- modifiers (got '{notation}'). Use base dice such as '1d20', '2d20kh1' (advantage), or '2d20kl1' (disadvantage), "
+                      + "and pass situational bonuses or penalties via the 'situational_modifier' parameter (e.g. situational_modifier: -5).");
                 }
 
                 attributeName = found.Name;
                 modifier = CharacterAttributes.Modifier(found.Score);
             }
+
+            var situationalModifier = Number(arguments, "situational_modifier")
+                ?? Number(arguments, "situationalModifier")
+                ?? Number(arguments, "modifier")
+                ?? 0;
 
             var outcome = Dice.TryRoll(notation, Random.Shared, out var error);
             if (outcome is null)
@@ -969,9 +980,10 @@ namespace TerminalQuest.Mcp
                 Reason = reason.Trim(),
                 Attribute = attributeName,
                 Modifier = modifier,
+                SituationalModifier = situationalModifier,
                 Notation = outcome.Notation,
                 Faces = [.. outcome.Faces],
-                Total = outcome.Total + modifier,
+                Total = outcome.Total + modifier + situationalModifier,
                 Hidden = Bool(arguments, "hidden") ?? false,
             };
 
@@ -1039,6 +1051,7 @@ namespace TerminalQuest.Mcp
                     Reason = roll.Reason,
                     Attribute = roll.Attribute,
                     Modifier = roll.Modifier,
+                    SituationalModifier = roll.SituationalModifier,
                     Notation = roll.Notation,
                     Faces = [.. roll.Faces],
                     Total = roll.Total,

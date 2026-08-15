@@ -527,6 +527,32 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task A_failed_roll_repeated_identically_is_suppressed()
+        {
+            // Two successful rolls are independent, but a refused roll repeated identically will fail
+            // identically and should be suppressed so the model does not spin in a tool loop.
+            using var save = Seeded();
+            var arguments = """{"notation":"1d20+3","reason":"Forcing the door","character":"Rowan","attribute":"Strength"}""";
+
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Calls("mcp__quest__roll", arguments)
+                .Calls("mcp__quest__roll", arguments)
+                .Says("Done.");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Force the door.", Token);
+
+            var calls = save.Store.Journal.Read().Entries.Where(entry => entry.Tool == "roll").ToList();
+
+            Assert.Equal(2, calls.Count);
+            Assert.True(calls[0].Failed);
+            Assert.True(calls[1].Failed);
+            Assert.Contains("already called roll", handler.Bodies[^1], StringComparison.Ordinal);
+        }
+
+        [Fact]
         public async Task A_repeat_on_the_next_turn_is_run_again()
         {
             // A new turn is a new situation; the world has moved since the last answer.

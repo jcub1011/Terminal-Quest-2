@@ -125,6 +125,25 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
+        public void A_roll_names_situational_modifiers()
+        {
+            var roll = new DiceRoll
+            {
+                Notation = "1d20",
+                Reason = "Being obnoxious",
+                Attribute = "Charisma",
+                Modifier = 1,
+                SituationalModifier = -5,
+                Total = 10,
+            };
+            roll.Faces.Add(14);
+
+            Assert.Equal(
+                "Rowan rolled 1d20 for Being obnoxious: [14] +1 Charisma -5 situational = 10.",
+                QuestRender.Roll(roll, "Rowan"));
+        }
+
+        [Fact]
         public void A_roll_with_nobody_behind_it_still_reads()
         {
             var roll = new DiceRoll { Notation = "1d6", Reason = "The weather", Total = 3 };

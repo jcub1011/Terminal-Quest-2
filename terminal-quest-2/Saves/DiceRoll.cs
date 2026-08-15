@@ -60,6 +60,9 @@ namespace TerminalQuest.Saves
         /// <summary>What <see cref="Attribute"/> was worth, already counted in <see cref="Total"/>.</summary>
         public int Modifier { get; set; }
 
+        /// <summary>Any situational bonus or penalty applied, already counted in <see cref="Total"/>.</summary>
+        public int SituationalModifier { get; set; }
+
         /// <summary>The expression as the resolver tidied it, which is the form the player is shown.</summary>
         public string Notation { get; set; } = string.Empty;
 

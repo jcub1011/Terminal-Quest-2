@@ -78,7 +78,11 @@ namespace TerminalQuest.Mcp
                 ? $" {CharacterAttributes.Sign(roll.Modifier)} {roll.Attribute}"
                 : string.Empty;
 
-            return $"{who} rolled {roll.Notation} for {roll.Reason}:{faces}{modifier} = {roll.Total}.";
+            var situational = roll.SituationalModifier != 0
+                ? $" {CharacterAttributes.Sign(roll.SituationalModifier)} situational"
+                : string.Empty;
+
+            return $"{who} rolled {roll.Notation} for {roll.Reason}:{faces}{modifier}{situational} = {roll.Total}.";
         }
 
         public static string Secrets(

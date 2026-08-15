@@ -352,9 +352,9 @@ namespace TerminalQuest.Agents.LmStudio
 
                 // Keyed on the re-emitted arguments rather than the raw string, so the same call
                 // formatted two ways is still the same call.
-                var key = Repeatable(name) ? null : $"{name} {Canonical(document.RootElement)}";
+                var callKey = $"{name} {Canonical(document.RootElement)}";
 
-                if (key is not null && answered.TryGetValue(key, out var previous))
+                if (answered.TryGetValue(callKey, out var previous))
                 {
                     // Journalled anyway, and as a failure, so the file still shows the loop happening -
                     // the journal answers "what did the narrator do", and doing this twice is a thing
@@ -367,24 +367,25 @@ namespace TerminalQuest.Agents.LmStudio
                          + "true and calling again will not change it. Act on it, or move on.";
                 }
 
-                string text;
+                ToolOutcome outcome;
                 try
                 {
-                    text = QuestTools.Invoke(_store, name, arguments).Text;
+                    outcome = QuestTools.Invoke(_store, name, arguments);
                 }
                 catch (SaveException ex)
                 {
-                    text = $"That could not be written to the save: {ex.Message}";
+                    outcome = ToolOutcome.Fail($"That could not be written to the save: {ex.Message}");
                 }
 
-                // Refusals are remembered too, and deliberately: a call the world turned down is the
-                // one a small model is likeliest to send again unchanged.
-                if (key is not null)
+                // Refusals are remembered for all tools (including roll): a call the world turned down
+                // will fail identically with unchanged arguments. Successful calls are remembered for
+                // non-repeatable tools to prevent re-reading or re-writing identical state.
+                if (outcome.IsError || !Repeatable(name))
                 {
-                    answered[key] = text;
+                    answered[callKey] = outcome.Text;
                 }
 
-                return text;
+                return outcome.Text;
             }
         }
 
