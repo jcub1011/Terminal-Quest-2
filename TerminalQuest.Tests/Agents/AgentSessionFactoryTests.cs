@@ -44,6 +44,16 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task Choosing_openai_api_builds_an_openai_session()
+        {
+            using var save = new TempSave();
+
+            await BuiltAsync<LmStudioSession>(
+                new AppSettings { Provider = AgentProvider.OpenAiApi },
+                save.Store);
+        }
+
+        [Fact]
         public async Task An_enum_value_this_build_does_not_know_falls_back_to_claude()
         {
             // Settings are read from a file a player may have edited. Falling through to the

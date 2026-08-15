@@ -20,6 +20,9 @@ namespace TerminalQuest.Settings
         /// </summary>
         public string ClaudeModel { get; set; } = DefaultClaudeModel;
 
+        /// <summary>The selected preset for OpenAI API (Google, OpenAI, Anthropic, Custom).</summary>
+        public string OpenAiPreset { get; set; } = OpenAiPresets.Custom.Name;
+
         /// <summary>Root of the OpenAI-compatible API, endpoint paths excluded.</summary>
         public string LmStudioBaseUrl { get; set; } = DefaultLmStudioBaseUrl;
 
@@ -27,8 +30,7 @@ namespace TerminalQuest.Settings
         public string LmStudioModel { get; set; } = string.Empty;
 
         /// <summary>
-        /// Bearer token. Only needed once LM Studio has authentication turned on, but needed
-        /// exactly then - without it the server refuses every request.
+        /// Bearer token. Only needed once the endpoint requires authentication (e.g. Google, OpenAI, Anthropic, or configured LM Studio).
         /// </summary>
         public string LmStudioApiKey { get; set; } = DefaultLmStudioApiKey;
 
@@ -67,6 +69,12 @@ namespace TerminalQuest.Settings
         /// after the next snapshot lands.
         /// </remarks>
         public const string DefaultClaudeModel = "claude-haiku-4-5";
+
+        /// <summary>Where the OpenAI-compatible server listens unless configured otherwise (defaults to LM Studio).</summary>
+        public const string DefaultOpenAiBaseUrl = DefaultLmStudioBaseUrl;
+
+        /// <summary>The default API key placeholder.</summary>
+        public const string DefaultOpenAiApiKey = DefaultLmStudioApiKey;
 
         /// <summary>Where LM Studio's server listens unless it has been told otherwise.</summary>
         public const string DefaultLmStudioBaseUrl = "http://localhost:1234/v1";
@@ -109,6 +117,7 @@ namespace TerminalQuest.Settings
 
             Provider = other.Provider;
             ClaudeModel = other.ClaudeModel;
+            OpenAiPreset = other.OpenAiPreset;
             LmStudioBaseUrl = other.LmStudioBaseUrl;
             LmStudioModel = other.LmStudioModel;
             LmStudioApiKey = other.LmStudioApiKey;

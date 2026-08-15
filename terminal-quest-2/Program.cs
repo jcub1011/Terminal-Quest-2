@@ -1118,8 +1118,8 @@ namespace TerminalQuest
         /// <summary>The one-line summary of who will be narrating, for the save menu.</summary>
         private static string Describe(AppSettings settings) => settings.Provider switch
         {
-            AgentProvider.LmStudio =>
-                $"LM Studio - {(settings.LmStudioModel is { Length: > 0 } model ? model : "whichever model is loaded")}",
+            AgentProvider.OpenAiApi =>
+                $"OpenAI API ({(settings.OpenAiPreset is { Length: > 0 } preset ? preset : "Custom")}) - {(settings.LmStudioModel is { Length: > 0 } model ? model : "whichever model is loaded")}",
             // By the name the settings screen offered rather than the raw id, so the menu says
             // back the same word the player picked.
             _ => $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } model ? ClaudeModels.Describe(model) : "default model")}",

@@ -55,6 +55,7 @@ namespace TerminalQuest.Tests.Settings
 
             Assert.Equal(AgentProvider.ClaudeCode, settings.Provider);
             Assert.Equal(AppSettings.DefaultClaudeModel, settings.ClaudeModel);
+            Assert.Equal(OpenAiPresets.Custom.Name, settings.OpenAiPreset);
             Assert.Equal(AppSettings.DefaultLmStudioBaseUrl, settings.LmStudioBaseUrl);
             Assert.Equal(AppSettings.DefaultLmStudioApiKey, settings.LmStudioApiKey);
             Assert.Equal(AppSettings.DefaultEditorCommand, settings.EditorCommand);
@@ -102,6 +103,33 @@ namespace TerminalQuest.Tests.Settings
             Assert.False(AppSettings.IsAddress(null!));
         }
 
+        // ---- Presets ---------------------------------------------------------------------------
+
+        [Fact]
+        public void Presets_define_known_providers()
+        {
+            Assert.Equal(4, OpenAiPresets.All.Length);
+            Assert.Equal("Google", OpenAiPresets.Google.Name);
+            Assert.Equal("OpenAI", OpenAiPresets.OpenAI.Name);
+            Assert.Equal("Anthropic", OpenAiPresets.Anthropic.Name);
+            Assert.Equal("Custom", OpenAiPresets.Custom.Name);
+            Assert.True(OpenAiPresets.Custom.IsCustom);
+            Assert.False(OpenAiPresets.Google.IsCustom);
+        }
+
+        [Theory]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "Google")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai/", "Google")]
+        [InlineData("https://api.openai.com/v1", "OpenAI")]
+        [InlineData("https://api.anthropic.com/v1", "Anthropic")]
+        [InlineData("http://localhost:1234/v1", "Custom")]
+        [InlineData("http://127.0.0.1:11434/v1", "Custom")]
+        public void DetectPreset_matches_url_to_preset(string url, string expectedPreset)
+        {
+            var preset = OpenAiPresets.DetectPreset(url);
+            Assert.Equal(expectedPreset, preset.Name);
+        }
+
         // ---- Copying ---------------------------------------------------------------------------
 
         [Fact]
@@ -111,8 +139,9 @@ namespace TerminalQuest.Tests.Settings
             // a copy block nobody remembered to update — which is the stated reason CopyFrom exists.
             var source = new AppSettings
             {
-                Provider = AgentProvider.LmStudio,
+                Provider = AgentProvider.OpenAiApi,
                 ClaudeModel = "claude-opus-5",
+                OpenAiPreset = "Google",
                 LmStudioBaseUrl = "https://example.test/v1",
                 LmStudioModel = "some-model",
                 LmStudioApiKey = "secret",
@@ -265,9 +294,18 @@ namespace TerminalQuest.Tests.Settings
             // So a hand-edited file reads as something a person can understand, and so reordering
             // the enum cannot silently change what a stored file means.
             using var temp = new TempSettings();
-            SettingsStore.Write(new AppSettings { Provider = AgentProvider.LmStudio }, temp.Path_);
+            SettingsStore.Write(new AppSettings { Provider = AgentProvider.OpenAiApi }, temp.Path_);
 
-            Assert.Contains("\"LmStudio\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+            Assert.Contains("\"OpenAiApi\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Legacy_provider_name_lm_studio_reads_as_openai_api()
+        {
+            using var temp = new TempSettings();
+            temp.Write("""{"provider":"LmStudio"}""");
+
+            Assert.Equal(AgentProvider.OpenAiApi, SettingsStore.Read(temp.Path_).Provider);
         }
 
         [Fact]
