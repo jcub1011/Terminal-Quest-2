@@ -99,12 +99,11 @@ namespace TerminalQuest.Tests.Saves
         }
 
         [Fact]
-        public void A_fully_populated_story_file_round_trips()
+        public void A_fully_populated_story_event_round_trips()
         {
-            var file = new StoryFile { NextId = 2 };
             var entry = new StoryEvent
             {
-                Id = 1,
+                Seq = 1,
                 Turn = 6,
                 Title = "The ford",
                 Detail = "Crossed at dusk.",
@@ -113,14 +112,14 @@ namespace TerminalQuest.Tests.Saves
                 ItemIds = ["itm_1"],
             };
             entry.Tags.Add("travel");
-            file.Events.Add(entry);
 
-            var read = JsonSerializer.Deserialize(
-                Write(file, SaveJsonContext.Readable.StoryFile),
-                SaveJsonContext.Readable.StoryFile)!;
+            var json = JsonSerializer.Serialize(entry, LogJsonContext.Readable.StoryEvent);
+            var back = JsonSerializer.Deserialize(json, LogJsonContext.Readable.StoryEvent)!;
 
-            Assert.Equal(2, read.NextId);
-            var back = Assert.Single(read.Events);
+            Assert.Equal(1, back.Seq);
+            Assert.Equal(6, back.Turn);
+            Assert.Equal("The ford", back.Title);
+            Assert.Equal("Crossed at dusk.", back.Detail);
             Assert.Equal(["travel"], back.Tags);
             Assert.Equal(["chr_1"], back.CharacterIds);
             Assert.Equal(["loc_1"], back.LocationIds);
@@ -128,12 +127,11 @@ namespace TerminalQuest.Tests.Saves
         }
 
         [Fact]
-        public void A_fully_populated_roll_file_round_trips()
+        public void A_fully_populated_dice_roll_round_trips()
         {
-            var file = new RollFile();
             var roll = new DiceRoll
             {
-                Id = 1,
+                Seq = 1,
                 Turn = 6,
                 CharacterId = "chr_1",
                 Reason = "Forcing the door",
@@ -143,19 +141,22 @@ namespace TerminalQuest.Tests.Saves
                 Total = 17,
                 Hidden = true,
                 Revealed = false,
+                RevealsSeq = 0,
             };
             roll.Faces.Add(14);
-            file.Rolls.Add(roll);
 
-            var read = JsonSerializer.Deserialize(
-                Write(file, SaveJsonContext.Readable.RollFile),
-                SaveJsonContext.Readable.RollFile)!;
+            var json = JsonSerializer.Serialize(roll, LogJsonContext.Readable.DiceRoll);
+            var back = JsonSerializer.Deserialize(json, LogJsonContext.Readable.DiceRoll)!;
 
-            var back = Assert.Single(read.Rolls);
+            Assert.Equal(1, back.Seq);
+            Assert.Equal(6, back.Turn);
+            Assert.Equal("chr_1", back.CharacterId);
+            Assert.Equal("Forcing the door", back.Reason);
             Assert.Equal([14], back.Faces);
             Assert.True(back.Hidden);
             Assert.False(back.Revealed);
             Assert.Equal("Strength", back.Attribute);
+            Assert.Equal(17, back.Total);
         }
 
         [Fact]

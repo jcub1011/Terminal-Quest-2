@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TerminalQuest.Saves
 {
     /// <summary>
@@ -9,15 +11,28 @@ namespace TerminalQuest.Saves
     /// what the dice said - which is the arrangement this whole feature exists to end.
     /// </para>
     /// </summary>
-    internal sealed class DiceRoll
+    internal sealed class DiceRoll : ILogEntry
     {
         /// <summary>
-        /// Stable identifier within <c>rolls.json</c>, assigned on write and never reused. The
-        /// transcript uses it as a cursor - everything above it has been shown - so it has to climb.
+        /// Stable sequence identifier within <c>rolls.jsonl</c>, assigned on append and never reused. The
+        /// transcript uses it as a cursor - everything at or above it has been shown.
         /// </summary>
-        public int Id { get; set; }
+        public int Seq { get; set; }
+
+        [JsonIgnore]
+        public int Id
+        {
+            get => Seq;
+            set => Seq = value;
+        }
 
         public int Turn { get; set; }
+
+        /// <summary>
+        /// If this entry is revealing a previous roll, the Seq of the roll being revealed.
+        /// Zero for an original roll.
+        /// </summary>
+        public int RevealsSeq { get; set; }
 
         /// <summary>
         /// Who rolled, by id, or empty for a roll nobody makes: a trap, the weather, the world

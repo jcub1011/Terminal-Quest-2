@@ -559,7 +559,7 @@ namespace TerminalQuest
                         return;
                     }
 
-                    lines = TranscriptReplay.Lines(recalled, store.ReadRolls().Rolls, store.ReadCharacters());
+                    lines = TranscriptReplay.Lines(recalled, store.Rolls.Read().Entries, store.ReadCharacters());
                 }
                 catch (SaveException ex)
                 {

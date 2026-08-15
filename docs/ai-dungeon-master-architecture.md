@@ -44,7 +44,7 @@ Revisions 1–4 proposed a number of things that exist. This section is here so 
 | Mechanical outcomes withheld from the model | `Mcp/QuestTools.cs:793-802`, `:1039` | The `roll` handler is described in the source as "the one handler that refuses things the fiction would allow", and refuses a flat bonus alongside a named attribute so the model cannot supply its own modifier |
 | Structured state store as the only coordination channel | `Saves/SaveStore.cs:22` | Six JSON documents per save folder, four append-only logs beside them, and one plain-text file the player owns; nothing cached, because "the file on disk is the only authority, and this process may not be the one that last changed it" |
 | Per-character knowledge | `Saves/Memory.cs`, retrieved by `get_memories(character, about)` | Turn-stamped, subject-indexed by id so retrieval survives a rename. The substrate secrets need |
-| Append-only history | `Location.Events`, `StoryFile.Events`, `RollFile.Rolls`, `Character.Memories` | All turn-stamped, all oldest-first, none rewritten |
+| Append-only history | `Location.Events`, `story.jsonl`, `rolls.jsonl`, `Character.Memories` | All turn-stamped, all oldest-first, none rewritten |
 | A turn clock, already on disk before the turn runs | `SaveMetadata.Turn`, stamped at `Program.cs:435` | Stamped early precisely so the out-of-process tool server can date what it writes |
 | Enforcement in the mechanism rather than the prompt | see below | The house rule §6 depends on |
 

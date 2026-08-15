@@ -37,6 +37,8 @@ namespace TerminalQuest.Saves
     [JsonSerializable(typeof(LedgerEntry))]
     [JsonSerializable(typeof(TranscriptEntry))]
     [JsonSerializable(typeof(DiagnosticEntry))]
+    [JsonSerializable(typeof(StoryEvent))]
+    [JsonSerializable(typeof(DiceRoll))]
     internal sealed partial class LogJsonContext : JsonSerializerContext
     {
         /// <summary>

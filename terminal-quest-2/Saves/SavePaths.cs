@@ -431,17 +431,17 @@ namespace TerminalQuest.Saves
             }
             store.WriteLocations(resetLocations);
 
-            // 4. Reset story and rolls
-            store.WriteStory(new StoryFile());
-            store.WriteRolls(new RollFile());
-
-            // 5. Delete logs and temp files
+            // 4. Delete logs, story, rolls, and temp files
             var logs = new[]
             {
                 "journal.jsonl",
                 "ledger.jsonl",
                 "transcript.jsonl",
                 "diagnostics.jsonl",
+                "story.jsonl",
+                "rolls.jsonl",
+                "story.json",
+                "rolls.json",
             };
 
             foreach (var logFile in logs)

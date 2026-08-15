@@ -255,7 +255,7 @@ namespace TerminalQuest.Tests.Saves
         {
             using var root = new SavesRoot();
             var store = SavePaths.Open("Riverbend");
-            store.WriteStory(new StoryFile());
+            store.WriteMetadata(new SaveMetadata());
 
             Assert.True(Assert.Single(SavePaths.List()).SizeBytes > 0);
         }
@@ -266,7 +266,7 @@ namespace TerminalQuest.Tests.Saves
         public void Deleting_removes_the_folder_and_everything_in_it()
         {
             using var root = new SavesRoot();
-            SavePaths.Open("Riverbend").WriteStory(new StoryFile());
+            SavePaths.Open("Riverbend").WriteMetadata(new SaveMetadata());
 
             Assert.True(SavePaths.Delete("Riverbend"));
             Assert.Empty(root.Folders);
@@ -357,14 +357,12 @@ namespace TerminalQuest.Tests.Saves
         {
             using var root = new SavesRoot();
             var store = SavePaths.Open("Riverbend");
-            var story = new StoryFile();
-            story.Events.Add(new StoryEvent { Id = 1, Turn = 2, Title = "The ford" });
-            store.WriteStory(story);
+            store.Story.Append(new StoryEvent { Turn = 2, Title = "The ford" });
 
             var copy = SavePaths.Duplicate("Riverbend");
 
             Assert.Equal("Riverbend (copy)", copy);
-            Assert.Equal("The ford", Assert.Single(SavePaths.Open(copy).ReadStory().Events).Title);
+            Assert.Equal("The ford", Assert.Single(SavePaths.Open(copy).Story.Read().Entries).Title);
         }
 
         [Fact]
@@ -431,11 +429,11 @@ namespace TerminalQuest.Tests.Saves
             // would hand the duplicate a document that was never valid.
             using var root = new SavesRoot();
             SavePaths.Open("Riverbend");
-            File.WriteAllText(Path.Combine(root.Root, "Riverbend", "story.json.tmp"), "half a write");
+            File.WriteAllText(Path.Combine(root.Root, "Riverbend", "characters.json.tmp"), "half a write");
 
             var copy = SavePaths.Duplicate("Riverbend");
 
-            Assert.False(File.Exists(Path.Combine(root.Root, copy, "story.json.tmp")));
+            Assert.False(File.Exists(Path.Combine(root.Root, copy, "characters.json.tmp")));
         }
 
         [Fact]
@@ -532,13 +530,8 @@ namespace TerminalQuest.Tests.Saves
             store.MoveCharacter(player.Id, secondLoc.Id);
 
             // Add story events and rolls
-            var story = store.ReadStory();
-            story.Events.Add(new StoryEvent { Turn = 1, Title = "Arrived at inn", Detail = "The tavern was warm" });
-            store.WriteStory(story);
-
-            var rolls = store.ReadRolls();
-            rolls.Rolls.Add(new DiceRoll { Turn = 1, Total = 18 });
-            store.WriteRolls(rolls);
+            store.Story.Append(new StoryEvent { Turn = 1, Title = "Arrived at inn", Detail = "The tavern was warm" });
+            store.Rolls.Append(new DiceRoll { Turn = 1, Total = 18 });
 
             // Append logs
             store.Journal.Append(new JournalEntry { Turn = 1, Tool = "get_state", Arguments = JsonDocument.Parse("{}").RootElement });
@@ -581,8 +574,8 @@ namespace TerminalQuest.Tests.Saves
             Assert.Equal([resetPlayer.Id], loc.CharacterIds);
 
             // Assert: Story & Rolls
-            Assert.Empty(store.ReadStory().Events);
-            Assert.Empty(store.ReadRolls().Rolls);
+            Assert.Empty(store.Story.Read().Entries);
+            Assert.Empty(store.Rolls.Read().Entries);
 
             // Assert: Logs deleted
             Assert.Empty(store.Journal.Read().Entries);

@@ -269,7 +269,7 @@ namespace TerminalQuest.Mcp
             var locations = store.ReadLocations();
             var items = store.ReadItems();
             var inventory = store.ReadInventory();
-            var story = store.ReadStory().Events;
+            var story = store.Story.Read().Entries;
             var metadata = store.ReadMetadata();
 
             var player = SaveStore.Player(characters);
@@ -567,7 +567,7 @@ namespace TerminalQuest.Mcp
             var characters = store.ReadCharacters();
             var items = store.ReadItems();
             var index = WorldIndex.Build(characters, file, items);
-            var story = store.ReadStory().Events;
+            var story = store.Story.Read().Entries;
             var recentEvents = story
                 .Where(ev => ev.LocationIds.Contains(location.Id, StringComparer.Ordinal))
                 .TakeLast(5)
@@ -812,10 +812,8 @@ namespace TerminalQuest.Mcp
                 }
             }
 
-            var storyFile = store.ReadStory();
             var entry = new StoryEvent
             {
-                Id = storyFile.TakeId(),
                 Turn = store.CurrentTurn(),
                 Title = title.Trim(),
                 Detail = detail.Trim(),
@@ -825,8 +823,7 @@ namespace TerminalQuest.Mcp
                 Tags = Strings(arguments, "tags"),
             };
 
-            storyFile.Events.Add(entry);
-            store.WriteStory(storyFile);
+            store.Story.Append(entry);
 
             return ToolOutcome.Ok($"Recorded.{Environment.NewLine}{QuestRender.StoryEvent(entry)}");
         }
@@ -846,7 +843,7 @@ namespace TerminalQuest.Mcp
             var locId = locName is { Length: > 0 } ? SaveStore.FindLocation(locations, locName)?.Id : null;
             var itemId = itemName is { Length: > 0 } ? SaveStore.FindItem(items, itemName)?.Id : null;
 
-            var events = store.ReadStory().Events.AsEnumerable();
+            var events = store.Story.Read().Entries.AsEnumerable();
 
             if (charId is not null || charName is { Length: > 0 })
             {
@@ -965,10 +962,8 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Fail(error);
             }
 
-            var file = store.ReadRolls();
             var roll = new DiceRoll
             {
-                Id = SaveStore.NextId(file.Rolls, static existing => existing.Id),
                 Turn = store.CurrentTurn(),
                 CharacterId = roller?.Id ?? string.Empty,
                 Reason = reason.Trim(),
@@ -980,8 +975,7 @@ namespace TerminalQuest.Mcp
                 Hidden = Bool(arguments, "hidden") ?? false,
             };
 
-            file.Rolls.Add(roll);
-            store.WriteRolls(file);
+            store.Rolls.Append(roll);
 
             var text = QuestRender.Roll(roll, roller?.Name);
 
@@ -992,7 +986,7 @@ namespace TerminalQuest.Mcp
 
         private static ToolOutcome RevealRoll(SaveStore store, JsonElement arguments)
         {
-            var file = store.ReadRolls();
+            var rolls = store.Rolls.Read().Entries;
             var characters = store.ReadCharacters();
 
             var wanted = Text(arguments, "character");
@@ -1005,11 +999,24 @@ namespace TerminalQuest.Mcp
 
             var reason = Text(arguments, "reason");
 
-            for (var index = file.Rolls.Count - 1; index >= 0; index--)
+            var alreadyRevealed = new HashSet<int>();
+            foreach (var r in rolls)
             {
-                var roll = file.Rolls[index];
+                if (r.RevealsSeq > 0)
+                {
+                    alreadyRevealed.Add(r.RevealsSeq);
+                }
+                else if (r.Revealed)
+                {
+                    alreadyRevealed.Add(r.Seq);
+                }
+            }
 
-                if (!roll.Hidden || roll.Revealed)
+            for (var index = rolls.Count - 1; index >= 0; index--)
+            {
+                var roll = rolls[index];
+
+                if (!roll.Hidden || roll.RevealsSeq > 0 || alreadyRevealed.Contains(roll.Seq))
                 {
                     continue;
                 }
@@ -1024,11 +1031,25 @@ namespace TerminalQuest.Mcp
                     continue;
                 }
 
-                roll.Revealed = true;
-                store.WriteRolls(file);
+                var reveal = new DiceRoll
+                {
+                    Turn = store.CurrentTurn(),
+                    RevealsSeq = roll.Seq,
+                    CharacterId = roll.CharacterId,
+                    Reason = roll.Reason,
+                    Attribute = roll.Attribute,
+                    Modifier = roll.Modifier,
+                    Notation = roll.Notation,
+                    Faces = [.. roll.Faces],
+                    Total = roll.Total,
+                    Hidden = true,
+                    Revealed = true,
+                };
+
+                store.Rolls.Append(reveal);
 
                 var name = SaveStore.FindCharacterById(characters, roll.CharacterId)?.Name;
-                return ToolOutcome.Ok($"Revealed.{Environment.NewLine}{QuestRender.Roll(roll, name)}");
+                return ToolOutcome.Ok($"Revealed.{Environment.NewLine}{QuestRender.Roll(reveal, name)}");
             }
 
             return ToolOutcome.Fail("There is no hidden roll left to reveal that matches that.");

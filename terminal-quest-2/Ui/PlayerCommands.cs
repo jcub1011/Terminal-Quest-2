@@ -142,7 +142,7 @@ namespace TerminalQuest.Ui
 
         private static void Story(List<StyledLine> lines, SaveStore store)
         {
-            var events = store.ReadStory().Events;
+            var events = store.Story.Read().Entries;
 
             if (events.Count == 0)
             {
@@ -168,12 +168,37 @@ namespace TerminalQuest.Ui
 
         private static void Rolls(List<StyledLine> lines, SaveStore store)
         {
-            var rolls = store.ReadRolls().Rolls;
+            var allEntries = store.Rolls.Read().Entries;
 
-            if (rolls.Count == 0)
+            if (allEntries.Count == 0)
             {
                 lines.Add(StyledLine.FromText("No dice have been thrown yet.", TextRole.System));
                 return;
+            }
+
+            var revealedSeqs = new HashSet<int>();
+            foreach (var r in allEntries)
+            {
+                if (r.RevealsSeq > 0)
+                {
+                    revealedSeqs.Add(r.RevealsSeq);
+                }
+            }
+
+            var rolls = new List<DiceRoll>();
+            foreach (var r in allEntries)
+            {
+                if (r.RevealsSeq > 0)
+                {
+                    continue;
+                }
+
+                if (revealedSeqs.Contains(r.Seq))
+                {
+                    r.Revealed = true;
+                }
+
+                rolls.Add(r);
             }
 
             lines.Add(StyledLine.FromText("The dice so far", TextRole.System));
@@ -317,7 +342,7 @@ namespace TerminalQuest.Ui
 
             lines.Add(attributes);
 
-            var storyEvents = store.ReadStory().Events
+            var storyEvents = store.Story.Read().Entries
                 .Where(ev => ev.CharacterIds.Contains(found.Id, StringComparer.Ordinal)
                     || ev.Title.Contains(found.Name, StringComparison.OrdinalIgnoreCase)
                     || ev.Detail.Contains(found.Name, StringComparison.OrdinalIgnoreCase))
@@ -410,7 +435,7 @@ namespace TerminalQuest.Ui
                 }
             }
 
-            var events = store.ReadStory().Events
+            var events = store.Story.Read().Entries
                 .Where(ev => ev.LocationIds.Contains(found.Id, StringComparer.Ordinal)
                     || ev.Title.Contains(found.Name, StringComparison.OrdinalIgnoreCase)
                     || ev.Detail.Contains(found.Name, StringComparison.OrdinalIgnoreCase))

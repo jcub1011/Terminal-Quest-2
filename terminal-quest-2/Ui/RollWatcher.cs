@@ -52,13 +52,13 @@ namespace TerminalQuest.Ui
         /// <exception cref="SaveException">The roll log exists but could not be parsed.</exception>
         public void CatchUp()
         {
-            foreach (var roll in _store.ReadRolls().Rolls)
+            foreach (var roll in _store.Rolls.Read().Entries)
             {
-                _shown = Math.Max(_shown, roll.Id);
+                _shown = Math.Max(_shown, roll.Seq);
 
                 if (roll.Revealed)
                 {
-                    _revealed.Add(roll.Id);
+                    _revealed.Add(roll.RevealsSeq > 0 ? roll.RevealsSeq : roll.Seq);
                 }
             }
         }
@@ -74,12 +74,12 @@ namespace TerminalQuest.Ui
         /// <exception cref="SaveException">A document exists but could not be parsed.</exception>
         public IReadOnlyList<DiceRoll> Take()
         {
-            var rolls = _store.ReadRolls().Rolls;
+            var rolls = _store.Rolls.Read().Entries;
 
             var highest = 0;
             foreach (var roll in rolls)
             {
-                highest = Math.Max(highest, roll.Id);
+                highest = Math.Max(highest, roll.Seq);
             }
 
             // A log that has shrunk was edited by hand. Following it down means the next roll is
@@ -93,8 +93,9 @@ namespace TerminalQuest.Ui
 
             foreach (var roll in rolls)
             {
-                var isNew = roll.Id > _shown;
-                var isRevealed = roll.Hidden && roll.Revealed && !_revealed.Contains(roll.Id);
+                var rollId = roll.RevealsSeq > 0 ? roll.RevealsSeq : roll.Seq;
+                var isNew = roll.Seq > _shown;
+                var isRevealed = roll.Hidden && roll.Revealed && !_revealed.Contains(rollId);
 
                 if (!isNew && !isRevealed)
                 {
@@ -113,11 +114,11 @@ namespace TerminalQuest.Ui
             // where it was, so nothing is lost to a save that would not parse for a moment.
             foreach (var roll in fresh)
             {
-                _shown = Math.Max(_shown, roll.Id);
+                _shown = Math.Max(_shown, roll.Seq);
 
                 if (roll.Revealed)
                 {
-                    _revealed.Add(roll.Id);
+                    _revealed.Add(roll.RevealsSeq > 0 ? roll.RevealsSeq : roll.Seq);
                 }
             }
 

@@ -229,7 +229,7 @@ namespace TerminalQuest.Tests.Mcp
             var outcome = Call(save.Store, "roll", """{"notation":"1d20","reason":"Forcing the door"}""");
 
             Assert.False(outcome.IsError);
-            var roll = Assert.Single(save.Store.ReadRolls().Rolls);
+            var roll = Assert.Single(save.Store.Rolls.Read().Entries);
             Assert.Equal("1d20", roll.Notation);
             Assert.InRange(roll.Total, 1, 20);
             Assert.Equal("Forcing the door", roll.Reason);
@@ -246,7 +246,7 @@ namespace TerminalQuest.Tests.Mcp
                 "roll",
                 """{"notation":"1d20","reason":"Forcing the door","character":"Rowan","attribute":"Strength"}""");
 
-            var roll = Assert.Single(save.Store.ReadRolls().Rolls);
+            var roll = Assert.Single(save.Store.Rolls.Read().Entries);
             Assert.Equal("Strength", roll.Attribute);
             Assert.Equal(3, roll.Modifier);
             Assert.InRange(roll.Total, 4, 23);
@@ -263,7 +263,7 @@ namespace TerminalQuest.Tests.Mcp
                 """{"notation":"1d20+3","reason":"Forcing","character":"Rowan","attribute":"Strength"}""");
 
             Assert.True(outcome.IsError);
-            Assert.Empty(save.Store.ReadRolls().Rolls);
+            Assert.Empty(save.Store.Rolls.Read().Entries);
         }
 
         [Fact]
@@ -276,7 +276,7 @@ namespace TerminalQuest.Tests.Mcp
                 "roll",
                 """{"notation":"1d20","reason":"Sensing the lie","hidden":true}""");
 
-            Assert.True(Assert.Single(save.Store.ReadRolls().Rolls).Hidden);
+            Assert.True(Assert.Single(save.Store.Rolls.Read().Entries).Hidden);
             Assert.Contains("Hidden", outcome.Text, StringComparison.Ordinal);
         }
 
@@ -289,7 +289,9 @@ namespace TerminalQuest.Tests.Mcp
             var outcome = Call(save.Store, "reveal_roll", "{}");
 
             Assert.False(outcome.IsError);
-            Assert.True(Assert.Single(save.Store.ReadRolls().Rolls).Revealed);
+            var entries = save.Store.Rolls.Read().Entries;
+            Assert.Equal(2, entries.Count);
+            Assert.True(entries[1].Revealed);
         }
 
         // ---- Places ---------------------------------------------------------------------------------
@@ -404,7 +406,7 @@ namespace TerminalQuest.Tests.Mcp
 
             Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk.","characters":["Rowan"],"locations":["The Ford"]}""");
 
-            var ev = Assert.Single(save.Store.ReadStory().Events);
+            var ev = Assert.Single(save.Store.Story.Read().Entries);
             Assert.Equal("The ford", ev.Title);
 
             var recall = Call(save.Store, "recall", """{"character":"Rowan"}""");

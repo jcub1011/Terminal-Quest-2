@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TerminalQuest.Saves
 {
     /// <summary>
@@ -8,9 +10,16 @@ namespace TerminalQuest.Saves
     /// or queries it via <c>recall</c>, and the player can read it with <c>/story</c>.
     /// </para>
     /// </summary>
-    internal sealed class StoryEvent
+    internal sealed class StoryEvent : ILogEntry
     {
-        public int Id { get; set; }
+        public int Seq { get; set; }
+
+        [JsonIgnore]
+        public int Id
+        {
+            get => Seq;
+            set => Seq = value;
+        }
 
         public int Turn { get; set; }
 

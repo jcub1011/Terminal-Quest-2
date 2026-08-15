@@ -13,8 +13,8 @@ namespace TerminalQuest.Saves
         private const string LocationsFileName = "locations.json";
         private const string ItemsFileName = "items.json";
         private const string InventoryFileName = "inventory.json";
-        private const string StoryFileName = "story.json";
-        private const string RollsFileName = "rolls.json";
+        private const string StoryFileName = "story.jsonl";
+        private const string RollsFileName = "rolls.jsonl";
         private const string MetadataFileName = "save.json";
         private const string JournalFileName = "journal.jsonl";
         private const string LedgerFileName = "ledger.jsonl";
@@ -53,14 +53,6 @@ namespace TerminalQuest.Saves
 
         public void WriteInventory(InventoryFile file) => Write(InventoryFileName, file, SaveJsonContext.Readable.InventoryFile);
 
-        public StoryFile ReadStory() => Read(StoryFileName, SaveJsonContext.Readable.StoryFile);
-
-        public void WriteStory(StoryFile file) => Write(StoryFileName, file, SaveJsonContext.Readable.StoryFile);
-
-        public RollFile ReadRolls() => Read(RollsFileName, SaveJsonContext.Readable.RollFile);
-
-        public void WriteRolls(RollFile file) => Write(RollsFileName, file, SaveJsonContext.Readable.RollFile);
-
         public SaveMetadata ReadMetadata() => Read(MetadataFileName, SaveJsonContext.Readable.SaveMetadata);
 
         public void WriteMetadata(SaveMetadata metadata) => Write(MetadataFileName, metadata, SaveJsonContext.Readable.SaveMetadata);
@@ -72,6 +64,12 @@ namespace TerminalQuest.Saves
         public string? ReadSystemPrompt() => ReadText(SystemPromptFileName);
 
         public void WriteSystemPrompt(string text) => WriteText(SystemPromptFileName, text);
+
+        public AppendLog<StoryEvent> Story =>
+            field ??= new(Path.Combine(Directory, StoryFileName), LogJsonContext.Readable.StoryEvent);
+
+        public AppendLog<DiceRoll> Rolls =>
+            field ??= new(Path.Combine(Directory, RollsFileName), LogJsonContext.Readable.DiceRoll);
 
         public AppendLog<JournalEntry> Journal =>
             field ??= new(Path.Combine(Directory, JournalFileName), LogJsonContext.Readable.JournalEntry);

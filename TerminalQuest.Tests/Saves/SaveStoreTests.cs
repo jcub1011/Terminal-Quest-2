@@ -55,8 +55,8 @@ namespace TerminalQuest.Tests.Saves
             Assert.Empty(save.Store.ReadLocations().Locations);
             Assert.Empty(save.Store.ReadItems().Items);
             Assert.Empty(save.Store.ReadInventory().Inventories);
-            Assert.Empty(save.Store.ReadStory().Events);
-            Assert.Empty(save.Store.ReadRolls().Rolls);
+            Assert.Empty(save.Store.Story.Read().Entries);
+            Assert.Empty(save.Store.Rolls.Read().Entries);
             Assert.Equal(0, save.Store.ReadMetadata().SchemaVersion);
         }
 
@@ -169,7 +169,7 @@ namespace TerminalQuest.Tests.Saves
             var nested = Path.Combine(save.Directory, "nested");
             var store = new SaveStore(nested);
 
-            store.WriteStory(new StoryFile());
+            store.WriteMetadata(new SaveMetadata());
 
             Assert.True(Directory.Exists(nested));
         }
@@ -193,18 +193,13 @@ namespace TerminalQuest.Tests.Saves
             inventory.Inventories.Add(charInv);
             save.Store.WriteInventory(inventory);
 
-            var story = new StoryFile();
-            story.Events.Add(new StoryEvent { Id = 1, Turn = 5, Title = "The ford", Detail = "Crossed." });
-            save.Store.WriteStory(story);
-
-            var rolls = new RollFile();
-            rolls.Rolls.Add(new DiceRoll { Id = 1, Turn = 5, Notation = "1d20", Total = 14 });
-            save.Store.WriteRolls(rolls);
+            save.Store.Story.Append(new StoryEvent { Turn = 5, Title = "The ford", Detail = "Crossed." });
+            save.Store.Rolls.Append(new DiceRoll { Turn = 5, Notation = "1d20", Total = 14 });
 
             Assert.Equal("The Ford", Assert.Single(save.Store.ReadLocations().Locations).Name);
             Assert.Equal(40, save.Store.ReadInventory().Find("chr_1")!.Money);
-            Assert.Equal("The ford", Assert.Single(save.Store.ReadStory().Events).Title);
-            Assert.Equal(14, Assert.Single(save.Store.ReadRolls().Rolls).Total);
+            Assert.Equal("The ford", Assert.Single(save.Store.Story.Read().Entries).Title);
+            Assert.Equal(14, Assert.Single(save.Store.Rolls.Read().Entries).Total);
         }
 
         // ---- Schema gate --------------------------------------------------------------------

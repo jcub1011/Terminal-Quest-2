@@ -434,8 +434,8 @@ namespace TerminalQuest.Tests.Agents
             await session.StartAsync(Token);
             await session.SendAsync("Cross the ford.", Token);
 
-            var story = save.Store.ReadStory();
-            Assert.Single(story.Events);
+            var story = save.Store.Story.Read().Entries;
+            Assert.Single(story);
         }
 
         [Fact]

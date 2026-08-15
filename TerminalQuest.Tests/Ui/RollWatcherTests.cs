@@ -35,9 +35,13 @@ namespace TerminalQuest.Tests.Ui
 
         private static void Write(TempSave save, params DiceRoll[] rolls)
         {
-            var file = new RollFile();
-            file.Rolls.AddRange(rolls);
-            save.Store.WriteRolls(file);
+            var path = Path.Combine(save.Directory, "rolls.jsonl");
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+            using var writer = new StreamWriter(stream, SaveStore.Utf8NoBom);
+            foreach (var roll in rolls)
+            {
+                writer.WriteLine(System.Text.Json.JsonSerializer.Serialize(roll, LogJsonContext.Readable.DiceRoll));
+            }
         }
 
         private static string TextOf(StyledLine line) =>
@@ -274,9 +278,12 @@ namespace TerminalQuest.Tests.Ui
             // Nothing is lost to a save that would not parse for a moment.
             using var save = new TempSave();
             var watcher = new RollWatcher(save.Store);
-            save.WriteRaw("rolls.json", "{ not json");
 
-            Assert.Throws<SaveException>(() => watcher.Take());
+            var path = Path.Combine(save.Directory, "rolls.jsonl");
+            using (var lockStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+            {
+                Assert.Throws<SaveException>(() => watcher.Take());
+            }
 
             Write(save, Roll(1));
             Assert.Single(watcher.Take());
@@ -286,7 +293,8 @@ namespace TerminalQuest.Tests.Ui
         public void Catching_up_on_a_broken_log_reports_it()
         {
             using var save = new TempSave();
-            save.WriteRaw("rolls.json", "{ not json");
+            var path = Path.Combine(save.Directory, "rolls.jsonl");
+            using var lockStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
             Assert.Throws<SaveException>(() => new RollWatcher(save.Store).CatchUp());
         }
