@@ -139,20 +139,7 @@ namespace TerminalQuest.Tests.Mcp
             Assert.Contains("the sealed cellar", outcome.Text, StringComparison.Ordinal);
         }
 
-        [Fact]
-        public void A_live_secret_reaches_get_memories_as_well()
-        {
-            // The narrator is told to call get_memories before voicing anybody, so this is the fetch at
-            // which a secret has to arrive. Only putting them on get_character would mean voicing
-            // somebody without ever seeing what they are keeping.
-            using var save = Scene();
-            Give(save.Store, "Bess", "the sealed cellar", SecretStage.Live);
 
-            Assert.Contains(
-                Sentinel,
-                Call(save.Store, "get_memories", """{"character":"Bess"}""").Text,
-                StringComparison.Ordinal);
-        }
 
         [Fact]
         public void A_live_secret_does_not_reach_a_fetch_naming_anybody_else()
@@ -239,29 +226,6 @@ namespace TerminalQuest.Tests.Mcp
             Assert.DoesNotContain("HP", outcome.Text, StringComparison.Ordinal);
         }
 
-        [Fact]
-        public void get_memories_is_gated_exactly_as_get_character_is()
-        {
-            using var save = Scene();
-            Give(save.Store, "Bess", "the sealed cellar", SecretStage.Live);
-
-            Call(save.Store, "get_memories", """{"character":"Bess"}""");
-
-            Assert.True(Call(save.Store, "get_memories", """{"character":"Tam"}""").IsError);
-        }
-
-        [Fact]
-        public void A_fetch_of_one_kind_blocks_a_fetch_of_the_other()
-        {
-            // Both tools hand secrets over, so the turn's history has to be shared between them rather
-            // than kept per tool.
-            using var save = Scene();
-            Give(save.Store, "Bess", "the sealed cellar", SecretStage.Live);
-
-            Call(save.Store, "get_character", """{"name":"Bess"}""");
-
-            Assert.True(Call(save.Store, "get_memories", """{"character":"Tam"}""").IsError);
-        }
 
         [Fact]
         public void Reading_the_same_character_repeatedly_is_never_refused()
@@ -270,7 +234,6 @@ namespace TerminalQuest.Tests.Mcp
             Give(save.Store, "Bess", "the sealed cellar", SecretStage.Live);
 
             Assert.False(Call(save.Store, "get_character", """{"name":"Bess"}""").IsError);
-            Assert.False(Call(save.Store, "get_memories", """{"character":"Bess"}""").IsError);
             Assert.False(Call(save.Store, "get_character", """{"name":"Bess"}""").IsError);
         }
 

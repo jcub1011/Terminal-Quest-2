@@ -492,12 +492,11 @@ namespace TerminalQuest.Tests.Saves
             store.Touch(15);
             store.WriteSystemPrompt("Custom instructions for narrator");
 
-            // Damage player, modify attributes, add memory & secret
+            // Damage player, modify attributes, add secret
             var characters = store.ReadCharacters();
             var player = SaveStore.Player(characters)!;
             player.Health = 10;
             player.Attributes.Add(new CharacterAttribute { Name = "Guild Standing", Score = 18 });
-            player.Memories.Add(new Memory { Turn = 3, Text = "Fought goblins" });
             player.Secrets.Add(new Secret { Turn = 5, Name = "Hidden key", Text = "The key is hidden under the floor" });
 
             // Add NPC
@@ -512,16 +511,21 @@ namespace TerminalQuest.Tests.Saves
             store.WriteCharacters(characters);
 
             // Modify inventory
+            var items = store.ReadItems();
+            var ring = new ItemDefinition { Id = items.TakeId(), Name = "Magic Ring" };
+            items.Items.Add(ring);
+            store.WriteItems(items);
+
             var inventory = store.ReadInventory();
-            inventory.Money = 500;
-            inventory.Items.Add(new Item { Id = inventory.TakeId(), Name = "Magic Ring", Quantity = 1 });
+            var pInv = inventory.GetOrCreate(player.Id);
+            pInv.Money = 500;
+            pInv.Items.Add(new ItemStack { ItemId = ring.Id, Quantity = 1 });
             store.WriteInventory(inventory);
 
-            // Add locations and events
+            // Add locations
             var locations = store.ReadLocations();
             var startLoc = locations.Locations[0];
             startLoc.Description = "A busy, smoke-filled inn.";
-            startLoc.Events.Add(new LocationEvent { Turn = 2, Text = "Brawl broke out" });
             var secondLoc = new Location { Id = locations.TakeId(), Name = "Dark Dungeon" };
             locations.Locations.Add(secondLoc);
             store.WriteLocations(locations);
@@ -558,23 +562,22 @@ namespace TerminalQuest.Tests.Saves
             Assert.Equal("Rowan", resetPlayer.Name);
             Assert.Equal(warrior.MaxHealth, resetPlayer.MaxHealth);
             Assert.Equal(warrior.MaxHealth, resetPlayer.Health);
-            Assert.Empty(resetPlayer.Memories);
             Assert.Empty(resetPlayer.Secrets);
             Assert.Equal(6, resetPlayer.Attributes.Count);
             Assert.Equal(16, resetPlayer.Attributes.Single(a => a.Name == "Strength").Score);
 
             // Assert: Inventory
-            var resetInventory = store.ReadInventory();
+            var resetInventory = store.ReadInventory().Find(resetPlayer.Id)!;
+            var resetItems = store.ReadItems();
             Assert.Equal(warrior.StartingMoney, resetInventory.Money);
             Assert.Equal(warrior.StartingItems.Count, resetInventory.Items.Count);
-            Assert.Equal("iron longsword", resetInventory.Items[0].Name);
+            Assert.Equal("iron longsword", SaveStore.FindItemById(resetItems, resetInventory.Items[0].ItemId)!.Name);
 
             // Assert: Location
             var resetLocations = store.ReadLocations();
             var loc = Assert.Single(resetLocations.Locations);
             Assert.Equal("The Prancing Pony", loc.Name);
             Assert.Equal(string.Empty, loc.Description);
-            Assert.Empty(loc.Events);
             Assert.Equal([resetPlayer.Id], loc.CharacterIds);
 
             // Assert: Story & Rolls

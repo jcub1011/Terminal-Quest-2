@@ -66,11 +66,15 @@ namespace TerminalQuest.Tests.Saves
 
             NewGame.Create(save.Store, "Rowan", string.Empty, Warrior, null);
 
-            var inventory = save.Store.ReadInventory();
+            var player = Assert.Single(save.Store.ReadCharacters().Characters);
+            var inventory = save.Store.ReadInventory().Find(player.Id)!;
+            var itemFile = save.Store.ReadItems();
+
             Assert.Equal(Warrior.StartingMoney, inventory.Money);
+            var itemNames = inventory.Items.Select(stack => SaveStore.FindItemById(itemFile, stack.ItemId)!.Name).ToList();
             Assert.Equal(
                 Warrior.StartingItems.Select(item => item.Name).ToList(),
-                inventory.Items.Select(item => item.Name).ToList());
+                itemNames);
         }
 
         [Fact]
@@ -84,7 +88,7 @@ namespace TerminalQuest.Tests.Saves
             Assert.Equal("loc_1", Assert.Single(save.Store.ReadLocations().Locations).Id);
             Assert.Equal(
                 Enumerable.Range(1, Warrior.StartingItems.Count).Select(n => $"itm_{n}").ToList(),
-                save.Store.ReadInventory().Items.Select(item => item.Id).ToList());
+                save.Store.ReadItems().Items.Select(item => item.Id).ToList());
         }
 
         [Fact]
@@ -124,7 +128,8 @@ namespace TerminalQuest.Tests.Saves
 
             NewGame.Create(save.Store, "Rowan", string.Empty, Warrior, null);
 
-            foreach (var item in save.Store.ReadInventory().Items)
+            var player = Assert.Single(save.Store.ReadCharacters().Characters);
+            foreach (var item in save.Store.ReadInventory().Find(player.Id)!.Items)
             {
                 item.Quantity = 99;
             }
@@ -279,7 +284,7 @@ namespace TerminalQuest.Tests.Saves
                 save.Store.RequireSupportedSchema();
                 var player = Assert.Single(save.Store.ReadCharacters().Characters);
                 Assert.True(player.Health > 0);
-                Assert.NotEmpty(save.Store.ReadInventory().Items);
+                Assert.NotEmpty(save.Store.ReadInventory().Find(player.Id)!.Items);
                 Assert.Equal(player.Id, Assert.Single(save.Store.ReadLocations().Locations).CharacterIds.Single());
             }
         }

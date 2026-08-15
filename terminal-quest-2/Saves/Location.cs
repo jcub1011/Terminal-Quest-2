@@ -1,6 +1,6 @@
 namespace TerminalQuest.Saves
 {
-    /// <summary>A place in the world, who is standing in it, and what it has been through.</summary>
+    /// <summary>A place in the world, who is standing in it, and what is lying there.</summary>
     internal sealed class Location
     {
         /// <summary>
@@ -16,16 +16,10 @@ namespace TerminalQuest.Saves
         /// <summary>
         /// Who is here right now - presence, not history. Holds <see cref="Character.Id"/>, not
         /// names, so renaming somebody does not have to be chased into every roster they stand in.
-        /// <para>
-        /// A character belongs to at most one location, so this is only ever changed through
-        /// <see cref="SaveStore.MoveCharacter"/>, which clears the old entry as it sets the new
-        /// one. Left to add and remove calls the narrator would eventually leave someone standing
-        /// in two places at once.
-        /// </para>
         /// </summary>
         public List<string> CharacterIds { get; set; } = [];
 
-        /// <summary>What has happened here, oldest first.</summary>
-        public List<LocationEvent> Events { get; set; } = [];
+        /// <summary>Items lying at this location or in containers here.</summary>
+        public List<ItemStack> Items { get; set; } = [];
     }
 }

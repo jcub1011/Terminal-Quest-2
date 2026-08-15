@@ -221,8 +221,8 @@ namespace TerminalQuest.Tests.Mcp
             using var save = Scene();
             Call(save.Store, """{"claims":[{"claim":"I saw nothing.","speaker":"Bess"}]}""");
 
-            QuestTools.Invoke(save.Store, "update_character", Args("""
-                {"name":"Bess","property":"name","value":"Bessa of the Ford"}
+            QuestTools.Invoke(save.Store, "set_character", Args("""
+                {"name":"Bess","new_name":"Bessa of the Ford"}
                 """));
 
             var entry = Assert.Single(save.Store.Ledger.Read().Entries);
@@ -377,7 +377,6 @@ namespace TerminalQuest.Tests.Mcp
             var outcome = Call(save.Store, """{"claims":[{"claim":"I saw nothing.","speaker":"Nobody"}]}""");
 
             Assert.True(outcome.IsError);
-            Assert.Contains("list_characters", outcome.Text, StringComparison.Ordinal);
             Assert.Contains("leave the speaker out", outcome.Text, StringComparison.Ordinal);
             Assert.Empty(save.Store.Ledger.Read().Entries);
         }

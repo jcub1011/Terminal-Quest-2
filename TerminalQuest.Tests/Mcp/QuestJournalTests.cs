@@ -106,7 +106,7 @@ namespace TerminalQuest.Tests.Mcp
             save.WriteRaw("characters.json", "{ not json");
 
             Assert.Throws<SaveException>(() =>
-                Call(save.Store, "upsert_character", """{"name":"Bess"}"""));
+                Call(save.Store, "set_character", """{"name":"Bess"}"""));
 
             var entry = Assert.Single(save.Store.Journal.Read().Entries);
 
@@ -138,12 +138,12 @@ namespace TerminalQuest.Tests.Mcp
         {
             using var save = Seeded();
 
-            Call(save.Store, "get_memories", """{"character":"Rowan","about":"the ford"}""");
+            Call(save.Store, "recall", """{"character":"Rowan","query":"the ford"}""");
 
             var arguments = Assert.Single(save.Store.Journal.Read().Entries).Arguments;
 
             Assert.Equal("Rowan", arguments.GetProperty("character").GetString());
-            Assert.Equal("the ford", arguments.GetProperty("about").GetString());
+            Assert.Equal("the ford", arguments.GetProperty("query").GetString());
         }
 
         [Fact]
@@ -197,12 +197,12 @@ namespace TerminalQuest.Tests.Mcp
         {
             using var save = Seeded();
 
-            Call(save.Store, "list_characters");
-            Call(save.Store, "list_locations");
-            Call(save.Store, "get_inventory");
+            Call(save.Store, "get_state");
+            Call(save.Store, "get_character", """{"name":"Rowan"}""");
+            Call(save.Store, "get_location", """{"name":"The Ford"}""");
 
             Assert.Equal(
-                ["list_characters", "list_locations", "get_inventory"],
+                ["get_state", "get_character", "get_location"],
                 save.Store.Journal.Read().Entries.Select(entry => entry.Tool));
         }
 

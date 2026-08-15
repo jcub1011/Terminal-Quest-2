@@ -2,28 +2,9 @@ namespace TerminalQuest.Saves
 {
     /// <summary>
     /// Seeds a fresh save with the character the player described.
-    /// <para>
-    /// The only place the game process writes story data itself. Everywhere else the narrator owns
-    /// the world and the TUI only reads it - but who the player is is the player's answer, not the
-    /// model's, and asking for it in prose costs a turn and comes back different every time.
-    /// </para>
-    /// <para>
-    /// Written before the narrator process exists, so there is no second writer to race with here.
-    /// </para>
     /// </summary>
     internal static class NewGame
     {
-        /// <summary>
-        /// Writes the player, their kit and - when one was named - where they begin.
-        /// </summary>
-        /// <param name="store">The save to seed. Expected to hold no characters yet.</param>
-        /// <param name="name">The player's name. Changeable later - see <see cref="Character.Id"/>.</param>
-        /// <param name="description">Free prose about who they are. May be empty.</param>
-        /// <param name="template">The archetype chosen, which decides health, coin and the kit.</param>
-        /// <param name="startLocation">
-        /// Where they begin, or null/blank to leave it to the narrator.
-        /// </param>
-        /// <exception cref="SaveException">A document could not be written.</exception>
         public static void Create(
             SaveStore store,
             string name,
@@ -37,8 +18,6 @@ namespace TerminalQuest.Saves
 
             var trimmedName = name.Trim();
 
-            // Stamped before anything else is written, so a folder that gets abandoned halfway
-            // through seeding is still recognisably a save of this shape rather than an old one.
             var metadata = store.ReadMetadata();
             metadata.SchemaVersion = SaveStore.CurrentSchemaVersion;
             store.WriteMetadata(metadata);
@@ -54,31 +33,38 @@ namespace TerminalQuest.Saves
                 Description = ComposeDescription(description, template),
             };
 
-            // The class's spread, copied rather than shared - the templates are static and the
-            // narrator edits attributes in place, so handing one out would spend the next
-            // character's. Seeding also fills in anything the spread left out, so the player leaves
-            // this screen with all six however the table is edited later.
             CharacterAttributes.Seed(player, template.Attributes);
 
             characters.Characters.Add(player);
             store.WriteCharacters(characters);
 
+            var itemFile = store.ReadItems();
             var inventory = store.ReadInventory();
-            inventory.Money = template.StartingMoney;
+            var playerInventory = inventory.GetOrCreate(player.Id);
+            playerInventory.Money = template.StartingMoney;
 
             foreach (var item in template.StartingItems)
             {
-                // Copied, not shared: the templates are static and the narrator edits items in
-                // place, so handing one out would spend the next save's kit.
-                inventory.Items.Add(new Item
+                var definition = SaveStore.FindItem(itemFile, item.Name);
+                if (definition is null)
                 {
-                    Id = inventory.TakeId(),
-                    Name = item.Name,
+                    definition = new ItemDefinition
+                    {
+                        Id = itemFile.TakeId(),
+                        Name = item.Name,
+                        Description = item.Description,
+                    };
+                    itemFile.Items.Add(definition);
+                }
+
+                playerInventory.Items.Add(new ItemStack
+                {
+                    ItemId = definition.Id,
                     Quantity = item.Quantity,
-                    Description = item.Description,
                 });
             }
 
+            store.WriteItems(itemFile);
             store.WriteInventory(inventory);
 
             if (startLocation is not { Length: > 0 } || startLocation.AsSpan().IsWhiteSpace())
@@ -93,9 +79,6 @@ namespace TerminalQuest.Saves
             {
                 Id = locations.TakeId(),
                 Name = place,
-
-                // Left empty on purpose. The narrator writes what the place looks like on the first
-                // turn; a description invented here would be one the story never agreed to.
                 Description = string.Empty,
             };
             locations.Locations.Add(start);
@@ -104,10 +87,6 @@ namespace TerminalQuest.Saves
             store.MoveCharacter(player.Id, start.Id);
         }
 
-        /// <summary>
-        /// The player's own words followed by what their class makes them good at, either half
-        /// tolerated as empty.
-        /// </summary>
         private static string ComposeDescription(string? description, ClassTemplate template)
         {
             var typed = description?.Trim() ?? string.Empty;
@@ -117,7 +96,6 @@ namespace TerminalQuest.Saves
                 return template.Aptitude;
             }
 
-            // A description that already ends in punctuation should not gain a second full stop.
             var separator = char.IsPunctuation(typed[^1]) ? " " : ". ";
 
             return typed + separator + template.Aptitude;

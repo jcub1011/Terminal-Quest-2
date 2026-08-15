@@ -34,13 +34,13 @@ namespace TerminalQuest.Tests.Saves
             return file;
         }
 
-        private static InventoryFile Items(params (string Id, string Name)[] items)
+        private static ItemFile Items(params (string Id, string Name)[] items)
         {
-            var file = new InventoryFile();
+            var file = new ItemFile();
 
             foreach (var (id, name) in items)
             {
-                file.Items.Add(new Item { Id = id, Name = name, Quantity = 1 });
+                file.Items.Add(new ItemDefinition { Id = id, Name = name });
             }
 
             return file;
@@ -124,7 +124,7 @@ namespace TerminalQuest.Tests.Saves
         {
             var index = WorldIndex.Build(
                 locations: Locations(("loc_1", "Anvil")),
-                inventory: Items(("itm_1", "Anvil")));
+                items: Items(("itm_1", "Anvil")));
 
             Assert.Equal("loc_1", index.IdOf("Anvil"));
         }

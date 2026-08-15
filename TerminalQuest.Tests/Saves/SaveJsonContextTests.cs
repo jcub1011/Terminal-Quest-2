@@ -10,11 +10,6 @@ namespace TerminalQuest.Tests.Saves
     /// <summary>
     /// The shape saves take on disk.
     /// </summary>
-    /// <remarks>
-    /// These are contract tests, not implementation tests. A save is meant to be opened and
-    /// hand-edited, and the enum spellings are shared with the MCP tool schemas, so the wire format
-    /// is part of the product rather than an internal detail.
-    /// </remarks>
     public sealed class SaveJsonContextTests
     {
         private static string Write<T>(T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) =>
@@ -36,8 +31,6 @@ namespace TerminalQuest.Tests.Saves
                 Description = "Weather-beaten.",
             };
             character.Attributes.Add(new CharacterAttribute { Name = "Strength", Score = 16 });
-            character.Memories.Add(new Memory { Id = 1, Turn = 4, Text = "{This} met {Player}." });
-            character.Memories[0].SubjectIds.Add("chr_2");
             file.Characters.Add(character);
 
             var json = Write(file, SaveJsonContext.Readable.CharacterFile);
@@ -49,8 +42,6 @@ namespace TerminalQuest.Tests.Saves
             Assert.Equal(CharacterKind.Player, back.Kind);
             Assert.Equal(12, back.Health);
             Assert.Equal(16, Assert.Single(back.Attributes).Score);
-            Assert.Equal("{This} met {Player}.", Assert.Single(back.Memories).Text);
-            Assert.Equal(["chr_2"], Assert.Single(back.Memories).SubjectIds);
         }
 
         [Fact]
@@ -59,7 +50,7 @@ namespace TerminalQuest.Tests.Saves
             var file = new LocationFile { NextId = 2 };
             var location = new Location { Id = "loc_1", Name = "The Ford", Description = "Shallow." };
             location.CharacterIds.Add("chr_1");
-            location.Events.Add(new LocationEvent { Id = 1, Turn = 3, Text = "The water rose." });
+            location.Items.Add(new ItemStack { ItemId = "itm_1", Quantity = 3 });
             file.Locations.Add(location);
 
             var read = JsonSerializer.Deserialize(
@@ -68,28 +59,59 @@ namespace TerminalQuest.Tests.Saves
 
             var back = Assert.Single(read.Locations);
             Assert.Equal(["chr_1"], back.CharacterIds);
-            Assert.Equal("The water rose.", Assert.Single(back.Events).Text);
+            Assert.Equal("itm_1", Assert.Single(back.Items).ItemId);
+            Assert.Equal(3, Assert.Single(back.Items).Quantity);
+        }
+
+        [Fact]
+        public void A_fully_populated_item_file_round_trips()
+        {
+            var file = new ItemFile { NextId = 2 };
+            file.Items.Add(new ItemDefinition { Id = "itm_1", Name = "Rope", Description = "Hemp." });
+
+            var read = JsonSerializer.Deserialize(
+                Write(file, SaveJsonContext.Readable.ItemFile),
+                SaveJsonContext.Readable.ItemFile)!;
+
+            Assert.Equal(2, read.NextId);
+            var item = Assert.Single(read.Items);
+            Assert.Equal("itm_1", item.Id);
+            Assert.Equal("Rope", item.Name);
+            Assert.Equal("Hemp.", item.Description);
         }
 
         [Fact]
         public void A_fully_populated_inventory_file_round_trips()
         {
-            var file = new InventoryFile { NextId = 2, Money = 40 };
-            file.Items.Add(new Item { Id = "itm_1", Name = "Rope", Quantity = 2, Description = "Hemp." });
+            var file = new InventoryFile();
+            var charInv = new CharacterInventory { CharacterId = "chr_1", Money = 40 };
+            charInv.Items.Add(new ItemStack { ItemId = "itm_1", Quantity = 2 });
+            file.Inventories.Add(charInv);
 
             var read = JsonSerializer.Deserialize(
                 Write(file, SaveJsonContext.Readable.InventoryFile),
                 SaveJsonContext.Readable.InventoryFile)!;
 
-            Assert.Equal(40, read.Money);
-            Assert.Equal(2, Assert.Single(read.Items).Quantity);
+            var back = Assert.Single(read.Inventories);
+            Assert.Equal("chr_1", back.CharacterId);
+            Assert.Equal(40, back.Money);
+            Assert.Equal(2, Assert.Single(back.Items).Quantity);
         }
 
         [Fact]
         public void A_fully_populated_story_file_round_trips()
         {
-            var file = new StoryFile();
-            var entry = new StoryEvent { Id = 1, Turn = 6, Title = "The ford", Detail = "Crossed at dusk." };
+            var file = new StoryFile { NextId = 2 };
+            var entry = new StoryEvent
+            {
+                Id = 1,
+                Turn = 6,
+                Title = "The ford",
+                Detail = "Crossed at dusk.",
+                CharacterIds = ["chr_1"],
+                LocationIds = ["loc_1"],
+                ItemIds = ["itm_1"],
+            };
             entry.Tags.Add("travel");
             file.Events.Add(entry);
 
@@ -97,7 +119,12 @@ namespace TerminalQuest.Tests.Saves
                 Write(file, SaveJsonContext.Readable.StoryFile),
                 SaveJsonContext.Readable.StoryFile)!;
 
-            Assert.Equal(["travel"], Assert.Single(read.Events).Tags);
+            Assert.Equal(2, read.NextId);
+            var back = Assert.Single(read.Events);
+            Assert.Equal(["travel"], back.Tags);
+            Assert.Equal(["chr_1"], back.CharacterIds);
+            Assert.Equal(["loc_1"], back.LocationIds);
+            Assert.Equal(["itm_1"], back.ItemIds);
         }
 
         [Fact]
@@ -176,9 +203,6 @@ namespace TerminalQuest.Tests.Saves
         {
             var kind = isPlayer ? CharacterKind.Player : CharacterKind.Npc;
 
-            // Pinned with [JsonStringEnumMemberName] precisely because the member-name default
-            // would say "Player" and diverge from what the MCP tools advertise. A drift here is a
-            // cross-boundary bug: the narrator would send a value the save layer cannot read.
             var file = new CharacterFile();
             file.Characters.Add(new Character { Id = "chr_1", Name = "Rowan", Kind = kind });
 
@@ -200,8 +224,6 @@ namespace TerminalQuest.Tests.Saves
         [Fact]
         public void An_apostrophe_survives_unescaped()
         {
-            // The whole reason the Readable context exists: a save is meant to be opened and read
-            // by a person, and ' everywhere makes that unpleasant.
             var file = new CharacterFile();
             file.Characters.Add(new Character { Id = "chr_1", Name = "Rowan", Description = "A smith's apprentice." });
 
@@ -283,8 +305,6 @@ namespace TerminalQuest.Tests.Saves
         [Fact]
         public void Taking_an_id_respects_a_counter_that_leads_the_records()
         {
-            // Deleting a character must never free their id for reuse: something may still point
-            // at it, and reissuing would silently merge two entities.
             var file = new CharacterFile { NextId = 100 };
 
             Assert.Equal("chr_101", file.TakeId());
@@ -306,7 +326,7 @@ namespace TerminalQuest.Tests.Saves
         {
             Assert.StartsWith(EntityIds.Character, new CharacterFile().TakeId(), StringComparison.Ordinal);
             Assert.StartsWith(EntityIds.Location, new LocationFile().TakeId(), StringComparison.Ordinal);
-            Assert.StartsWith(EntityIds.Item, new InventoryFile().TakeId(), StringComparison.Ordinal);
+            Assert.StartsWith(EntityIds.Item, new ItemFile().TakeId(), StringComparison.Ordinal);
         }
 
         [Fact]
@@ -315,8 +335,6 @@ namespace TerminalQuest.Tests.Saves
             using var save = new TempSave();
             NewGame.Create(save.Store, "Rowan", "A quiet sort.", ClassTemplates.All[0], "The Ford");
 
-            // Re-read through a second store over the same folder: nothing is cached, so this is
-            // what another process sees.
             var reader = new SaveStore(save.Directory);
 
             Assert.Equal("Rowan", SaveStore.PlayerName(reader.ReadCharacters()));

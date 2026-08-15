@@ -154,7 +154,7 @@ namespace TerminalQuest.Tests.Mcp
             var outcome = Call(save.Store, """{"character":"Nobody","name":"the cellar","detail":"Bricked up."}""");
 
             Assert.True(outcome.IsError);
-            Assert.Contains("list_characters", outcome.Text, StringComparison.Ordinal);
+            Assert.Contains("set_character", outcome.Text, StringComparison.Ordinal);
         }
 
         [Fact]

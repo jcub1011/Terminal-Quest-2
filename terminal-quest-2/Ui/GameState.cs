@@ -111,12 +111,22 @@ namespace TerminalQuest.Ui
             }
 
             var inventory = store.ReadInventory();
-            Money = inventory.Money;
+            var playerInv = player is not null ? inventory.Find(player.Id) : null;
+            var itemFile = store.ReadItems();
+
+            Money = playerInv?.Money ?? 0;
 
             Inventory.Clear();
-            foreach (var item in inventory.Items)
+            if (playerInv is not null)
             {
-                Inventory.Add(new InventoryEntry(item.Quantity, item.Name));
+                foreach (var stack in playerInv.Items)
+                {
+                    var def = SaveStore.FindItemById(itemFile, stack.ItemId);
+                    if (def is not null)
+                    {
+                        Inventory.Add(new InventoryEntry(stack.Quantity, def.Name));
+                    }
+                }
             }
         }
     }

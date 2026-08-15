@@ -43,7 +43,6 @@ namespace TerminalQuest.Mcp
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["get_character"] = "name",
-                ["get_memories"] = "character",
             };
 
         /// <summary>

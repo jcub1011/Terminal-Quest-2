@@ -279,8 +279,11 @@ namespace TerminalQuest.Tests.Ui
 
             var text = TextOf(PlayerCommands.Execute("/inventory", save.Store));
 
-            foreach (var item in save.Store.ReadInventory().Items)
+            var player = SaveStore.Player(save.Store.ReadCharacters())!;
+            var items = save.Store.ReadItems();
+            foreach (var stack in save.Store.ReadInventory().Find(player.Id)!.Items)
             {
+                var item = SaveStore.FindItemById(items, stack.ItemId)!;
                 Assert.Contains(item.Name, text, StringComparison.Ordinal);
             }
         }

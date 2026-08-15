@@ -53,7 +53,8 @@ namespace TerminalQuest.Tests.Saves
 
             Assert.Empty(save.Store.ReadCharacters().Characters);
             Assert.Empty(save.Store.ReadLocations().Locations);
-            Assert.Empty(save.Store.ReadInventory().Items);
+            Assert.Empty(save.Store.ReadItems().Items);
+            Assert.Empty(save.Store.ReadInventory().Inventories);
             Assert.Empty(save.Store.ReadStory().Events);
             Assert.Empty(save.Store.ReadRolls().Rolls);
             Assert.Equal(0, save.Store.ReadMetadata().SchemaVersion);
@@ -182,8 +183,14 @@ namespace TerminalQuest.Tests.Saves
             locations.Locations.Add(new Location { Id = "loc_1", Name = "The Ford" });
             save.Store.WriteLocations(locations);
 
-            var inventory = new InventoryFile { NextId = 3, Money = 40 };
-            inventory.Items.Add(new Item { Id = "itm_1", Name = "Rope", Quantity = 2 });
+            var items = new ItemFile { NextId = 2 };
+            items.Items.Add(new ItemDefinition { Id = "itm_1", Name = "Rope", Description = "Hemp." });
+            save.Store.WriteItems(items);
+
+            var inventory = new InventoryFile();
+            var charInv = new CharacterInventory { CharacterId = "chr_1", Money = 40 };
+            charInv.Items.Add(new ItemStack { ItemId = "itm_1", Quantity = 2 });
+            inventory.Inventories.Add(charInv);
             save.Store.WriteInventory(inventory);
 
             var story = new StoryFile();
@@ -195,7 +202,7 @@ namespace TerminalQuest.Tests.Saves
             save.Store.WriteRolls(rolls);
 
             Assert.Equal("The Ford", Assert.Single(save.Store.ReadLocations().Locations).Name);
-            Assert.Equal(40, save.Store.ReadInventory().Money);
+            Assert.Equal(40, save.Store.ReadInventory().Find("chr_1")!.Money);
             Assert.Equal("The ford", Assert.Single(save.Store.ReadStory().Events).Title);
             Assert.Equal(14, Assert.Single(save.Store.ReadRolls().Rolls).Total);
         }

@@ -427,15 +427,15 @@ namespace TerminalQuest.Tests.Agents
             var handler = new ScriptedHandler()
                 .Models("a-model")
                 .Calls("mcp__quest__add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""")
-                .Calls("mcp__quest__add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""")
+                .Calls("mcp__quest__record_event", """{"title":"The ford","detail":"Rowan crossed the ford.","characters":["Rowan"]}""")
                 .Says("Rowan crosses.");
             await using var session = new LmStudioSession(Options(), save.Store, handler);
 
             await session.StartAsync(Token);
             await session.SendAsync("Cross the ford.", Token);
 
-            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
-            Assert.Single(rowan.Memories);
+            var story = save.Store.ReadStory();
+            Assert.Single(story.Events);
         }
 
         [Fact]

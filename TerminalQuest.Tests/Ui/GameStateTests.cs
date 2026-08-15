@@ -112,10 +112,13 @@ namespace TerminalQuest.Tests.Ui
 
             state.RefreshFrom(save.Store);
 
-            var inventory = save.Store.ReadInventory();
+            var player = SaveStore.Player(save.Store.ReadCharacters())!;
+            var inventory = save.Store.ReadInventory().Find(player.Id)!;
+            var items = save.Store.ReadItems();
             Assert.Equal(inventory.Money, state.Money);
+            var itemNames = inventory.Items.Select(stack => SaveStore.FindItemById(items, stack.ItemId)!.Name).ToList();
             Assert.Equal(
-                inventory.Items.Select(item => item.Name).ToList(),
+                itemNames,
                 state.Inventory.Select(entry => entry.Name).ToList());
         }
 

@@ -475,5 +475,29 @@ namespace TerminalQuest.Tests.Settings
 
             Assert.Equal("code -w", read.EditorCommand);
         }
+
+        [Fact]
+        public void Test_reading_actual_settings()
+        {
+            using var temp = new TempSettings();
+            temp.Write("""
+            {
+              "provider": "OpenAiApi",
+              "claudeModel": "",
+              "openAiPreset": "Google",
+              "lmStudioBaseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+              "lmStudioModel": "gemini-flash-lite-latest",
+              "lmStudioApiKey": "AIzaSyB81j5sV3SfyZvS-Q7_Nsa1iqboy3-qbrE",
+              "editorCommand": "notepad.exe",
+              "transcriptRecallCharacters": 4000
+            }
+            """);
+            var read = SettingsStore.Read(temp.Path_);
+            Assert.Equal(AgentProvider.OpenAiApi, read.Provider);
+            Assert.Equal("Google", read.OpenAiPreset);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", read.LmStudioBaseUrl);
+            Assert.Equal("gemini-flash-lite-latest", read.LmStudioModel);
+            Assert.Equal("AIzaSyB81j5sV3SfyZvS-Q7_Nsa1iqboy3-qbrE", read.LmStudioApiKey);
+        }
     }
 }

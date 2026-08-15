@@ -73,16 +73,16 @@ namespace TerminalQuest.Tests.Consistency
             NewGame.Create(save.Store, "Rowan", "A quiet sort.", ClassTemplates.All[0], "The Ford");
 
             Turn(save, 1,
-                ("upsert_location", """{"name":"The Mill","description":"A wheel turns in the race."}"""),
-                ("upsert_character", """{"name":"Bess","description":"Keeps the inn.","health":10,"maxHealth":10}"""),
+                ("set_location", """{"name":"The Mill","description":"A wheel turns in the race."}"""),
+                ("set_character", """{"name":"Bess","description":"Keeps the inn.","health":10,"max_health":10}"""),
                 ("grant_secret", """{"character":"Bess","name":"the sealed cellar","detail":"Bricked up the fever winter."}"""),
                 ("get_character", """{"name":"Bess"}"""),
                 ("record_claims", """{"claims":[{"claim":"The mill wheel still turns.","speaker":"Bess"}]}"""));
 
             Turn(save, 2,
-                ("upsert_location", """{"name":"The Mill","description":"The roof has fallen in since."}"""),
-                ("update_character", """{"name":"Bess","property":"description","value":"Lost a brother to the fever."}"""),
-                ("get_memories", """{"character":"Bess"}"""),
+                ("set_location", """{"name":"The Mill","description":"The roof has fallen in since."}"""),
+                ("set_character", """{"name":"Bess","description":"Lost a brother to the fever."}"""),
+                ("recall", """{"character":"Bess"}"""),
                 ("record_claims", """
                     {"claims":[
                       {"claim":"The cellar was bricked up the fever winter.","speaker":"Bess","reveals":"the sealed cellar"},
@@ -250,8 +250,8 @@ namespace TerminalQuest.Tests.Consistency
                     continue;
                 }
 
-                var isPlace = entry.Tool is "upsert_location" or "update_location";
-                var isPerson = entry.Tool is "upsert_character" or "update_character";
+                var isPlace = entry.Tool is "set_location";
+                var isPerson = entry.Tool is "set_character";
 
                 if (!isPlace && !isPerson)
                 {
@@ -263,11 +263,7 @@ namespace TerminalQuest.Tests.Consistency
                     continue;
                 }
 
-                var text = entry.Tool.StartsWith("upsert", StringComparison.Ordinal)
-                    ? QuestTools.Text(entry.Arguments, "description")
-                    : QuestTools.Text(entry.Arguments, "property") == "description"
-                        ? QuestTools.Text(entry.Arguments, "value")
-                        : null;
+                var text = QuestTools.Text(entry.Arguments, "description");
 
                 if (text is { Length: > 0 })
                 {

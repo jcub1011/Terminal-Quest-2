@@ -6,25 +6,16 @@ namespace TerminalQuest.Mcp
 {
     /// <summary>
     /// Renders save records as the plain text a tool call returns.
-    /// <para>
-    /// Text rather than JSON, deliberately. The consumer is a language model that is about to
-    /// write prose from this, and it reads a line like <c>Bess (npc) - HP 12/12</c> more reliably
-    /// than the same fact wrapped in braces and quotes - for a fraction of the tokens, on every
-    /// call, for the whole session.
-    /// </para>
-    /// <para>
-    /// Every path here resolves placeholders. The model wrote <c>{This}</c> going in; it should
-    /// never have to think about it coming back out.
-    /// </para>
     /// </summary>
     internal static class QuestRender
     {
-        /// <summary>A character's headline: name, kind and health.</summary>
         public static string CharacterLine(Character character) =>
             $"{character.Name} ({Kind(character.Kind)}) - HP {character.Health}/{character.MaxHealth}";
 
-        /// <summary>Full character record, memories included.</summary>
-        public static string Character(Character character, string? playerName)
+        public static string Character(
+            Character character,
+            CharacterInventory? inventory = null,
+            ItemFile? itemFile = null)
         {
             var text = new StringBuilder();
             text.AppendLine(CharacterLine(character));
@@ -36,38 +27,14 @@ namespace TerminalQuest.Mcp
 
             text.AppendLine(Attributes(character));
 
-            if (character.Memories.Count == 0)
+            if (inventory is not null && itemFile is not null)
             {
-                text.AppendLine("Memories: none yet.");
-            }
-            else
-            {
-                text.AppendLine("Memories:");
-                foreach (var memory in character.Memories)
-                {
-                    text.AppendLine(Memory(memory, character.Name, playerName));
-                }
+                text.AppendLine(Inventory(inventory, itemFile));
             }
 
             return text.ToString().TrimEnd();
         }
 
-        /// <summary>
-        /// What a character is made of, on one line, each score with the modifier a roll would
-        /// actually apply.
-        /// </summary>
-        /// <remarks>
-        /// The modifier is spelled out beside the score rather than left to be worked out. The
-        /// narrator does not need it - the resolver applies it - but it is what makes the line
-        /// readable as a description of somebody, and a model that can see "Strength 16 (+3)" is far
-        /// less tempted to invent a bonus than one handed a bare 16.
-        /// <para>
-        /// Names in full, not the three-letter forms everyone knows the six by. The saving would be
-        /// some forty tokens on a response that is cached after the first turn, against the narrator
-        /// echoing "DEX" back as an argument - which the lookup forgives, but a shape the model never
-        /// sees is a shape it never guesses wrong.
-        /// </para>
-        /// </remarks>
         public static string Attributes(Character character)
         {
             var parts = CharacterAttributes.All(character)
@@ -77,14 +44,31 @@ namespace TerminalQuest.Mcp
             return $"Attributes: {string.Join(", ", parts)}";
         }
 
-        /// <summary>
-        /// One roll, as the narrator reads it back.
-        /// </summary>
-        /// <remarks>
-        /// The total is here whether or not the roll was hidden. Hiding governs what the
-        /// <em>player</em> is told; a narrator that could not see its own dice could not describe
-        /// what they did, which is the one job it has left once the resolver owns the number.
-        /// </remarks>
+        public static string Inventory(CharacterInventory inventory, ItemFile itemFile)
+        {
+            var text = new StringBuilder();
+            text.AppendLine(Money(inventory.Money));
+
+            if (inventory.Items.Count == 0)
+            {
+                text.AppendLine("Carrying: (nothing else)");
+            }
+            else
+            {
+                text.AppendLine("Carrying:");
+                foreach (var stack in inventory.Items)
+                {
+                    var def = SaveStore.FindItemById(itemFile, stack.ItemId);
+                    if (def is not null)
+                    {
+                        text.AppendLine(Item(def, stack.Quantity));
+                    }
+                }
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
         public static string Roll(DiceRoll roll, string? rollerName)
         {
             var who = rollerName is { Length: > 0 } ? rollerName : "Something";
@@ -97,24 +81,6 @@ namespace TerminalQuest.Mcp
             return $"{who} rolled {roll.Notation} for {roll.Reason}:{faces}{modifier} = {roll.Total}.";
         }
 
-        /// <summary>One memory, resolved, stamped with the turn it was formed on.</summary>
-        public static string Memory(Memory memory, string owner, string? playerName) =>
-            $"  [turn {memory.Turn}] {Placeholders.Resolve(memory.Text, owner, playerName)}";
-
-        /// <summary>
-        /// The secret block of a knowledge fetch: what this character is holding, then what the player
-        /// has already been told and anybody may now speak of. Empty when there is neither.
-        /// </summary>
-        /// <remarks>
-        /// Takes the two lists rather than the character, and that is the point of the signature: a
-        /// character carries dormant secrets, and this must be incapable of printing one. The only
-        /// producer of either argument is <see cref="SecretGate.Release"/>.
-        /// <para>
-        /// The shared block is worded as permission rather than as information, because the narrator's
-        /// question about a spent secret is not what it says - it may well have just said it - but
-        /// whether the thing still has to be handled carefully.
-        /// </para>
-        /// </remarks>
         public static string Secrets(
             IReadOnlyList<Secret> held,
             IReadOnlyList<Secret> common,
@@ -151,18 +117,9 @@ namespace TerminalQuest.Mcp
             return text.ToString().TrimEnd();
         }
 
-        /// <summary>
-        /// One secret: its name, the turn it was granted on, and what it is. The name comes first
-        /// because it is the handle the narrator has to say back when a line gives the secret away.
-        /// </summary>
         private static string Secret(Secret secret, string owner, string? playerName) =>
             $"  {secret.Name} - [turn {secret.Turn}] {Placeholders.Resolve(secret.Text, owner, playerName)}";
 
-        /// <summary>A location's headline: name and who is standing in it.</summary>
-        /// <param name="index">
-        /// Resolves the roster, which holds ids. The model must never see one, so this is required
-        /// rather than optional - see <see cref="WorldIndex"/>.
-        /// </param>
         public static string LocationLine(Location location, WorldIndex index)
         {
             var roster = Roster(location, index);
@@ -170,8 +127,11 @@ namespace TerminalQuest.Mcp
             return $"{location.Name} ({(roster.Length == 0 ? "nobody here" : roster)})";
         }
 
-        /// <summary>Full location record, history included.</summary>
-        public static string Location(Location location, WorldIndex index, string? playerName)
+        public static string Location(
+            Location location,
+            WorldIndex index,
+            ItemFile? itemFile = null,
+            IReadOnlyList<StoryEvent>? recentEvents = null)
         {
             var text = new StringBuilder();
             text.AppendLine(location.Name);
@@ -187,42 +147,41 @@ namespace TerminalQuest.Mcp
                 ? "Here now: nobody."
                 : $"Here now: {roster}.");
 
-            if (location.Events.Count == 0)
+            if (location.Items.Count > 0 && itemFile is not null)
             {
-                text.AppendLine("History: nothing has happened here yet.");
-            }
-            else
-            {
-                text.AppendLine("History:");
-                foreach (var entry in location.Events)
+                text.AppendLine("Items here:");
+                foreach (var stack in location.Items)
                 {
-                    text.AppendLine(LocationEvent(entry, location.Name, playerName));
+                    var def = SaveStore.FindItemById(itemFile, stack.ItemId);
+                    if (def is not null)
+                    {
+                        text.AppendLine(Item(def, stack.Quantity));
+                    }
+                }
+            }
+
+            if (recentEvents is { Count: > 0 })
+            {
+                text.AppendLine("Recent history here:");
+                foreach (var ev in recentEvents)
+                {
+                    text.AppendLine(StoryEvent(ev));
                 }
             }
 
             return text.ToString().TrimEnd();
         }
 
-        /// <summary>
-        /// Who is present, by name. Empty when nobody is - which an id that resolves to nobody also
-        /// counts as, since a reference to a character no longer on record describes an empty room
-        /// more truthfully than it describes anything else.
-        /// </summary>
         private static string Roster(Location location, WorldIndex index) =>
             string.Join(", ", index.NamesOf(location.CharacterIds));
 
-        /// <summary>One durable change to a place, resolved.</summary>
-        public static string LocationEvent(LocationEvent entry, string owner, string? playerName) =>
-            $"  [turn {entry.Turn}] {Placeholders.Resolve(entry.Text, owner, playerName)}";
-
-        /// <summary>The purse, worded so that nought reads as a fact rather than a missing value.</summary>
         public static string Money(int amount) =>
             amount == 0 ? "Money: none." : $"Money: {amount} coin.";
 
-        public static string Item(Item item) =>
+        public static string Item(ItemDefinition item, int quantity) =>
             item.Description.Length > 0
-                ? $"  {item.Name} x{item.Quantity} - {item.Description}"
-                : $"  {item.Name} x{item.Quantity}";
+                ? $"  {item.Name} x{quantity} - {item.Description}"
+                : $"  {item.Name} x{quantity}";
 
         public static string StoryEvent(StoryEvent entry)
         {
@@ -230,20 +189,6 @@ namespace TerminalQuest.Mcp
             return entry.Detail.Length > 0 ? $"{line} - {entry.Detail}" : line;
         }
 
-        /// <summary>
-        /// The recalled conversation, oldest last, and whose move it is.
-        /// </summary>
-        /// <remarks>
-        /// The only renderer here that resolves no placeholders, because there are none to resolve:
-        /// this is prose as it was shown, not a record written with <c>{This}</c> in it. Markup is left
-        /// alone for the same reason - the narrator wrote those tags and reads them back as its own
-        /// hand, which is most of what makes a recalled scene worth having.
-        /// <para>
-        /// The closing line is the point of the whole call as much as the prose is. A resumed session
-        /// that left the narrator mid-sentence has a player line nobody answered, and without being
-        /// told so the narrator opens a fresh scene over the top of it.
-        /// </para>
-        /// </remarks>
         public static string Transcript(IReadOnlyList<TranscriptEntry> entries)
         {
             ArgumentNullException.ThrowIfNull(entries);
@@ -273,7 +218,6 @@ namespace TerminalQuest.Mcp
             return text.ToString().TrimEnd();
         }
 
-        /// <summary>The lowercase wire spelling of a kind, matching what the JSON holds.</summary>
         public static string Kind(CharacterKind kind) => kind == CharacterKind.Player ? "player" : "npc";
     }
 }

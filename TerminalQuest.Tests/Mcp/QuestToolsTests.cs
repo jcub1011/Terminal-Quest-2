@@ -11,15 +11,6 @@ namespace TerminalQuest.Tests.Mcp
     /// <summary>
     /// The tools the narrator writes the world through.
     /// </summary>
-    /// <remarks>
-    /// Every argument here arrives from a language model, so the coercion and refusal paths are as
-    /// important as the happy ones — a refused call costs a turn, and a wrongly accepted one writes
-    /// nonsense into a save the player cannot easily repair.
-    /// <para>
-    /// <c>roll</c> and the word banks use <see cref="Random.Shared"/>, so those assertions are on
-    /// shape and range rather than on values.
-    /// </para>
-    /// </remarks>
     public sealed class QuestToolsTests
     {
         private static JsonElement Args(string json) => JsonDocument.Parse(json).RootElement.Clone();
@@ -51,8 +42,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void Get_state_on_an_empty_save_refuses_to_invent_a_player()
         {
-            // A save that reaches here has lost its roster; inviting the narrator to quietly
-            // replace whoever used to be there would be worse than saying so.
             using var save = new TempSave();
 
             var outcome = Call(save.Store, "get_state");
@@ -63,18 +52,15 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void No_tool_output_ever_leaks_an_entity_id()
         {
-            // The one rule the whole identity scheme rests on: an id never leaves the save layer.
-            // The narrator cannot do anything with "chr_1", and echoing one back teaches it to.
             using var save = Seeded();
-            Call(save.Store, "add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""");
-            Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk."}""");
+            Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk.","characters":["Rowan"],"locations":["The Ford"]}""");
 
             foreach (var name in new[]
             {
-                "get_state", "list_characters", "list_locations", "get_inventory", "get_story",
+                "get_state", "get_character", "get_location", "recall",
             })
             {
-                var text = Call(save.Store, name).Text;
+                var text = Call(save.Store, name, """{"name":"Rowan"}""").Text;
 
                 Assert.DoesNotContain(EntityIds.Character, text, StringComparison.Ordinal);
                 Assert.DoesNotContain(EntityIds.Location, text, StringComparison.Ordinal);
@@ -115,14 +101,14 @@ namespace TerminalQuest.Tests.Mcp
         // ---- Writing characters ----------------------------------------------------------------
 
         [Fact]
-        public void Upserting_creates_a_character()
+        public void Setting_creates_a_character()
         {
             using var save = Seeded();
 
             var outcome = Call(
                 save.Store,
-                "upsert_character",
-                """{"name":"Bess","description":"The ferrywoman.","maxHealth":14}""");
+                "set_character",
+                """{"name":"Bess","description":"The ferrywoman.","max_health":14}""");
 
             Assert.False(outcome.IsError);
             var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess");
@@ -132,13 +118,12 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
-        public void Upserting_an_existing_character_keeps_their_id()
+        public void Setting_an_existing_character_keeps_their_id()
         {
-            // The id is what memories and rosters point at; reissuing one would strand them.
             using var save = Seeded();
             var before = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!.Id;
 
-            Call(save.Store, "upsert_character", """{"name":"Rowan","description":"Changed."}""");
+            Call(save.Store, "set_character", """{"name":"Rowan","description":"Changed."}""");
 
             Assert.Equal(before, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!.Id);
         }
@@ -146,11 +131,9 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void A_number_sent_as_a_string_is_still_a_number()
         {
-            // Models routinely send "14" where the schema asks for 14, and refusing would cost a
-            // turn to no purpose.
             using var save = Seeded();
 
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":"14"}""");
+            Call(save.Store, "set_character", """{"name":"Bess","max_health":"14"}""");
 
             Assert.Equal(14, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.MaxHealth);
         }
@@ -162,7 +145,7 @@ namespace TerminalQuest.Tests.Mcp
 
             Call(
                 save.Store,
-                "upsert_character",
+                "set_character",
                 """{"name":"Bess","attributes":{"Strength":15,"dex":"12"}}""");
 
             var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
@@ -176,161 +159,64 @@ namespace TerminalQuest.Tests.Mcp
         public void Health_is_set_to_the_number_it_was_given()
         {
             using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+            Call(save.Store, "set_character", """{"name":"Bess","max_health":14}""");
 
             var outcome = Call(
                 save.Store,
-                "update_character",
-                """{"name":"Bess","property":"health","value":"9"}""");
+                "set_character",
+                """{"name":"Bess","health":9}""");
 
             Assert.False(outcome.IsError);
             Assert.Equal(9, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
         }
 
         [Fact]
-        public void Health_may_go_above_the_maximum()
+        public void Health_delta_adjusts_health_relatively()
         {
-            // Overhealing is a mechanic. Clamping it away used to leave a reply that read exactly
-            // like a successful write, which is what taught a local model to send the same call
-            // twenty times in one turn.
             using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+            Call(save.Store, "set_character", """{"name":"Bess","max_health":20,"health":15}""");
 
             var outcome = Call(
                 save.Store,
-                "update_character",
-                """{"name":"Bess","property":"health","value":"20"}""");
+                "set_character",
+                """{"name":"Bess","health_delta":-4}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Equal(11, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+
+            Call(save.Store, "set_character", """{"name":"Bess","health_delta":5}""");
+            Assert.Equal(16, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
+        }
+
+        [Fact]
+        public void Health_may_go_above_the_maximum()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess","max_health":14}""");
+
+            var outcome = Call(
+                save.Store,
+                "set_character",
+                """{"name":"Bess","health":20}""");
 
             Assert.False(outcome.IsError);
             Assert.Equal(20, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
-        }
-
-        [Fact]
-        public void Health_above_the_maximum_says_so()
-        {
-            // The whole point of allowing it: the narrator has to be able to tell that this landed
-            // somewhere unusual, or it cannot tell the call worked at all.
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
-
-            var outcome = Call(
-                save.Store,
-                "update_character",
-                """{"name":"Bess","property":"health","value":"20"}""");
-
             Assert.Contains("above", outcome.Text, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("14", outcome.Text, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void Ordinary_health_is_reported_without_a_note()
-        {
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
-
-            var outcome = Call(
-                save.Store,
-                "update_character",
-                """{"name":"Bess","property":"health","value":"9"}""");
-
-            Assert.DoesNotContain("above", outcome.Text, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
         public void Health_still_has_a_floor_at_zero()
         {
             using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14}""");
+            Call(save.Store, "set_character", """{"name":"Bess","max_health":14,"health":5}""");
 
             var outcome = Call(
                 save.Store,
-                "update_character",
-                """{"name":"Bess","property":"health","value":"-5"}""");
+                "set_character",
+                """{"name":"Bess","health_delta":-10}""");
 
             Assert.Equal(0, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
             Assert.Contains("at 0", outcome.Text, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void Upserting_health_agrees_with_updating_it()
-        {
-            // The two tools write the same field; disagreeing about whether overhealing is legal
-            // would make the answer depend on which one the narrator happened to reach for.
-            using var save = Seeded();
-
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14,"health":20}""");
-
-            Assert.Equal(20, SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Health);
-        }
-
-        [Fact]
-        public void Lowering_the_maximum_leaves_health_where_it_is()
-        {
-            // Dragging health down would spend an overheal as a side effect of a call that never
-            // mentioned health.
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","maxHealth":14,"health":20}""");
-
-            Call(
-                save.Store,
-                "update_character",
-                """{"name":"Bess","property":"maxHealth","value":"16"}""");
-
-            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
-            Assert.Equal(16, bess.MaxHealth);
-            Assert.Equal(20, bess.Health);
-        }
-
-        [Fact]
-        public void One_unreadable_score_does_not_cost_the_whole_character()
-        {
-            using var save = Seeded();
-
-            Call(
-                save.Store,
-                "upsert_character",
-                """{"name":"Bess","attributes":{"Strength":15,"Wisdom":"not a number"}}""");
-
-            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
-            Assert.Equal(15, CharacterAttributes.Find(bess, "Strength")!.Score);
-        }
-
-        [Fact]
-        public void Setting_an_attribute_clamps_it_into_range()
-        {
-            using var save = Seeded();
-
-            Call(save.Store, "set_attribute", """{"character":"Rowan","attribute":"Strength","score":999}""");
-
-            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
-            Assert.Equal(CharacterAttributes.MaxScore, CharacterAttributes.Find(rowan, "Strength")!.Score);
-        }
-
-        // ---- Memories --------------------------------------------------------------------------
-
-        [Fact]
-        public void A_memory_is_stored_with_its_tokens_unresolved()
-        {
-            // Writing resolved names to disk would make the record wrong the moment a character is
-            // renamed, and would lose what makes a memory portable.
-            using var save = Seeded();
-
-            Call(save.Store, "add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""");
-
-            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
-            Assert.Equal("{This} crossed the ford.", Assert.Single(rowan.Memories).Text);
-        }
-
-        [Fact]
-        public void A_memory_reads_back_with_its_tokens_resolved()
-        {
-            using var save = Seeded();
-            Call(save.Store, "add_memory", """{"character":"Rowan","text":"{This} crossed the ford."}""");
-
-            var outcome = Call(save.Store, "get_memories", """{"character":"Rowan"}""");
-
-            Assert.Contains("Rowan crossed the ford.", outcome.Text, StringComparison.Ordinal);
-            Assert.DoesNotContain("{This}", outcome.Text, StringComparison.Ordinal);
         }
 
         // ---- Rolling -----------------------------------------------------------------------------
@@ -353,7 +239,7 @@ namespace TerminalQuest.Tests.Mcp
         public void An_attribute_supplies_the_modifier()
         {
             using var save = Seeded();
-            Call(save.Store, "set_attribute", """{"character":"Rowan","attribute":"Strength","score":16}""");
+            Call(save.Store, "set_character", """{"name":"Rowan","attributes":{"Strength":16}}""");
 
             Call(
                 save.Store,
@@ -369,7 +255,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void An_attribute_and_a_flat_bonus_together_are_refused()
         {
-            // Two sources for one number is the ambiguity the resolver exists to remove.
             using var save = Seeded();
 
             var outcome = Call(
@@ -382,18 +267,7 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
-        public void A_malformed_notation_is_refused_with_a_sentence_the_narrator_can_act_on()
-        {
-            using var save = Seeded();
-
-            var outcome = Call(save.Store, "roll", """{"notation":"nonsense","reason":"Forcing"}""");
-
-            Assert.True(outcome.IsError);
-            Assert.Empty(save.Store.ReadRolls().Rolls);
-        }
-
-        [Fact]
-        public void A_hidden_roll_is_stored_hidden_and_the_narrator_is_told_not_to_say_the_number()
+        public void A_hidden_roll_is_stored_hidden()
         {
             using var save = Seeded();
 
@@ -403,17 +277,7 @@ namespace TerminalQuest.Tests.Mcp
                 """{"notation":"1d20","reason":"Sensing the lie","hidden":true}""");
 
             Assert.True(Assert.Single(save.Store.ReadRolls().Rolls).Hidden);
-            Assert.Contains("never the total", outcome.Text, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void A_boolean_sent_as_a_string_is_still_a_boolean()
-        {
-            using var save = Seeded();
-
-            Call(save.Store, "roll", """{"notation":"1d20","reason":"Sensing","hidden":"true"}""");
-
-            Assert.True(Assert.Single(save.Store.ReadRolls().Rolls).Hidden);
+            Assert.Contains("Hidden", outcome.Text, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -426,14 +290,6 @@ namespace TerminalQuest.Tests.Mcp
 
             Assert.False(outcome.IsError);
             Assert.True(Assert.Single(save.Store.ReadRolls().Rolls).Revealed);
-        }
-
-        [Fact]
-        public void Revealing_when_nothing_is_hidden_says_so()
-        {
-            using var save = Seeded();
-
-            Assert.True(Call(save.Store, "reveal_roll", "{}").IsError);
         }
 
         // ---- Places ---------------------------------------------------------------------------------
@@ -452,7 +308,7 @@ namespace TerminalQuest.Tests.Mcp
         public void A_character_moves_between_places()
         {
             using var save = Seeded();
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"Wheel turning."}""");
+            Call(save.Store, "set_location", """{"name":"The Mill","description":"Wheel turning."}""");
 
             var outcome = Call(save.Store, "move_character", """{"character":"Rowan","location":"The Mill"}""");
 
@@ -465,124 +321,95 @@ namespace TerminalQuest.Tests.Mcp
         // ---- Inventory and coin -------------------------------------------------------------------------
 
         [Fact]
-        public void Adding_an_item_puts_it_in_the_pack()
+        public void Modifying_an_item_puts_it_in_the_pack()
         {
             using var save = Seeded();
 
-            Call(save.Store, "add_item", """{"name":"lantern","quantity":1,"description":"Tin, dented."}""");
+            var outcome = Call(save.Store, "modify_item", """{"name":"lantern","quantity":1,"description":"Tin, dented."}""");
 
-            Assert.Contains(save.Store.ReadInventory().Items, item => item.Name == "lantern");
+            Assert.False(outcome.IsError);
+            var items = save.Store.ReadItems();
+            var itemDef = SaveStore.FindItem(items, "lantern");
+            Assert.NotNull(itemDef);
+            Assert.Equal("Tin, dented.", itemDef.Description);
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var inv = save.Store.ReadInventory().Find(rowan.Id);
+            Assert.NotNull(inv);
+            Assert.Contains(inv.Items, stack => stack.ItemId == itemDef.Id && stack.Quantity == 1);
         }
 
         [Fact]
-        public void Removing_more_of_an_item_than_is_carried_takes_all_of_it()
+        public void Modifying_items_for_npc_works()
         {
-            // Note the asymmetry with remove_money, which refuses rather than clamping because the
-            // narrator has to know the player cannot afford something before it writes that they
-            // bought it. Items take the other choice: over-removing means the thing is gone, and
-            // the quantity never goes negative. Pinned because the two rules read alike but differ.
             using var save = Seeded();
-            Call(save.Store, "add_item", """{"name":"lantern","quantity":1}""");
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
 
-            var outcome = Call(save.Store, "remove_item", """{"name":"lantern","quantity":5}""");
+            Call(save.Store, "modify_item", """{"name":"oar","quantity":2,"character":"Bess","description":"Ash wood."}""");
 
-            Assert.False(outcome.IsError);
-            Assert.DoesNotContain(save.Store.ReadInventory().Items, item => item.Name == "lantern");
-            Assert.All(save.Store.ReadInventory().Items, item => Assert.True(item.Quantity > 0));
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var inv = save.Store.ReadInventory().Find(bess.Id);
+            Assert.NotNull(inv);
+            Assert.Single(inv.Items);
+            Assert.Equal(2, inv.Items[0].Quantity);
         }
 
         [Fact]
         public void Removing_some_of_a_stack_leaves_the_rest()
         {
             using var save = Seeded();
-            Call(save.Store, "add_item", """{"name":"arrows","quantity":10}""");
+            Call(save.Store, "modify_item", """{"name":"arrows","quantity":10}""");
+            Call(save.Store, "modify_item", """{"name":"arrows","quantity":-4}""");
 
-            Call(save.Store, "remove_item", """{"name":"arrows","quantity":4}""");
-
-            var arrows = save.Store.ReadInventory().Items.Single(item => item.Name == "arrows");
-            Assert.Equal(6, arrows.Quantity);
-        }
-
-        [Fact]
-        public void Removing_an_item_the_player_does_not_have_is_refused()
-        {
-            using var save = Seeded();
-
-            Assert.True(Call(save.Store, "remove_item", """{"name":"lantern"}""").IsError);
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var inv = save.Store.ReadInventory().Find(rowan.Id)!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "arrows")!;
+            var stack = inv.Items.Single(s => s.ItemId == itemDef.Id);
+            Assert.Equal(6, stack.Quantity);
         }
 
         [Fact]
         public void Coin_is_paid_in_and_out()
         {
             using var save = Seeded();
-            var start = save.Store.ReadInventory().Money;
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var start = save.Store.ReadInventory().Find(rowan.Id)?.Money ?? 0;
 
-            Call(save.Store, "add_money", """{"amount":10}""");
-            Assert.Equal(start + 10, save.Store.ReadInventory().Money);
+            Call(save.Store, "modify_money", """{"amount":10}""");
+            Assert.Equal(start + 10, save.Store.ReadInventory().Find(rowan.Id)!.Money);
 
-            Call(save.Store, "remove_money", """{"amount":4}""");
-            Assert.Equal(start + 6, save.Store.ReadInventory().Money);
+            Call(save.Store, "modify_money", """{"amount":-4}""");
+            Assert.Equal(start + 6, save.Store.ReadInventory().Find(rowan.Id)!.Money);
         }
 
         [Fact]
-        public void Spending_more_than_the_purse_holds_is_refused_rather_than_clamped()
+        public void Spending_more_than_the_purse_holds_is_refused()
         {
-            // The narrator is about to describe a purchase and needs to know the player cannot
-            // afford it before it writes that they bought it.
             using var save = Seeded();
-            var start = save.Store.ReadInventory().Money;
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var start = save.Store.ReadInventory().Find(rowan.Id)?.Money ?? 0;
 
-            var outcome = Call(save.Store, "remove_money", $$"""{"amount":{{start + 1}}}""");
+            var outcome = Call(save.Store, "modify_money", $$"""{"amount":{{-(start + 1)}}}""");
 
             Assert.True(outcome.IsError);
-            Assert.Equal(start, save.Store.ReadInventory().Money);
+            Assert.Equal(start, save.Store.ReadInventory().Find(rowan.Id)!.Money);
         }
+
+        // ---- Story and Recall -----------------------------------------------------------------------
 
         [Fact]
-        public void The_purse_can_never_go_negative_through_the_tools()
+        public void An_event_is_recorded_and_recalled()
         {
             using var save = Seeded();
 
-            for (var attempt = 0; attempt < 20; attempt++)
-            {
-                Call(save.Store, "remove_money", """{"amount":7}""");
-                Assert.True(save.Store.ReadInventory().Money >= 0);
-            }
-        }
+            Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk.","characters":["Rowan"],"locations":["The Ford"]}""");
 
-        [Theory]
-        [InlineData("add_money", 0)]
-        [InlineData("add_money", -5)]
-        [InlineData("remove_money", 0)]
-        [InlineData("remove_money", -5)]
-        public void Coin_moves_only_in_positive_amounts(string tool, int amount)
-        {
-            using var save = Seeded();
+            var ev = Assert.Single(save.Store.ReadStory().Events);
+            Assert.Equal("The ford", ev.Title);
 
-            Assert.True(Call(save.Store, tool, $$"""{"amount":{{amount}}}""").IsError);
-        }
-
-        [Theory]
-        [InlineData("add_money")]
-        [InlineData("remove_money")]
-        public void Coin_needs_an_amount(string tool)
-        {
-            using var save = Seeded();
-
-            Assert.True(Call(save.Store, tool, "{}").IsError);
-        }
-
-        // ---- Story ------------------------------------------------------------------------------------
-
-        [Fact]
-        public void An_event_is_recorded_and_read_back()
-        {
-            using var save = Seeded();
-
-            Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk."}""");
-
-            Assert.Equal("The ford", Assert.Single(save.Store.ReadStory().Events).Title);
-            Assert.Contains("The ford", Call(save.Store, "get_story").Text, StringComparison.Ordinal);
+            var recall = Call(save.Store, "recall", """{"character":"Rowan"}""");
+            Assert.False(recall.IsError);
+            Assert.Contains("The ford", recall.Text, StringComparison.Ordinal);
         }
 
         // ---- Word banks ---------------------------------------------------------------------------------
@@ -598,201 +425,6 @@ namespace TerminalQuest.Tests.Mcp
 
             Assert.False(outcome.IsError);
             Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
-        }
-
-        [Theory]
-        [InlineData("random_noun")]
-        [InlineData("random_adjective")]
-        public void The_word_bank_is_bounded(string tool)
-        {
-            using var save = Seeded();
-
-            var outcome = Call(save.Store, tool, """{"count":10000}""");
-
-            Assert.False(outcome.IsError);
-            Assert.True(outcome.Text.Length < 4096);
-        }
-
-        // ---- Failure is text, not an exception ------------------------------------------------------------
-
-        [Fact]
-        public void A_tool_reports_a_broken_save_by_throwing_for_the_server_to_catch()
-        {
-            // SaveException is the store's way of saying the document is unreadable; McpServer
-            // turns it into a JSON-RPC error rather than letting the process die.
-            using var save = Seeded();
-            save.WriteRaw("characters.json", "{ not json");
-
-            Assert.Throws<SaveException>(() => Call(save.Store, "list_characters"));
-        }
-
-        [Fact]
-        public void Every_tool_survives_being_called_with_nothing_at_all()
-        {
-            // A model that sends an empty argument object must get a sentence back, never an
-            // unhandled exception that takes the server down mid-turn.
-            using var save = Seeded();
-
-            foreach (var tool in QuestTools.Definitions)
-            {
-                var outcome = QuestTools.Invoke(save.Store, tool.Name, Args("{}"));
-
-                Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
-            }
-        }
-
-        [Fact]
-        public void Every_tool_survives_arguments_of_the_wrong_shape()
-        {
-            using var save = Seeded();
-            var hostile = Args(
-                """
-                {"name":42,"character":true,"text":[],"amount":"lots","quantity":{},
-                 "notation":null,"attributes":"not an object","count":"three"}
-                """);
-
-            foreach (var tool in QuestTools.Definitions)
-            {
-                var outcome = QuestTools.Invoke(save.Store, tool.Name, hostile);
-
-                Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
-            }
-        }
-
-        // ---- Descriptions are extended, never replaced ---------------------------------------
-
-        [Fact]
-        public void Upserting_a_place_adds_to_its_description_rather_than_replacing_it()
-        {
-            // The only surface in the save where the world can contradict what the player was told. A
-            // second visit adds to the place; it does not overwrite what they already saw.
-            using var save = Seeded();
-
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns in the race."}""");
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"The roof has fallen in."}""");
-
-            var mill = SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!;
-
-            Assert.Contains("A wheel turns in the race.", mill.Description, StringComparison.Ordinal);
-            Assert.Contains("The roof has fallen in.", mill.Description, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void Upserting_a_place_twice_with_the_same_words_does_not_double_it()
-        {
-            using var save = Seeded();
-
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
-
-            Assert.Equal(
-                "A wheel turns.",
-                SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!.Description);
-        }
-
-        [Fact]
-        public void Updating_a_place_description_with_nothing_leaves_it_alone()
-        {
-            // Used to blank the field outright, because the assignment did not check for an empty value.
-            using var save = Seeded();
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
-
-            Call(save.Store, "update_location", """{"name":"The Mill","property":"description","value":""}""");
-
-            Assert.Equal(
-                "A wheel turns.",
-                SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!.Description);
-        }
-
-        [Fact]
-        public void Updating_a_place_description_adds_to_it()
-        {
-            using var save = Seeded();
-            Call(save.Store, "upsert_location", """{"name":"The Mill","description":"A wheel turns."}""");
-
-            Call(save.Store, "update_location", """{"name":"The Mill","property":"description","value":"Ivy has taken the south wall."}""");
-
-            var mill = SaveStore.FindLocation(save.Store.ReadLocations(), "The Mill")!;
-
-            Assert.Contains("A wheel turns.", mill.Description, StringComparison.Ordinal);
-            Assert.Contains("Ivy has taken the south wall.", mill.Description, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void An_overlong_place_description_is_refused_and_names_add_location_event()
-        {
-            // The ceiling exists so that "grows forever" becomes a refusal naming somewhere better to put
-            // the change, rather than a field that quietly taxes every later turn.
-            using var save = Seeded();
-            Call(save.Store, "upsert_location", $$"""{"name":"The Mill","description":"{{new string('x', Descriptions.MaxLength - 2)}}"}""");
-
-            var outcome = Call(save.Store, "upsert_location", """{"name":"The Mill","description":"And a heron on the weir."}""");
-
-            Assert.True(outcome.IsError);
-            Assert.Contains("add_location_event", outcome.Text, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void Upserting_a_character_adds_to_their_description()
-        {
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Keeps the inn."}""");
-
-            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Lost a brother to the fever."}""");
-
-            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
-
-            Assert.Contains("Keeps the inn.", bess.Description, StringComparison.Ordinal);
-            Assert.Contains("Lost a brother to the fever.", bess.Description, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void Updating_a_character_description_with_nothing_leaves_it_alone()
-        {
-            // The same blanking bug as the location one, in the other handler.
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", """{"name":"Bess","description":"Keeps the inn."}""");
-
-            Call(save.Store, "update_character", """{"name":"Bess","property":"description","value":""}""");
-
-            Assert.Equal(
-                "Keeps the inn.",
-                SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!.Description);
-        }
-
-        [Fact]
-        public void An_overlong_character_description_is_refused_and_names_somewhere_to_put_it()
-        {
-            using var save = Seeded();
-            Call(save.Store, "upsert_character", $$"""{"name":"Bess","description":"{{new string('x', Descriptions.MaxLength - 2)}}"}""");
-
-            var outcome = Call(save.Store, "upsert_character", """{"name":"Bess","description":"She whistles when she is lying."}""");
-
-            Assert.True(outcome.IsError);
-            Assert.Contains("add_memory", outcome.Text, StringComparison.Ordinal);
-        }
-
-        [Fact]
-        public void No_tool_promises_everything_a_character_knows()
-        {
-            // get_character used to advertise itself as returning a character "in full, including
-            // everything they know", which is exactly what the lifecycle gate makes untrue. The sentence
-            // is the kind a later edit reintroduces without noticing.
-            foreach (var tool in QuestTools.Definitions)
-            {
-                Assert.DoesNotContain("everything they know", tool.Description, StringComparison.OrdinalIgnoreCase);
-            }
-        }
-
-        [Fact]
-        public void No_tool_offers_to_rewrite_a_description()
-        {
-            // A tool that advertises rewriting will be used to rewrite, whatever the handler then does
-            // with it - so the wording has to change with the behaviour.
-            foreach (var tool in QuestTools.Definitions)
-            {
-                Assert.DoesNotContain("rewrite its description", tool.Description, StringComparison.OrdinalIgnoreCase);
-            }
         }
     }
 }

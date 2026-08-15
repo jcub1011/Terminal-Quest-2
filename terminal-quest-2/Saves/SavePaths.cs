@@ -382,7 +382,6 @@ namespace TerminalQuest.Saves
                 player.Health = player.MaxHealth;
             }
 
-            player.Memories.Clear();
             player.Secrets.Clear();
 
             characters.Characters.Clear();
@@ -390,22 +389,30 @@ namespace TerminalQuest.Saves
             characters.NextId = 1;
             store.WriteCharacters(characters);
 
-            // 2. Reset inventory
+            // 2. Reset inventory and items
+            var itemFile = new ItemFile();
             var inventory = new InventoryFile();
+            var playerInv = inventory.GetOrCreate(player.Id);
             if (template is not null)
             {
-                inventory.Money = template.StartingMoney;
+                playerInv.Money = template.StartingMoney;
                 foreach (var item in template.StartingItems)
                 {
-                    inventory.Items.Add(new Item
+                    var itemDef = new ItemDefinition
                     {
-                        Id = inventory.TakeId(),
+                        Id = itemFile.TakeId(),
                         Name = item.Name,
-                        Quantity = item.Quantity,
                         Description = item.Description,
+                    };
+                    itemFile.Items.Add(itemDef);
+                    playerInv.Items.Add(new ItemStack
+                    {
+                        ItemId = itemDef.Id,
+                        Quantity = item.Quantity,
                     });
                 }
             }
+            store.WriteItems(itemFile);
             store.WriteInventory(inventory);
 
             // 3. Reset locations
@@ -418,7 +425,6 @@ namespace TerminalQuest.Saves
                     Name = loc1.Name,
                     Description = string.Empty,
                     CharacterIds = [player.Id],
-                    Events = [],
                 };
                 resetLocations.Locations.Add(start);
                 resetLocations.NextId = 1;

@@ -38,7 +38,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void The_rendered_kind_matches_the_wire_spelling()
         {
-            // The same strings the JSON holds and the tool schemas advertise.
             Assert.Equal("player", QuestRender.Kind(CharacterKind.Player));
             Assert.Equal("npc", QuestRender.Kind(CharacterKind.Npc));
         }
@@ -46,8 +45,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void Attributes_show_the_modifier_beside_the_score()
         {
-            // A model that can see "Strength 16 (+3)" is far less tempted to invent a bonus than
-            // one handed a bare 16.
             var character = Rowan();
             CharacterAttributes.Set(character, "Strength", 16);
 
@@ -59,7 +56,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void Attributes_are_spelled_out_in_full()
         {
-            // A shape the model never sees is a shape it never guesses wrong.
             var line = QuestRender.Attributes(Rowan());
 
             Assert.Contains("Constitution", line, StringComparison.Ordinal);
@@ -77,21 +73,21 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
-        public void A_full_character_includes_memories_resolved()
+        public void A_full_character_includes_inventory()
         {
             var character = Rowan();
-            character.Memories.Add(new Memory { Id = 1, Turn = 4, Text = "{This} met {Player}." });
+            var itemFile = new ItemFile();
+            var itemDef = new ItemDefinition { Id = "itm_1", Name = "dagger", Description = "Sharp iron." };
+            itemFile.Items.Add(itemDef);
 
-            var text = QuestRender.Character(character, "Rowan");
+            var inv = new CharacterInventory { CharacterId = character.Id, Money = 15 };
+            inv.Items.Add(new ItemStack { ItemId = "itm_1", Quantity = 1 });
 
-            Assert.Contains("[turn 4] Rowan met Rowan.", text, StringComparison.Ordinal);
-            Assert.DoesNotContain("{This}", text, StringComparison.Ordinal);
-        }
+            var text = QuestRender.Character(character, inv, itemFile);
 
-        [Fact]
-        public void A_character_with_nothing_remembered_says_so()
-        {
-            Assert.Contains("Memories: none yet.", QuestRender.Character(Rowan(), "Rowan"), StringComparison.Ordinal);
+            Assert.Contains("Rowan (player)", text, StringComparison.Ordinal);
+            Assert.Contains("Money: 15 coin.", text, StringComparison.Ordinal);
+            Assert.Contains("dagger x1 - Sharp iron.", text, StringComparison.Ordinal);
         }
 
         // ---- Rolls -----------------------------------------------------------------------------
@@ -139,8 +135,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void The_narrator_sees_the_total_of_a_hidden_roll()
         {
-            // Hiding governs what the *player* is told. A narrator that could not see its own dice
-            // could not describe what they did.
             var roll = new DiceRoll
             {
                 Notation = "1d20",
@@ -179,8 +173,6 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void A_roster_never_shows_an_id()
         {
-            // A reference to a character no longer on record describes an empty room more truthfully
-            // than it describes anything else — and the model must never see "chr_9".
             var location = new Location { Id = "loc_1", Name = "The Ford" };
             location.CharacterIds.Add("chr_9");
 
@@ -191,26 +183,24 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
-        public void A_full_location_resolves_its_history()
+        public void A_full_location_resolves_its_history_and_items()
         {
             var location = new Location { Id = "loc_1", Name = "The Ford", Description = "Shallow." };
-            location.Events.Add(new LocationEvent { Id = 1, Turn = 3, Text = "{This} flooded." });
+            var itemFile = new ItemFile();
+            var itemDef = new ItemDefinition { Id = "itm_1", Name = "lantern", Description = "Tin." };
+            itemFile.Items.Add(itemDef);
+            location.Items.Add(new ItemStack { ItemId = "itm_1", Quantity = 1 });
 
-            var text = QuestRender.Location(location, WorldIndex.Build(), "Rowan");
+            var recentEvents = new List<StoryEvent>
+            {
+                new() { Turn = 3, Title = "The flood", Detail = "The river rose." }
+            };
 
-            Assert.Contains("[turn 3] The Ford flooded.", text, StringComparison.Ordinal);
-            Assert.DoesNotContain("{This}", text, StringComparison.Ordinal);
-        }
+            var text = QuestRender.Location(location, WorldIndex.Build(), itemFile, recentEvents);
 
-        [Fact]
-        public void A_location_nothing_has_happened_in_says_so()
-        {
-            var location = new Location { Id = "loc_1", Name = "The Ford" };
-
-            var text = QuestRender.Location(location, WorldIndex.Build(), null);
-
-            Assert.Contains("nothing has happened here yet", text, StringComparison.Ordinal);
-            Assert.Contains("Here now: nobody.", text, StringComparison.Ordinal);
+            Assert.Contains("The Ford", text, StringComparison.Ordinal);
+            Assert.Contains("lantern x1 - Tin.", text, StringComparison.Ordinal);
+            Assert.Contains("[turn 3] The flood - The river rose.", text, StringComparison.Ordinal);
         }
 
         // ---- Odds and ends -----------------------------------------------------------------------
@@ -227,11 +217,11 @@ namespace TerminalQuest.Tests.Mcp
         {
             Assert.Equal(
                 "  rope x2 - Hemp, knotted.",
-                QuestRender.Item(new Item { Name = "rope", Quantity = 2, Description = "Hemp, knotted." }));
+                QuestRender.Item(new ItemDefinition { Name = "rope", Description = "Hemp, knotted." }, 2));
 
             Assert.Equal(
                 "  rope x2",
-                QuestRender.Item(new Item { Name = "rope", Quantity = 2 }));
+                QuestRender.Item(new ItemDefinition { Name = "rope" }, 2));
         }
 
         [Fact]
@@ -244,14 +234,6 @@ namespace TerminalQuest.Tests.Mcp
             Assert.Equal(
                 "  [turn 6] The ford",
                 QuestRender.StoryEvent(new StoryEvent { Turn = 6, Title = "The ford" }));
-        }
-
-        [Fact]
-        public void A_memory_is_stamped_with_the_turn_it_was_formed_on()
-        {
-            var memory = new Memory { Turn = 9, Text = "{Player} paid the toll." };
-
-            Assert.Equal("  [turn 9] Tam paid the toll.", QuestRender.Memory(memory, "Rowan", "Tam"));
         }
     }
 }
