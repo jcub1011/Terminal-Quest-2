@@ -9,8 +9,11 @@ namespace TerminalQuest.Mcp
     /// </summary>
     internal static class QuestRender
     {
-        public static string CharacterLine(Character character) =>
-            $"{character.Name} ({Kind(character.Kind)}) - HP {character.Health}/{character.MaxHealth}";
+        public static string CharacterLine(Character character)
+        {
+            var idPart = character.Id.Length > 0 ? $"{character.Id}, " : string.Empty;
+            return $"{character.Name} ({idPart}{Kind(character.Kind)}) - HP {character.Health}/{character.MaxHealth}";
+        }
 
         public static string Character(
             Character character,
@@ -127,8 +130,9 @@ namespace TerminalQuest.Mcp
         public static string LocationLine(Location location, WorldIndex index)
         {
             var roster = Roster(location, index);
+            var idPart = location.Id.Length > 0 ? $" ({location.Id})" : string.Empty;
 
-            return $"{location.Name} ({(roster.Length == 0 ? "nobody here" : roster)})";
+            return $"{location.Name}{idPart} ({(roster.Length == 0 ? "nobody here" : roster)})";
         }
 
         public static string Location(
@@ -138,7 +142,8 @@ namespace TerminalQuest.Mcp
             IReadOnlyList<StoryEvent>? recentEvents = null)
         {
             var text = new StringBuilder();
-            text.AppendLine(location.Name);
+            var idPart = location.Id.Length > 0 ? $" ({location.Id})" : string.Empty;
+            text.AppendLine($"{location.Name}{idPart}");
 
             if (location.Description.Length > 0)
             {
@@ -182,10 +187,13 @@ namespace TerminalQuest.Mcp
         public static string Money(int amount) =>
             amount == 0 ? "Money: none." : $"Money: {amount} coin.";
 
-        public static string Item(ItemDefinition item, int quantity) =>
-            item.Description.Length > 0
-                ? $"  {item.Name} x{quantity} - {item.Description}"
-                : $"  {item.Name} x{quantity}";
+        public static string Item(ItemDefinition item, int quantity)
+        {
+            var idPart = item.Id.Length > 0 ? $" ({item.Id})" : string.Empty;
+            return item.Description.Length > 0
+                ? $"  {item.Name}{idPart} x{quantity} - {item.Description}"
+                : $"  {item.Name}{idPart} x{quantity}";
+        }
 
         public static string StoryEvent(StoryEvent entry)
         {

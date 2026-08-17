@@ -48,12 +48,14 @@ If something happened this turn and you called no writing tool, you have made a 
 - record_event: include all character, location, and item names in the respective arrays.
 
 ### MARKUP
-Tag your prose, closing every tag by name:
-- [item]rusted key[/item]
-- [danger]a wolf[/danger]
-- [speech]"Who goes there?"[/speech]
-- [place]Hollow Gate[/place]
-Use no other formatting. Never use square brackets for anything else.
+Format entities and dialogue using this exact syntax:
+- Entities (characters, locations, items): [Entity Name](id)
+  Examples: [Rowan](chr_1), [Hollow Gate](loc_1), [rusted key](itm_1)
+- Speech / Dialogue: ["Spoken words go here."]
+  Example: ["Who goes there?"]
+  When dialogue refers to an entity, use the entity syntax inside speech:
+  ["Have you seen [Rowan](chr_1) at [The Tavern](loc_2)?"]
+Use no other formatting or tags.
 
 ### NUMBERED CHOICES
 End EVERY turn with 2-4 numbered choices for the player:

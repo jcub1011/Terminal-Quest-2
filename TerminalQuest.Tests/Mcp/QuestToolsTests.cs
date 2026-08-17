@@ -50,22 +50,20 @@ namespace TerminalQuest.Tests.Mcp
         }
 
         [Fact]
-        public void No_tool_output_ever_leaks_an_entity_id()
+        public void Tool_outputs_include_entity_ids_for_referencing()
         {
             using var save = Seeded();
             Call(save.Store, "record_event", """{"title":"The ford","detail":"Crossed at dusk.","characters":["Rowan"],"locations":["The Ford"]}""");
 
-            foreach (var name in new[]
-            {
-                "get_state", "get_character", "get_location", "recall",
-            })
-            {
-                var text = Call(save.Store, name, """{"name":"Rowan"}""").Text;
+            var stateText = Call(save.Store, "get_state").Text;
+            Assert.Contains(EntityIds.Character, stateText, StringComparison.Ordinal);
+            Assert.Contains(EntityIds.Location, stateText, StringComparison.Ordinal);
 
-                Assert.DoesNotContain(EntityIds.Character, text, StringComparison.Ordinal);
-                Assert.DoesNotContain(EntityIds.Location, text, StringComparison.Ordinal);
-                Assert.DoesNotContain(EntityIds.Item, text, StringComparison.Ordinal);
-            }
+            var charText = Call(save.Store, "get_character", """{"name":"Rowan"}""").Text;
+            Assert.Contains(EntityIds.Character, charText, StringComparison.Ordinal);
+
+            var locText = Call(save.Store, "get_location", """{"name":"The Ford"}""").Text;
+            Assert.Contains(EntityIds.Location, locText, StringComparison.Ordinal);
         }
 
         [Fact]

@@ -15,7 +15,7 @@ namespace TerminalQuest.Tests.Saves
             var content = File.ReadAllText(path);
             Assert.False(string.IsNullOrWhiteSpace(content));
             Assert.Contains("ROLE", content);
-            Assert.Equal(content, SystemPromptFile.Default);
+            Assert.Equal(content, NarratorPromptFile.Default);
         }
 
         [Fact]

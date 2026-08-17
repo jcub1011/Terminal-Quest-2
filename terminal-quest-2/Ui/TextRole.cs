@@ -22,6 +22,9 @@ namespace TerminalQuest.Ui
         /// <summary>A named location.</summary>
         Place,
 
+        /// <summary>A character or person.</summary>
+        Character,
+
         /// <summary>Out-of-fiction text from the game itself, not the narrator.</summary>
         System,
 

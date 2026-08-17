@@ -25,12 +25,17 @@ namespace TerminalQuest.Ui
 
         private readonly FrameView _inventoryFrame;
         private readonly Label _moneyLabel;
-        private readonly ListView _inventoryListView;
+        private readonly InventoryView _inventoryView;
 
         private readonly FrameView _sessionFrame;
         private readonly Label _contextLabel;
         private readonly ProgressBar _contextBar;
         private readonly Label _metricsLabel;
+
+        /// <summary>
+        /// Raised when the player clicks on an inventory entity in the Pack & Purse panel.
+        /// </summary>
+        public event Action<string>? EntityClicked;
 
         public StatusView(GameState state)
         {
@@ -106,17 +111,17 @@ namespace TerminalQuest.Ui
             _moneyLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "Gold: 0" };
             _moneyLabel.SetScheme(Theme.CreateScheme());
 
-            _inventoryListView = new ListView
+            _inventoryView = new InventoryView
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill() - 2,
                 Height = Dim.Fill(),
-                CanFocus = false,
             };
-            _inventoryListView.SetScheme(Theme.CreateScheme());
+            _inventoryView.SetScheme(Theme.CreateScheme());
+            _inventoryView.EntityClicked += entityId => EntityClicked?.Invoke(entityId);
 
-            _inventoryFrame.Add(_moneyLabel, _inventoryListView);
+            _inventoryFrame.Add(_moneyLabel, _inventoryView);
 
             // 4. Session & Context Frame
             _sessionFrame = new FrameView
@@ -156,6 +161,10 @@ namespace TerminalQuest.Ui
         public void Refresh()
         {
             // Update Vitals
+            _vitalsFrame.Title = string.IsNullOrWhiteSpace(_state.PlayerName)
+                ? "Vitals"
+                : $"Vitals - {_state.PlayerName}";
+
             var hasPlayer = _state.MaxHealth > 0;
             _hpLabel.Text = hasPlayer ? $"HP: {_state.Health} / {_state.MaxHealth}" : "HP: -";
             if (hasPlayer)
@@ -192,14 +201,7 @@ namespace TerminalQuest.Ui
 
             // Update Inventory
             _moneyLabel.Text = $"Gold: {_state.Money} gp";
-            if (_state.Inventory.Count > 0)
-            {
-                _inventoryListView.SetSource(new ObservableCollection<string>(_state.Inventory.Select(i => $"{i.Quantity}x {i.Name}").ToList()));
-            }
-            else
-            {
-                _inventoryListView.SetSource(new ObservableCollection<string>(new[] { "(empty pack)" }));
-            }
+            _inventoryView.SetItems(_state.Inventory);
 
             // Update Session & Context
             if (_state.ContextTokens > 0)

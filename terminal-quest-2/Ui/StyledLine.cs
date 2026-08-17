@@ -1,7 +1,7 @@
 namespace TerminalQuest.Ui
 {
-    /// <summary>A run of text sharing a single <see cref="TextRole"/>.</summary>
-    internal readonly record struct StyledSpan(string Text, TextRole Role);
+    /// <summary>A run of text sharing a single <see cref="TextRole"/> and optional entity ID.</summary>
+    internal readonly record struct StyledSpan(string Text, TextRole Role, string? EntityId = null);
 
     /// <summary>
     /// One logical paragraph of the transcript. Holds unwrapped spans; wrapping to the
@@ -18,10 +18,10 @@ namespace TerminalQuest.Ui
         public int Length { get; private set; }
 
         /// <summary>
-        /// Appends text, merging into the trailing span when the role matches so that a
+        /// Appends text, merging into the trailing span when the role and entity ID match so that a
         /// token-by-token stream does not produce one span per token.
         /// </summary>
-        public void Append(string text, TextRole role)
+        public void Append(string text, TextRole role, string? entityId = null)
         {
             if (text.Length == 0)
             {
@@ -31,7 +31,7 @@ namespace TerminalQuest.Ui
             if (_spans.Count > 0)
             {
                 var last = _spans[^1];
-                if (last.Role == role)
+                if (last.Role == role && string.Equals(last.EntityId, entityId, StringComparison.Ordinal))
                 {
                     _spans[^1] = last with { Text = last.Text + text };
                     Length += text.Length;
@@ -39,11 +39,11 @@ namespace TerminalQuest.Ui
                 }
             }
 
-            _spans.Add(new StyledSpan(text, role));
+            _spans.Add(new StyledSpan(text, role, entityId));
             Length += text.Length;
         }
 
-        public void Append(StyledSpan span) => Append(span.Text, span.Role);
+        public void Append(StyledSpan span) => Append(span.Text, span.Role, span.EntityId);
 
         /// <summary>
         /// Drops trailing spaces. Used when a wrapped row is committed so that the space sitting

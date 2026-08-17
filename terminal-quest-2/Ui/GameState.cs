@@ -3,7 +3,7 @@ using TerminalQuest.Saves;
 namespace TerminalQuest.Ui
 {
     /// <summary>One line of the status pane's inventory list.</summary>
-    internal readonly record struct InventoryEntry(int Quantity, string Name);
+    internal readonly record struct InventoryEntry(int Quantity, string Name, string Id = "");
 
     /// <summary>One of the six scores shown in the status pane, abbreviated to fit it.</summary>
     internal readonly record struct AttributeEntry(string Label, int Score);
@@ -21,6 +21,9 @@ namespace TerminalQuest.Ui
     {
         /// <summary>The save being played, shown in the window title.</summary>
         public string SaveName { get; set; } = string.Empty;
+
+        /// <summary>The name of the player character, or empty when no player is on record yet.</summary>
+        public string PlayerName { get; set; } = string.Empty;
 
         public int Health { get; set; }
 
@@ -90,6 +93,7 @@ namespace TerminalQuest.Ui
             var characters = store.ReadCharacters();
             var player = SaveStore.Player(characters);
 
+            PlayerName = player?.Name ?? string.Empty;
             Health = player?.Health ?? 0;
             MaxHealth = player?.MaxHealth ?? 0;
             Location = SaveStore.WhereIs(store.ReadLocations(), player?.Id)?.Name ?? string.Empty;
@@ -124,7 +128,7 @@ namespace TerminalQuest.Ui
                     var def = SaveStore.FindItemById(itemFile, stack.ItemId);
                     if (def is not null)
                     {
-                        Inventory.Add(new InventoryEntry(stack.Quantity, def.Name));
+                        Inventory.Add(new InventoryEntry(stack.Quantity, def.Name, def.Id));
                     }
                 }
             }

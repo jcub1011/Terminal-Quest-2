@@ -10,16 +10,10 @@ using Xunit;
 namespace TerminalQuest.Tests.Saves
 {
     /// <summary>
-    /// The one document in a save folder the player writes: that it is seeded once, never seeded
+    /// The one document in a save folder the player writes for the narrator: that it is seeded once, never seeded
     /// over, and read back exactly as they left it.
     /// </summary>
-    /// <remarks>
-    /// Two promises are being kept here and they pull in opposite directions. A save that has never
-    /// heard of this file must still play, which means falling back to the built-in text; and a save
-    /// whose player has rewritten the file must be narrated by what they wrote, which means never
-    /// deciding their version needs helping. The seam between the two is the whole subject.
-    /// </remarks>
-    public sealed class SystemPromptFileTests
+    public sealed class NarratorPromptFileTests
     {
         private const string FileName = "system-prompt.txt";
 
@@ -30,7 +24,7 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave();
 
-            Assert.Equal(SystemPromptFile.Default, SystemPromptFile.Read(save.Store));
+            Assert.Equal(NarratorPromptFile.Default, NarratorPromptFile.Read(save.Store));
 
             // Reading must not create it. Only Ensure does that, and only where it is safe to.
             Assert.False(save.Has(FileName));
@@ -58,7 +52,7 @@ namespace TerminalQuest.Tests.Saves
 
             save.WriteRaw(FileName, contents);
 
-            Assert.Equal(SystemPromptFile.Default, SystemPromptFile.Read(save.Store));
+            Assert.Equal(NarratorPromptFile.Default, NarratorPromptFile.Read(save.Store));
         }
 
         // ---- Seeding ------------------------------------------------------------------------------
@@ -68,10 +62,10 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave();
 
-            var seeded = SystemPromptFile.Ensure(save.Store);
+            var seeded = NarratorPromptFile.Ensure(save.Store);
 
             Assert.True(save.Has(FileName));
-            Assert.Equal(SystemPromptFile.Default.ReplaceLineEndings(), seeded);
+            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), seeded);
             Assert.Equal(seeded, save.ReadRaw(FileName));
         }
 
@@ -81,10 +75,10 @@ namespace TerminalQuest.Tests.Saves
             // The first thing that happens to this file is that somebody opens it in Notepad.
             using var save = new TempSave();
 
-            var seeded = SystemPromptFile.Ensure(save.Store);
+            var seeded = NarratorPromptFile.Ensure(save.Store);
 
             Assert.Contains(Environment.NewLine, seeded, StringComparison.Ordinal);
-            Assert.Equal(SystemPromptFile.Default.ReplaceLineEndings(), seeded);
+            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), seeded);
         }
 
         [Fact]
@@ -96,10 +90,10 @@ namespace TerminalQuest.Tests.Saves
 
             using var save = new TempSave();
 
-            SystemPromptFile.Ensure(save.Store);
+            NarratorPromptFile.Ensure(save.Store);
             save.Store.WriteSystemPrompt(Written);
 
-            Assert.Equal(Written, SystemPromptFile.Ensure(save.Store));
+            Assert.Equal(Written, NarratorPromptFile.Ensure(save.Store));
             Assert.Equal(Written, save.ReadRaw(FileName));
         }
 
@@ -110,7 +104,7 @@ namespace TerminalQuest.Tests.Saves
 
             save.WriteRaw(FileName, "   ");
 
-            Assert.Equal(SystemPromptFile.Default.ReplaceLineEndings(), SystemPromptFile.Ensure(save.Store));
+            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), NarratorPromptFile.Ensure(save.Store));
         }
 
         [Fact]
@@ -118,7 +112,7 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave();
 
-            Assert.Equal(SystemPromptFile.Ensure(save.Store), SystemPromptFile.Ensure(save.Store));
+            Assert.Equal(NarratorPromptFile.Ensure(save.Store), NarratorPromptFile.Ensure(save.Store));
         }
 
         // ---- Fidelity -----------------------------------------------------------------------------
@@ -135,7 +129,7 @@ namespace TerminalQuest.Tests.Saves
             save.Store.WriteSystemPrompt(Written);
 
             Assert.Equal(Written, save.Store.ReadSystemPrompt());
-            Assert.Equal(Written, SystemPromptFile.Read(save.Store));
+            Assert.Equal(Written, NarratorPromptFile.Read(save.Store));
         }
 
         [Fact]
@@ -144,7 +138,7 @@ namespace TerminalQuest.Tests.Saves
             // The prompt is largely about square brackets and placeholder braces. Nothing may treat
             // either as syntax of its own.
             const string Written =
-                "Mark items as [item]a rusted key[/item] and use {This} and {Player} in memories.";
+                "Mark items as [item](itm_1) and use {This} and {Player} in memories.";
 
             using var save = new TempSave();
 
@@ -172,7 +166,7 @@ namespace TerminalQuest.Tests.Saves
             // reach the model as a stray character at the head of its instructions.
             using var save = new TempSave();
 
-            SystemPromptFile.Ensure(save.Store);
+            NarratorPromptFile.Ensure(save.Store);
 
             var bytes = File.ReadAllBytes(Path.Combine(save.Directory, FileName));
 
@@ -201,7 +195,7 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave();
 
-            SystemPromptFile.Ensure(save.Store);
+            NarratorPromptFile.Ensure(save.Store);
             save.Store.WriteSystemPrompt("Rewritten.");
 
             Assert.Empty(save.TempFiles);
@@ -223,11 +217,8 @@ namespace TerminalQuest.Tests.Saves
             // The prompt and MarkupParser are a pair. This does not stop a player breaking that in
             // their own save - they are allowed to - but it stops the shipped default drifting from
             // the parser without anybody noticing.
-            foreach (var tag in new[] { "item", "danger", "speech", "place" })
-            {
-                Assert.Contains($"[{tag}]", SystemPromptFile.Default, StringComparison.Ordinal);
-                Assert.Contains($"[/{tag}]", SystemPromptFile.Default, StringComparison.Ordinal);
-            }
+            Assert.Contains("[Entity Name](id)", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("[\"Spoken words go here.\"]", NarratorPromptFile.Default, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -237,8 +228,8 @@ namespace TerminalQuest.Tests.Saves
             // newlines and drops leading spaces, so the list only renders as a list while the brief
             // asks for one short line per choice - and nothing in the game parses the player's "2",
             // so this section is the only thing that makes a bare number mean anything at all.
-            Assert.Contains("What do you do?", SystemPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("\n1. ", SystemPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("What do you do?", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("\n1. ", NarratorPromptFile.Default, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -246,25 +237,17 @@ namespace TerminalQuest.Tests.Saves
         {
             // If the shipped text ever crossed this line, every new save would open on a warning.
             Assert.True(
-                SystemPromptFile.Default.Length < SystemPromptFile.WarnAboveCharacters,
-                $"the default prompt is {SystemPromptFile.Default.Length} characters");
+                NarratorPromptFile.Default.Length < NarratorPromptFile.WarnAboveCharacters,
+                $"the default prompt is {NarratorPromptFile.Default.Length} characters");
         }
 
         [Fact]
         public void Every_tool_the_default_names_is_a_tool_that_exists()
         {
-            // The third pairing between this text and code it cannot see, and the one that had already
-            // gone wrong: the brief spent a long time telling the narrator to "call roll or hidden",
-            // and hidden is a parameter of roll rather than a tool of its own.
-            //
-            // Only the underscored names can be checked, which is twenty-seven of the twenty-eight.
-            // A one-word tool name is indistinguishable from prose - this would not have caught
-            // "hidden", and cannot be made to without a list of English words. What it does catch is a
-            // tool renamed or misspelled in one place and not the other, which is the way this drifts.
             var known = QuestTools.Definitions.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
 
             var named = Regex
-                .Matches(SystemPromptFile.Default, @"\b[a-z]+(?:_[a-z]+)+\b")
+                .Matches(NarratorPromptFile.Default, @"\b[a-z]+(?:_[a-z]+)+\b")
                 .Select(match => match.Value)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
@@ -277,20 +260,14 @@ namespace TerminalQuest.Tests.Saves
         [Fact]
         public void The_default_still_names_the_one_tool_this_cannot_spell_check()
         {
-            // roll is the only tool whose name carries no underscore, so the check above is blind to
-            // it. It is also the tool the old brief got wrong. Assert at least that it is still spoken
-            // of, and that the parameter it was once confused with is described as one.
-            Assert.Contains("call roll", SystemPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("Set hidden true", SystemPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("call roll", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("Set hidden true", NarratorPromptFile.Default, StringComparison.Ordinal);
         }
 
         [Fact]
         public void The_default_is_plain_ascii()
         {
-            // This file held four CP1252 em dashes once, with no byte order mark to say so. It compiled
-            // to the right characters only because Roslyn falls back to the machine's ANSI code page,
-            // which is a property of the machine rather than of the repository.
-            Assert.DoesNotContain(SystemPromptFile.Default, character => character > '\x7f');
+            Assert.DoesNotContain(NarratorPromptFile.Default, character => character > '\x7f');
         }
     }
 }

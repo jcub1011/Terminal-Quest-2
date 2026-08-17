@@ -1,0 +1,136 @@
+using TerminalQuest.Saves;
+using TerminalQuest.Tests.Infrastructure;
+using TerminalQuest.Ui;
+
+using Xunit;
+
+namespace TerminalQuest.Tests.Ui
+{
+    public sealed class EntityDetailsDialogTests
+    {
+        private static TempSave Seeded()
+        {
+            var save = new TempSave();
+            NewGame.Create(save.Store, "Rowan", "A quiet ranger.", ClassTemplates.All[0], "The Ford");
+
+            // Add an NPC, location, item, and story events
+            var charFile = save.Store.ReadCharacters();
+            var npc = new Character
+            {
+                Id = "chr_2",
+                Name = "Bess",
+                Kind = CharacterKind.Npc,
+                Health = 12,
+                MaxHealth = 15,
+                Description = "A wise herbalist with grey hair."
+            };
+            charFile.Characters.Add(npc);
+            save.Store.WriteCharacters(charFile);
+
+            var itemFile = save.Store.ReadItems();
+            var item = new ItemDefinition
+            {
+                Id = itemFile.TakeId(),
+                Name = "Rusted Key",
+                Description = "An old iron key found near the river."
+            };
+            itemFile.Items.Add(item);
+            save.Store.WriteItems(itemFile);
+
+            save.Store.Story.Append(new StoryEvent
+            {
+                Turn = 1,
+                Title = "Met Bess at the river",
+                Detail = "She spoke of an ancient ruin.",
+                CharacterIds = ["chr_2"],
+                LocationIds = ["loc_1"],
+                ItemIds = [item.Id]
+            });
+
+            return save;
+        }
+
+        [Fact]
+        public void Character_details_format_name_health_description_and_memories()
+        {
+            using var save = Seeded();
+
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "chr_2");
+
+            Assert.Equal("Character: Bess", title);
+            Assert.Contains("Bess (npc)", content, StringComparison.Ordinal);
+            Assert.Contains("Health: 12/15", content, StringComparison.Ordinal);
+            Assert.Contains("A wise herbalist with grey hair.", content, StringComparison.Ordinal);
+            Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
+            Assert.Contains("She spoke of an ancient ruin.", content, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Location_details_format_name_roster_and_events()
+        {
+            using var save = Seeded();
+
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "loc_1");
+
+            Assert.Equal("Location: The Ford", title);
+            Assert.Contains("The Ford", content, StringComparison.Ordinal);
+            Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Item_details_format_name_description_and_events()
+        {
+            using var save = Seeded();
+
+            var item = save.Store.ReadItems().Items.First(i => i.Name == "Rusted Key");
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, item.Id);
+
+            Assert.Equal("Item: Rusted Key", title);
+            Assert.Contains("Rusted Key", content, StringComparison.Ordinal);
+            Assert.Contains("An old iron key found near the river.", content, StringComparison.Ordinal);
+            Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Item_carried_by_player_shows_possession()
+        {
+            using var save = Seeded();
+
+            // Starting weapon given to Rowan in NewGame.Create
+            var item = save.Store.ReadItems().Items.First(i => i.Name == "iron longsword");
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, item.Id);
+
+            Assert.Equal("Item: iron longsword", title);
+            Assert.Contains("Location / Possession:", content, StringComparison.Ordinal);
+            Assert.Contains("Carried by Rowan (x1)", content, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Item_at_location_shows_location()
+        {
+            using var save = Seeded();
+
+            var locFile = save.Store.ReadLocations();
+            var loc = locFile.Locations.First();
+            var item = save.Store.ReadItems().Items.First(i => i.Name == "Rusted Key");
+            loc.Items.Add(new ItemStack { ItemId = item.Id, Quantity = 1 });
+            save.Store.WriteLocations(locFile);
+
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, item.Id);
+
+            Assert.Contains("Location / Possession:", content, StringComparison.Ordinal);
+            Assert.Contains($"At {loc.Name} (x1)", content, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Unknown_entity_id_returns_clean_message()
+        {
+            using var save = Seeded();
+
+            var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "chr_999");
+
+            Assert.Equal("Entity: chr_999", title);
+            Assert.Contains("No entity found on record", content, StringComparison.Ordinal);
+        }
+    }
+}

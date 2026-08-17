@@ -68,6 +68,11 @@ namespace TerminalQuest.Ui
         private int? _highlightedOption;
 
         /// <summary>
+        /// Raised when the player clicks on a rendered entity in the transcript.
+        /// </summary>
+        public event Action<string>? EntityClicked;
+
+        /// <summary>
         /// The 1-based option number currently selected and highlighted in the UI, or null if none.
         /// </summary>
         public int? HighlightedOption
@@ -175,13 +180,17 @@ namespace TerminalQuest.Ui
         {
             if (_current is { Length: > 0 })
             {
+                _parser.Reset(_current);
                 _committed.Add(_current);
                 _committedRows.AddRange(Wrap(_current.Spans, _wrapWidth));
+            }
+            else
+            {
+                _parser.Reset();
             }
 
             _current = null;
             _currentRows = [];
-            _parser.Reset();
 
             // The paragraph being waited for has arrived, so the placeholder is spent. Cleared here
             // rather than left to the host, which flips IsBusy back a moment later on another
@@ -326,6 +335,30 @@ namespace TerminalQuest.Ui
             {
                 ScrollToBottom();
                 return true;
+            }
+
+            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) && mouse.Position is { } pos)
+            {
+                var rowIndex = Viewport.Y + pos.Y;
+                if (rowIndex >= 0 && rowIndex < TotalRows)
+                {
+                    var row = RowAt(rowIndex);
+                    var col = 0;
+                    foreach (var span in row.Spans)
+                    {
+                        var spanEnd = col + span.Text.Length;
+                        if (pos.X >= col && pos.X < spanEnd)
+                        {
+                            if (span.EntityId is { Length: > 0 } entityId)
+                            {
+                                EntityClicked?.Invoke(entityId);
+                                return true;
+                            }
+                            break;
+                        }
+                        col = spanEnd;
+                    }
+                }
             }
 
             return false;
@@ -502,7 +535,7 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Greedy word wrap. Preserves span roles across the break, collapses the space that
+        /// Greedy word wrap. Preserves span roles and entity IDs across the break, collapses the space that
         /// falls at a wrap point, and hard-breaks words longer than a full line.
         /// </summary>
         internal static List<StyledLine> Wrap(IReadOnlyList<StyledSpan> spans, int width)
@@ -514,7 +547,7 @@ namespace TerminalQuest.Ui
             }
 
             var row = new StyledLine();
-            var word = new List<(char Ch, TextRole Role)>();
+            var word = new List<(char Ch, TextRole Role, string? EntityId)>();
 
             void CommitRow()
             {
@@ -540,7 +573,7 @@ namespace TerminalQuest.Ui
 
                     for (var i = 0; i < width; i++)
                     {
-                        row.Append(word[i].Ch.ToString(), word[i].Role);
+                        row.Append(word[i].Ch.ToString(), word[i].Role, word[i].EntityId);
                     }
 
                     word.RemoveRange(0, width);
@@ -552,9 +585,9 @@ namespace TerminalQuest.Ui
                     CommitRow();
                 }
 
-                foreach (var (ch, role) in word)
+                foreach (var (ch, role, entityId) in word)
                 {
-                    row.Append(ch.ToString(), role);
+                    row.Append(ch.ToString(), role, entityId);
                 }
 
                 word.Clear();
@@ -580,13 +613,13 @@ namespace TerminalQuest.Ui
                             // rows do not start with stray indentation.
                             if (row.Length > 0 && row.Length < width)
                             {
-                                row.Append(" ", span.Role);
+                                row.Append(" ", span.Role, span.EntityId);
                             }
 
                             break;
 
                         default:
-                            word.Add((ch, span.Role));
+                            word.Add((ch, span.Role, span.EntityId));
                             break;
                     }
                 }

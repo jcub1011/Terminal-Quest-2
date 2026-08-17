@@ -1,204 +1,280 @@
 using System.Text;
+using TerminalQuest.Saves;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// Turns the narrator's semantic markup (<c>[item]rusted key[/]</c>) into styled spans.
+    /// Turns the narrator's semantic markup (<c>[Entity Name](entity_id)</c> and <c>["Speech"]</c>) into styled spans.
     /// <para>
-    /// This is deliberately incremental: <see cref="Append"/> is fed raw stream deltas, and a
-    /// tag split across two deltas (<c>"...[dan"</c> then <c>"ger]..."</c>) must not corrupt
-    /// the line. Parser state therefore survives between calls until <see cref="Reset"/>.
+    /// This is deliberately incremental: <see cref="Append"/> is fed raw stream deltas, and tags/entities
+    /// split across deltas must not corrupt the line. Parser state survives between calls until <see cref="Reset"/>.
     /// </para>
     /// <para>
-    /// Input is model-authored, so it is never trusted to be well-formed. Unknown tags,
-    /// unbalanced closers, and stray brackets all render as literal text rather than throwing.
+    /// Input is model-authored, so it is never trusted to be well-formed. Stray brackets, incomplete entities,
+    /// or unclosed tags render gracefully as literal text rather than throwing.
     /// Write <c>[[</c> for a literal <c>[</c>.
     /// </para>
     /// </summary>
     internal sealed class MarkupParser
     {
-        /// <summary>
-        /// Longest plausible tag, including the brackets. A '[' that is not closed within this
-        /// many characters is treated as literal text, so one stray bracket in the narration
-        /// cannot swallow the rest of the stream.
-        /// </summary>
-        private const int MaxTagLength = 24;
+        private const int MaxEntityNameLength = 120;
+        private const int MaxEntityIdLength = 60;
 
-        private readonly Stack<TextRole> _roles = new();
-        private readonly StringBuilder _tag = new();
-        private bool _inTag;
-
-        /// <summary>The role that text would currently be emitted with.</summary>
-        private TextRole Current => _roles.Count > 0 ? _roles.Peek() : TextRole.Normal;
-
-        /// <summary>Clears all state. Call between narration blocks.</summary>
-        public void Reset()
+        private enum ParserState
         {
-            _roles.Clear();
-            _tag.Clear();
-            _inTag = false;
+            Normal,
+            AfterOpenBracket,
+            EntityName,
+            AfterCloseBracket,
+            EntityId,
+            AfterQuoteInSpeech,
         }
 
-        /// <summary>
-        /// Parses <paramref name="text"/> and appends the resulting spans to <paramref name="sink"/>.
-        /// Any trailing partial tag is retained for the next call.
-        /// </summary>
+        private ParserState _state = ParserState.Normal;
+        private bool _inSpeech;
+
+        private readonly StringBuilder _entityName = new();
+        private readonly StringBuilder _entityId = new();
+
+        /// <summary>Current baseline text role when outside an entity link.</summary>
+        private TextRole CurrentRole => _inSpeech ? TextRole.Speech : TextRole.Normal;
+
+        /// <summary>Clears all state. Call between narration blocks.</summary>
+        public void Reset(StyledLine? sink = null)
+        {
+            if (sink is not null)
+            {
+                FlushIncompleteState(sink);
+            }
+
+            _state = ParserState.Normal;
+            _inSpeech = false;
+            _entityName.Clear();
+            _entityId.Clear();
+        }
+
         public void Append(string text, StyledLine sink)
+        {
+            ArgumentNullException.ThrowIfNull(sink);
+
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            var run = new StringBuilder();
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                var c = text[i];
+                ProcessChar(c, run, sink);
+            }
+
+            FlushRun(run, sink);
+        }
+
+        private void ProcessChar(char c, StringBuilder run, StyledLine sink)
+        {
+            switch (_state)
+            {
+                case ParserState.Normal:
+                    if (c == '[')
+                    {
+                        FlushRun(run, sink);
+                        _state = ParserState.AfterOpenBracket;
+                    }
+                    else if (_inSpeech && c == '"')
+                    {
+                        FlushRun(run, sink);
+                        _state = ParserState.AfterQuoteInSpeech;
+                    }
+                    else
+                    {
+                        run.Append(c);
+                    }
+                    break;
+
+                case ParserState.AfterOpenBracket:
+                    if (c == '[')
+                    {
+                        // "[[" is an escaped literal '['.
+                        run.Append('[');
+                        _state = ParserState.Normal;
+                    }
+                    else if (c == '"')
+                    {
+                        // '["' starts speech.
+                        if (!_inSpeech)
+                        {
+                            FlushRun(run, sink);
+                            _inSpeech = true;
+                            run.Append('"');
+                        }
+                        else
+                        {
+                            // Already in speech, emit literal '["'
+                            run.Append("[\"");
+                        }
+                        _state = ParserState.Normal;
+                    }
+                    else if (c == ']')
+                    {
+                        // "[]" is empty entity name, not a valid entity. Emit "[]".
+                        run.Append("[]");
+                        _state = ParserState.Normal;
+                    }
+                    else
+                    {
+                        _entityName.Clear();
+                        _entityName.Append(c);
+                        _state = ParserState.EntityName;
+                    }
+                    break;
+
+                case ParserState.EntityName:
+                    if (c == ']')
+                    {
+                        _state = ParserState.AfterCloseBracket;
+                    }
+                    else if (c == '[')
+                    {
+                        // Nested '[' inside unclosed '['. Emit previous as literal.
+                        run.Append('[').Append(_entityName);
+                        _entityName.Clear();
+                        _state = ParserState.AfterOpenBracket;
+                    }
+                    else if (c == '\n' || _entityName.Length > MaxEntityNameLength)
+                    {
+                        // Abort entity parsing and emit literal text.
+                        run.Append('[').Append(_entityName).Append(c);
+                        _entityName.Clear();
+                        _state = ParserState.Normal;
+                    }
+                    else
+                    {
+                        _entityName.Append(c);
+                    }
+                    break;
+
+                case ParserState.AfterCloseBracket:
+                    if (c == '(')
+                    {
+                        _entityId.Clear();
+                        _state = ParserState.EntityId;
+                    }
+                    else
+                    {
+                        // Not followed by '(', so '[EntityName]' was literal text.
+                        run.Append('[').Append(_entityName).Append(']');
+                        _entityName.Clear();
+                        _state = ParserState.Normal;
+                        // Re-process current character in Normal state
+                        ProcessChar(c, run, sink);
+                    }
+                    break;
+
+                case ParserState.EntityId:
+                    if (c == ')')
+                    {
+                        FlushRun(run, sink);
+                        var name = _entityName.ToString();
+                        var id = _entityId.ToString().Trim();
+                        var role = RoleForEntityId(id);
+
+                        sink.Append(name, role, id.Length > 0 ? id : null);
+
+                        _entityName.Clear();
+                        _entityId.Clear();
+                        _state = ParserState.Normal;
+                    }
+                    else if (c == '(' || c == '[' || c == '\n' || _entityId.Length > MaxEntityIdLength)
+                    {
+                        // Malformed ID. Emit literal text.
+                        run.Append('[').Append(_entityName).Append("](").Append(_entityId).Append(c);
+                        _entityName.Clear();
+                        _entityId.Clear();
+                        _state = ParserState.Normal;
+                    }
+                    else
+                    {
+                        _entityId.Append(c);
+                    }
+                    break;
+
+                case ParserState.AfterQuoteInSpeech:
+                    if (c == ']')
+                    {
+                        // '"]' ends speech.
+                        run.Append('"');
+                        FlushRun(run, sink);
+                        _inSpeech = false;
+                        _state = ParserState.Normal;
+                    }
+                    else
+                    {
+                        // '"' was just a regular quote inside speech.
+                        run.Append('"');
+                        _state = ParserState.Normal;
+                        ProcessChar(c, run, sink);
+                    }
+                    break;
+            }
+        }
+
+        private void FlushIncompleteState(StyledLine sink)
         {
             var run = new StringBuilder();
 
-            foreach (var c in text)
+            switch (_state)
             {
-                if (_inTag)
-                {
-                    HandleTagChar(c, run, sink);
-                    continue;
-                }
-
-                if (c == '[')
-                {
-                    _inTag = true;
-                    _tag.Clear();
-                }
-                else
-                {
-                    run.Append(c);
-                }
+                case ParserState.AfterOpenBracket:
+                    run.Append('[');
+                    break;
+                case ParserState.EntityName:
+                    run.Append('[').Append(_entityName);
+                    break;
+                case ParserState.AfterCloseBracket:
+                    run.Append('[').Append(_entityName).Append(']');
+                    break;
+                case ParserState.EntityId:
+                    run.Append('[').Append(_entityName).Append("](").Append(_entityId);
+                    break;
+                case ParserState.AfterQuoteInSpeech:
+                    run.Append('"');
+                    break;
             }
 
-            Flush(run, sink);
+            FlushRun(run, sink);
         }
 
-        private void HandleTagChar(char c, StringBuilder run, StyledLine sink)
+        private static TextRole RoleForEntityId(string entityId)
         {
-            // "[[" is an escaped literal '['.
-            if (_tag.Length == 0 && c == '[')
+            if (entityId.StartsWith(EntityIds.Character, StringComparison.OrdinalIgnoreCase))
             {
-                run.Append('[');
-                _inTag = false;
-                return;
+                return TextRole.Character;
             }
 
-            if (c == ']')
+            if (entityId.StartsWith(EntityIds.Location, StringComparison.OrdinalIgnoreCase))
             {
-                Flush(run, sink);
-                CloseTag(run);
-                _inTag = false;
-                return;
+                return TextRole.Place;
             }
 
-            // A nested '[' means the previous one was never a tag. Emit it literally and
-            // restart tag scanning at this character.
-            if (c == '[')
+            if (entityId.StartsWith(EntityIds.Item, StringComparison.OrdinalIgnoreCase))
             {
-                run.Append('[').Append(_tag);
-                _tag.Clear();
-                return;
+                return TextRole.Item;
             }
 
-            _tag.Append(c);
-
-            if (_tag.Length > MaxTagLength)
-            {
-                run.Append('[').Append(_tag);
-                _tag.Clear();
-                _inTag = false;
-            }
+            return TextRole.Normal;
         }
 
-        private void CloseTag(StringBuilder run)
-        {
-            var name = _tag.ToString();
-            _tag.Clear();
-
-            if (name.StartsWith('/'))
-            {
-                CloseRole(name, run);
-                return;
-            }
-
-            if (TryParseRole(name, out var role))
-            {
-                _roles.Push(role);
-                return;
-            }
-
-            // Not a tag we know. Show it as the narrator wrote it.
-            run.Append('[').Append(name).Append(']');
-        }
-
-        /// <summary>
-        /// Handles a closing tag. Both the bare <c>[/]</c> and the named <c>[/place]</c> form are
-        /// accepted - models emit either regardless of what the prompt asks for, and an
-        /// unrecognised closer would otherwise be printed into the narration as literal text.
-        /// </summary>
-        private void CloseRole(string name, StringBuilder run)
-        {
-            var closing = name[1..];
-
-            // Bare "[/]" closes whatever is innermost.
-            if (closing.Length == 0)
-            {
-                if (_roles.Count > 0)
-                {
-                    _roles.Pop();
-                }
-
-                return;
-            }
-
-            if (!TryParseRole(closing, out var role))
-            {
-                // A closer for a tag we never understood; show it as written.
-                run.Append('[').Append(name).Append(']');
-                return;
-            }
-
-            // Unmatched closer - drop it rather than printing it or corrupting the role stack.
-            if (!_roles.Contains(role))
-            {
-                return;
-            }
-
-            // Pop through to the named role, so a missing inner closer cannot strand the stack.
-            while (_roles.Count > 0 && _roles.Pop() != role)
-            {
-            }
-        }
-
-        /// <summary>
-        /// The tags the narrator may write, matched exactly by the markup rules at the head of the
-        /// system prompt - the two are a pair and have to be changed together.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="TextRole.Command"/> and <see cref="TextRole.Roll"/> are missing on purpose,
-        /// not by oversight. Both are the game's own voice: the first is the player's line echoed
-        /// back, the second is drawn from the save. Giving the narrator a <c>[roll]</c> tag would let
-        /// it type a roll line - which means inventing a number, or spelling out one it was asked to
-        /// keep quiet. An unknown tag renders as literal text, so if it ever tries, the mistake is
-        /// visible rather than convincing.
-        /// </remarks>
-        private static bool TryParseRole(string name, out TextRole role)
-        {
-            switch (name)
-            {
-                case "item": role = TextRole.Item; return true;
-                case "danger": role = TextRole.Danger; return true;
-                case "speech": role = TextRole.Speech; return true;
-                case "place": role = TextRole.Place; return true;
-                case "system": role = TextRole.System; return true;
-                default: role = TextRole.Normal; return false;
-            }
-        }
-
-        private void Flush(StringBuilder run, StyledLine sink)
+        private void FlushRun(StringBuilder run, StyledLine sink)
         {
             if (run.Length == 0)
             {
                 return;
             }
 
-            sink.Append(run.ToString(), Current);
+            sink.Append(run.ToString(), CurrentRole);
             run.Clear();
         }
 
@@ -206,7 +282,9 @@ namespace TerminalQuest.Ui
         public static StyledLine Parse(string text)
         {
             var line = new StyledLine();
-            new MarkupParser().Append(text, line);
+            var parser = new MarkupParser();
+            parser.Append(text, line);
+            parser.Reset(line);
             return line;
         }
     }

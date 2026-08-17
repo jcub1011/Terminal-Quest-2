@@ -23,6 +23,7 @@ namespace TerminalQuest.Ui
         private static readonly Ink DangerInk = new(new Color("#d05a4a"), TextStyle.Bold);
         private static readonly Ink SpeechInk = new(new Color("#7fc3c8"), TextStyle.Italic);
         private static readonly Ink PlaceInk = new(new Color("#8fb26a"), TextStyle.Bold);
+        private static readonly Ink CharacterInk = new(new Color("#e69875"), TextStyle.Bold);
         private static readonly Ink SystemInk = new(new Color("#8a8375"), TextStyle.None);
         private static readonly Ink CommandInk = new(new Color("#f0e6d2"), TextStyle.Bold);
 
@@ -39,6 +40,7 @@ namespace TerminalQuest.Ui
             TextRole.Danger => DangerInk,
             TextRole.Speech => SpeechInk,
             TextRole.Place => PlaceInk,
+            TextRole.Character => CharacterInk,
             TextRole.System => SystemInk,
             TextRole.Command => CommandInk,
             TextRole.Roll => RollInk,

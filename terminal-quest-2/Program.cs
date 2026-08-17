@@ -178,7 +178,7 @@ namespace TerminalQuest
             // What this save tells the narrator. Read once, here, because both providers keep the
             // prompt they were given for the whole life of their process - which is what makes
             // /system-prompt end the session rather than take effect in it.
-            var systemPrompt = SystemPromptFile.Default;
+            var systemPrompt = NarratorPromptFile.Default;
             var directorPrompt = DirectorPromptFile.Default;
 
             try
@@ -191,7 +191,7 @@ namespace TerminalQuest
                 // now and can be edited from the character screen and from /system-prompt. Inside
                 // this try, so a folder that cannot be written says so on the same path as every
                 // other save fault - and the character screen and the narrator are both skipped.
-                systemPrompt = SystemPromptFile.Ensure(store);
+                systemPrompt = NarratorPromptFile.Ensure(store);
                 directorPrompt = DirectorPromptFile.Ensure(store);
 
                 // A save with nobody in it has never been played, whatever its metadata says.
@@ -277,6 +277,7 @@ namespace TerminalQuest
             // save name, so that the place name in it can be green on its own.
             using var window = new GameWindow(state)
             {
+                App = app,
                 Editor = editor,
                 Store = store,
             };
@@ -335,11 +336,11 @@ namespace TerminalQuest
                 // whole line a little over 32,000 characters. A process that would not start is
                 // reported already, but "could not start claude" is a baffling thing to be told when
                 // the cause is a file the player edited an hour ago.
-                if (systemPrompt.Length > SystemPromptFile.WarnAboveCharacters)
+                if (systemPrompt.Length > NarratorPromptFile.WarnAboveCharacters)
                 {
                     window.Narration.AddLine(
                         $"system-prompt.txt is {systemPrompt.Length:N0} characters. Past about "
-                      + $"{SystemPromptFile.WarnAboveCharacters:N0} the Claude narrator may refuse to start, "
+                      + $"{NarratorPromptFile.WarnAboveCharacters:N0} the Claude narrator may refuse to start, "
                       + "because the prompt is passed to it on the command line. Shorten the file if it does.",
                         TextRole.Danger);
                     window.Narration.AddBlankLine();
@@ -643,7 +644,7 @@ namespace TerminalQuest
                 // and anything may have happened to it in between - including being deleted by hand.
                 try
                 {
-                    SystemPromptFile.Ensure(store);
+                    NarratorPromptFile.Ensure(store);
                 }
                 catch (SaveException ex)
                 {

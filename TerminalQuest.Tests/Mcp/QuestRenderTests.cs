@@ -22,7 +22,7 @@ namespace TerminalQuest.Tests.Mcp
         [Fact]
         public void A_character_line_reads_as_a_sentence_a_model_can_parse()
         {
-            Assert.Equal("Rowan (player) - HP 12/20", QuestRender.CharacterLine(Rowan()));
+            Assert.Equal("Rowan (chr_1, player) - HP 12/20", QuestRender.CharacterLine(Rowan()));
         }
 
         [Fact]
@@ -32,7 +32,7 @@ namespace TerminalQuest.Tests.Mcp
             bess.Name = "Bess";
             bess.Kind = CharacterKind.Npc;
 
-            Assert.StartsWith("Bess (npc)", QuestRender.CharacterLine(bess), StringComparison.Ordinal);
+            Assert.StartsWith("Bess (chr_1, npc)", QuestRender.CharacterLine(bess), StringComparison.Ordinal);
         }
 
         [Fact]
@@ -85,9 +85,9 @@ namespace TerminalQuest.Tests.Mcp
 
             var text = QuestRender.Character(character, inv, itemFile);
 
-            Assert.Contains("Rowan (player)", text, StringComparison.Ordinal);
+            Assert.Contains("Rowan (chr_1, player)", text, StringComparison.Ordinal);
             Assert.Contains("Money: 15 coin.", text, StringComparison.Ordinal);
-            Assert.Contains("dagger x1 - Sharp iron.", text, StringComparison.Ordinal);
+            Assert.Contains("dagger (itm_1) x1 - Sharp iron.", text, StringComparison.Ordinal);
         }
 
         // ---- Rolls -----------------------------------------------------------------------------
@@ -178,7 +178,7 @@ namespace TerminalQuest.Tests.Mcp
 
             var line = QuestRender.LocationLine(location, WorldIndex.Build(characters));
 
-            Assert.Equal("The Ford (Rowan)", line);
+            Assert.Equal("The Ford (loc_1) (Rowan)", line);
         }
 
         [Fact]
@@ -186,7 +186,7 @@ namespace TerminalQuest.Tests.Mcp
         {
             var location = new Location { Id = "loc_1", Name = "The Ford" };
 
-            Assert.Equal("The Ford (nobody here)", QuestRender.LocationLine(location, WorldIndex.Build()));
+            Assert.Equal("The Ford (loc_1) (nobody here)", QuestRender.LocationLine(location, WorldIndex.Build()));
         }
 
         [Fact]
@@ -197,8 +197,8 @@ namespace TerminalQuest.Tests.Mcp
 
             var line = QuestRender.LocationLine(location, WorldIndex.Build());
 
-            Assert.Equal("The Ford (nobody here)", line);
-            Assert.DoesNotContain("chr_", line, StringComparison.Ordinal);
+            Assert.Equal("The Ford (loc_1) (nobody here)", line);
+            Assert.DoesNotContain("chr_9", line, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -217,8 +217,8 @@ namespace TerminalQuest.Tests.Mcp
 
             var text = QuestRender.Location(location, WorldIndex.Build(), itemFile, recentEvents);
 
-            Assert.Contains("The Ford", text, StringComparison.Ordinal);
-            Assert.Contains("lantern x1 - Tin.", text, StringComparison.Ordinal);
+            Assert.Contains("The Ford (loc_1)", text, StringComparison.Ordinal);
+            Assert.Contains("lantern (itm_1) x1 - Tin.", text, StringComparison.Ordinal);
             Assert.Contains("[turn 3] The flood - The river rose.", text, StringComparison.Ordinal);
         }
 

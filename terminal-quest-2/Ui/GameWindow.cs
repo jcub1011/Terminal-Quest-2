@@ -1,3 +1,4 @@
+using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -111,6 +112,9 @@ namespace TerminalQuest.Ui
                 RefreshSuggestions();
                 SyncOptionHighlight();
             };
+
+            Narration.EntityClicked += OnEntityClicked;
+            Status.EntityClicked += OnEntityClicked;
 
             // The suggestions are added last so they draw over the foot of the transcript, the
             // same layering the settings screen uses to drop its editor onto a drawn row.
@@ -614,6 +618,16 @@ namespace TerminalQuest.Ui
             }
 
             Narration.HighlightedOption = null;
+        }
+
+        private void OnEntityClicked(string entityId)
+        {
+            if (App is null || Store is null)
+            {
+                return;
+            }
+
+            EntityDetailsDialog.Show(App, Store, entityId);
         }
     }
 }

@@ -82,12 +82,12 @@ namespace TerminalQuest.Tests.Ui
         {
             // Why the prose is stored with its tags. Recalled text has to be coloured as it was, and
             // the tags are the only record of how that was.
-            var lines = Replay([Narrator(1, "The [item]iron key[/item] turns.")]);
+            var lines = Replay([Narrator(1, "The [iron key](itm_1) turns.")]);
 
             var prose = Assert.Single(lines, line => TextOf(line).Contains("iron key", StringComparison.Ordinal));
 
             Assert.Equal("The iron key turns.", TextOf(prose));
-            Assert.Contains(prose.Spans, span => span is { Text: "iron key", Role: TextRole.Item });
+            Assert.Contains(prose.Spans, span => span is { Text: "iron key", Role: TextRole.Item, EntityId: "itm_1" });
         }
 
         [Fact]

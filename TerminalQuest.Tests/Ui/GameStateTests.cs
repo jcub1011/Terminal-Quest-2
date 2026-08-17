@@ -32,6 +32,7 @@ namespace TerminalQuest.Tests.Ui
             state.RefreshFrom(save.Store);
 
             Assert.Equal("Riverbend", state.SaveName);
+            Assert.Equal("Rowan", state.PlayerName);
             Assert.Equal("The Ford", state.Location);
             Assert.True(state.Health > 0);
             Assert.Equal(state.MaxHealth, state.Health);
@@ -117,9 +118,13 @@ namespace TerminalQuest.Tests.Ui
             var items = save.Store.ReadItems();
             Assert.Equal(inventory.Money, state.Money);
             var itemNames = inventory.Items.Select(stack => SaveStore.FindItemById(items, stack.ItemId)!.Name).ToList();
+            var itemIds = inventory.Items.Select(stack => stack.ItemId).ToList();
             Assert.Equal(
                 itemNames,
                 state.Inventory.Select(entry => entry.Name).ToList());
+            Assert.Equal(
+                itemIds,
+                state.Inventory.Select(entry => entry.Id).ToList());
         }
 
         [Fact]

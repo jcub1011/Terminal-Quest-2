@@ -402,7 +402,7 @@ namespace TerminalQuest.Mcp
             text.AppendLine("PLACES ON RECORD");
             text.AppendLine(locations.Locations.Count == 0
                 ? "  (nowhere yet)"
-                : "  " + string.Join(", ", locations.Locations.Select(location => location.Name)));
+                : "  " + string.Join(", ", locations.Locations.Select(location => $"{location.Name} ({location.Id})")));
 
             return ToolOutcome.Ok(text.ToString().TrimEnd());
         }
@@ -720,7 +720,7 @@ namespace TerminalQuest.Mcp
 
             store.WriteLocations(file);
 
-            return ToolOutcome.Ok($"{(isNew ? "Created" : "Updated")}: {location.Name}");
+            return ToolOutcome.Ok($"{(isNew ? "Created" : "Updated")}: {location.Name} ({location.Id})");
         }
 
         private static ToolOutcome GetLocation(SaveStore store, JsonElement arguments)
