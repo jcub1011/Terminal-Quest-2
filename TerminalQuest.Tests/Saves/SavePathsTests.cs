@@ -132,14 +132,14 @@ namespace TerminalQuest.Tests.Saves
         {
             using var root = new SavesRoot();
 
-            Assert.Equal(Path.GetFullPath(root.Root), SavePaths.Root);
+            Assert.Equal(Path.GetFullPath(root.SavesDirectory), SavePaths.Root);
         }
 
         [Fact]
         public void A_saves_folder_that_does_not_exist_lists_nothing()
         {
             using var root = new SavesRoot();
-            Directory.Delete(root.Root, recursive: true);
+            Directory.Delete(root.SavesDirectory, recursive: true);
 
             Assert.Empty(SavePaths.List());
         }
@@ -155,7 +155,7 @@ namespace TerminalQuest.Tests.Saves
             var store = SavePaths.Open("Riverbend");
             var metadata = store.ReadMetadata();
 
-            Assert.True(Directory.Exists(Path.Combine(root.Root, "Riverbend")));
+            Assert.True(Directory.Exists(Path.Combine(root.SavesDirectory, "Riverbend")));
             Assert.Equal(SaveStore.CurrentSchemaVersion, metadata.SchemaVersion);
             Assert.Equal("Riverbend", metadata.Name);
             Assert.Equal(0, metadata.Turn);
@@ -208,7 +208,7 @@ namespace TerminalQuest.Tests.Saves
 
             var folder = SavePaths.Folder("Riverbend");
 
-            Assert.Equal(Path.Combine(Path.GetFullPath(root.Root), "Riverbend"), folder);
+            Assert.Equal(Path.Combine(Path.GetFullPath(root.SavesDirectory), "Riverbend"), folder);
             Assert.False(Directory.Exists(folder));
         }
 
@@ -429,11 +429,11 @@ namespace TerminalQuest.Tests.Saves
             // would hand the duplicate a document that was never valid.
             using var root = new SavesRoot();
             SavePaths.Open("Riverbend");
-            File.WriteAllText(Path.Combine(root.Root, "Riverbend", "characters.json.tmp"), "half a write");
+            File.WriteAllText(Path.Combine(root.SavesDirectory, "Riverbend", "characters.json.tmp"), "half a write");
 
             var copy = SavePaths.Duplicate("Riverbend");
 
-            Assert.False(File.Exists(Path.Combine(root.Root, copy, "characters.json.tmp")));
+            Assert.False(File.Exists(Path.Combine(root.SavesDirectory, copy, "characters.json.tmp")));
         }
 
         [Fact]

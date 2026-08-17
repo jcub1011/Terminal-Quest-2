@@ -90,7 +90,7 @@ namespace TerminalQuest.Ui
         /// Where the scratch files go: the game's own folder, so a file left behind by a kill is
         /// somewhere the player can find rather than invisible in <c>%TEMP%</c>.
         /// </summary>
-        private static string ScratchDirectory => Path.Combine(AppDirectory.Root, "edit");
+        private static string ScratchDirectory => Path.Combine(PathProvider.Root, "edit");
 
         /// <summary>
         /// Opens the editor on <paramref name="field"/>'s current text.

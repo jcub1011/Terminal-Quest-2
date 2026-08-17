@@ -28,27 +28,31 @@ namespace TerminalQuest.Tests.Infrastructure
             Root = Path.Combine(
                 Path.GetTempPath(),
                 "TerminalQuest.Tests",
-                Guid.NewGuid().ToString("N"),
-                "Saves");
+                Guid.NewGuid().ToString("N"));
 
-            Directory.CreateDirectory(Root);
+            Directory.CreateDirectory(SavesDirectory);
             Environment.SetEnvironmentVariable(Variable, Root);
         }
 
-        /// <summary>The folder <c>SavePaths.Root</c> now resolves to.</summary>
+        /// <summary>The persisted root folder containing Saves and Settings.</summary>
         public string Root { get; }
+
+        /// <summary>The folder <c>SavePaths.Root</c> resolves to (<c>Path.Combine(Root, "Saves")</c>).</summary>
+        public string SavesDirectory => Path.Combine(Root, "Saves");
 
         /// <summary>Creates a save folder directly, bypassing <c>SavePaths.Open</c>.</summary>
         public string Folder(string name)
         {
-            var directory = Path.Combine(Root, name);
+            var directory = Path.Combine(SavesDirectory, name);
             Directory.CreateDirectory(directory);
             return directory;
         }
 
         /// <summary>The names of the folders actually on disk, sorted for comparison.</summary>
         public string[] Folders =>
-            [.. Directory.GetDirectories(Root).Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)];
+            Directory.Exists(SavesDirectory)
+                ? [.. Directory.GetDirectories(SavesDirectory).Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)]
+                : [];
 
         public void Dispose()
         {
@@ -56,7 +60,7 @@ namespace TerminalQuest.Tests.Infrastructure
 
             try
             {
-                Directory.Delete(Path.GetDirectoryName(Root)!, recursive: true);
+                Directory.Delete(Root, recursive: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

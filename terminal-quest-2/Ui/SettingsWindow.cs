@@ -567,7 +567,7 @@ namespace TerminalQuest.Ui
 
             _openConfigFolderButton.Accepting += (_, _) =>
             {
-                var dir = AppDirectory.Root;
+                var dir = PathProvider.Root;
                 Directory.CreateDirectory(dir);
                 if (!FileExplorer.TryOpen(dir, out var reason))
                 {

@@ -119,6 +119,9 @@ namespace TerminalQuest
             // And so that a keystroke is drawn on the next tick rather than up to 25ms later.
             Responsiveness.Apply(app);
 
+            // Migrate legacy data (settings, unnested saves) to new folder structure if needed
+            PathProvider.EnsureMigrated();
+
             // Read once and carried across sessions, because the settings screen mutates it in
             // place. A provider changed between one save and the next takes effect on the next,
             // since the narrator is built per session.

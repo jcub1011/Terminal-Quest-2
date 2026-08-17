@@ -12,9 +12,6 @@ namespace TerminalQuest.Saves
     /// </summary>
     internal static class SavePaths
     {
-        /// <summary>Overrides <see cref="Root"/>, mirroring the <c>TQ_DRIVER</c> convention.</summary>
-        private const string RootVariable = "TQ_SAVES";
-
         /// <summary>
         /// The longest name a save may have. Well inside what any filesystem takes; the limit is
         /// there so a name stays readable in a menu column.
@@ -40,21 +37,9 @@ namespace TerminalQuest.Saves
             };
 
         /// <summary>
-        /// The saves directory. <c>%APPDATA%\TerminalQuest\Saves</c> unless <c>TQ_SAVES</c> says
-        /// otherwise.
+        /// The saves directory under <see cref="PathProvider.Root"/>.
         /// </summary>
-        public static string Root
-        {
-            get
-            {
-                if (Environment.GetEnvironmentVariable(RootVariable) is { Length: > 0 } configured)
-                {
-                    return Path.GetFullPath(configured);
-                }
-
-                return Path.Combine(AppDirectory.Root, "Saves");
-            }
-        }
+        public static string Root => PathProvider.Saves;
 
         /// <summary>Existing saves, most recently played first.</summary>
         /// <remarks>

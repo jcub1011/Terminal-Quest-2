@@ -14,7 +14,7 @@ namespace TerminalQuest.Settings
         private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
         /// <summary>Where the file lives.</summary>
-        public static string Path => System.IO.Path.Combine(AppDirectory.Root, "settings.json");
+        public static string Path => System.IO.Path.Combine(PathProvider.Settings, "settings.json");
 
         /// <summary>
         /// The stored settings, or the defaults.
@@ -25,15 +25,17 @@ namespace TerminalQuest.Settings
         /// a working configuration. They can see what went wrong on the settings screen, which is
         /// where they would go to fix it anyway.
         /// </remarks>
-        public static AppSettings Read() => Read(Path);
+        public static AppSettings Read()
+        {
+            PathProvider.EnsureMigrated();
+            return Read(Path);
+        }
 
         /// <summary>
         /// The same, from a named file.
         /// </summary>
         /// <remarks>
-        /// <see cref="Path"/> is fixed under <see cref="AppDirectory"/> with no override — saves
-        /// can be redirected with <c>TQ_SAVES</c> but settings cannot. This overload is the seam
-        /// that lets the recovery behaviour above be checked without writing to the real profile.
+        /// This overload is the seam that lets the recovery behaviour above be checked without writing to the real profile.
         /// </remarks>
         internal static AppSettings Read(string path)
         {
