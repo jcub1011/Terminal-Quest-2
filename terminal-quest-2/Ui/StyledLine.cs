@@ -1,7 +1,10 @@
 namespace TerminalQuest.Ui
 {
     /// <summary>A run of text sharing a single <see cref="TextRole"/> and optional entity ID.</summary>
-    internal readonly record struct StyledSpan(string Text, TextRole Role, string? EntityId = null);
+    internal readonly record struct StyledSpan(string Text, TextRole Role, string? EntityId = null)
+    {
+        public string ToMarkup() => Theme.Format(Text, Role);
+    }
 
     /// <summary>
     /// One logical paragraph of the transcript. Holds unwrapped spans; wrapping to the
@@ -73,6 +76,12 @@ namespace TerminalQuest.Ui
                 _spans.RemoveAt(_spans.Count - 1);
             }
         }
+
+        public string ToPlainText() =>
+            string.Concat(_spans.Select(s => s.Text));
+
+        public string ToMarkup() =>
+            string.Concat(_spans.Select(s => s.ToMarkup()));
 
         public static StyledLine FromText(string text, TextRole role = TextRole.Normal)
         {

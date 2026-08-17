@@ -1,20 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text;
-using Terminal.Gui.App;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
     /// Carries streamed narration from the Claude reader thread onto the UI thread.
-    /// <para>
-    /// <c>ClaudeSession.OnTextDelta</c> is raised on a background thread. Views are not
-    /// thread-safe, so nothing here touches <see cref="NarrationView"/> directly - deltas are
-    /// queued and applied inside <see cref="IApplication.Invoke(Action)"/>.
-    /// </para>
-    /// <para>
-    /// A single drain is scheduled at a time and it empties the whole queue, so a fast stream
-    /// coalesces into few UI updates instead of posting one work item per token.
-    /// </para>
     /// </summary>
     internal sealed class NarrationPump
     {
@@ -24,19 +14,9 @@ namespace TerminalQuest.Ui
 
         private int _drainScheduled;
 
-        public NarrationPump(IApplication app, INarrationSink view)
-            : this(app.Invoke, view)
-        {
-        }
-
         /// <summary>
-        /// The same, given only a way onto the UI thread.
+        /// Given a delegate for marshalling invocations.
         /// </summary>
-        /// <remarks>
-        /// What this type needs from the application is one method, and taking it as a delegate is
-        /// what lets the drain gate below be exercised without a terminal - including the ordering
-        /// that matters, where a delta arrives while a drain is already running.
-        /// </remarks>
         internal NarrationPump(Action<Action> invoke, INarrationSink view)
         {
             ArgumentNullException.ThrowIfNull(invoke);

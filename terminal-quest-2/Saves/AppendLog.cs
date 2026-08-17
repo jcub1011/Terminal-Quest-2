@@ -54,7 +54,7 @@ namespace TerminalQuest.Saves
         /// holder's critical section is a small read and a small write, so ten is generous rather
         /// than hopeful.
         /// </remarks>
-        private const int Attempts = 10;
+        private const int Attempts = 50;
 
         private const int RetryMilliseconds = 20;
 

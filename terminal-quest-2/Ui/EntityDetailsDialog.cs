@@ -1,78 +1,35 @@
 using System.Text;
-using Terminal.Gui.App;
-using Terminal.Gui.Drawing;
-using Terminal.Gui.Input;
-using Terminal.Gui.ViewBase;
-using Terminal.Gui.Views;
+using Spectre.Console;
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
 
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// Modal dialog displaying details, descriptions, stats, and memories for a clicked entity.
+    /// Formats and displays details, descriptions, stats, and memories for an entity.
     /// </summary>
     internal static class EntityDetailsDialog
     {
-        public static void Show(IApplication? app, SaveStore? store, string entityId)
+        public static void Show(SaveStore? store, string entityId)
         {
-            if (app is null || store is null || string.IsNullOrWhiteSpace(entityId))
+            if (store is null || string.IsNullOrWhiteSpace(entityId))
             {
                 return;
             }
 
             var (title, content) = FormatEntityDetails(store, entityId.Trim());
 
-            var lines = content.Split('\n');
-            var dialogHeight = Math.Clamp(lines.Length + 6, 12, 24);
-            var maxLineWidth = lines.Length > 0 ? lines.Max(l => l.Length) : 40;
-            var dialogWidth = Math.Clamp(maxLineWidth + 6, 50, 76);
-
-            var dialog = new Dialog
+            var panel = new Panel(content)
             {
-                Title = title,
-                Width = dialogWidth,
-                Height = dialogHeight,
-                BorderStyle = LineStyle.Rounded,
-            };
-            dialog.SetScheme(Theme.CreateScheme());
-
-#pragma warning disable CS0618 // TextView is obsolete in Terminal.Gui v2
-            var textView = new TextView
-            {
-                X = 1,
-                Y = 0,
-                Width = Dim.Fill() - 2,
-                Height = Dim.Fill() - 2,
-                Text = content,
-                ReadOnly = true,
-                WordWrap = true,
-            };
-#pragma warning restore CS0618
-            textView.SetScheme(Theme.CreateScheme());
-
-            var closeButton = new Button
-            {
-                Text = "Close",
-                IsDefault = true,
-            };
-            closeButton.SetScheme(Theme.CreateScheme());
-            closeButton.Accepting += (_, _) => app.RequestStop(dialog);
-
-            dialog.KeyDown += (_, key) =>
-            {
-                if (key == Key.Esc)
-                {
-                    app.RequestStop(dialog);
-                }
+                Header = new PanelHeader($" [bold yellow]{Markup.Escape(title)}[/] "),
+                Border = BoxBorder.Rounded,
+                BorderStyle = new Style(new Color(0x8f, 0xb2, 0x6a)),
+                Padding = new Padding(1, 0, 1, 0)
             };
 
-            dialog.Add(textView);
-            dialog.AddButton(closeButton);
-
-            dialog.Initialized += (_, _) => closeButton.SetFocus();
-
-            app.Run(dialog);
+            AnsiConsole.WriteLine();
+            AnsiConsole.Write(panel);
+            AnsiConsole.WriteLine();
         }
 
         public static (string Title, string Content) FormatEntityDetails(SaveStore store, string entityId)

@@ -158,8 +158,8 @@ namespace TerminalQuest.Agents.LmStudio
             _contextWindowTokens = await LmStudioModels
                 .ContextLengthAsync(
                     _options.BaseUrl,
-                    _options.ApiKey,
                     _options.Model,
+                    _options.ApiKey,
                     _options.StartupTimeout,
                     cancellationToken,
                     _handler)

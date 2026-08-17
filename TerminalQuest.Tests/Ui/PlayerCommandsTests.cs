@@ -1,5 +1,3 @@
-using Terminal.Gui.Input;
-using Terminal.Gui.Views;
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
@@ -530,39 +528,14 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void GameWindow_completes_argument_on_tab()
+        public void Argument_suggestions_complete_character_name()
         {
             using var save = Seeded();
-            var state = new GameState();
-            using var window = new GameWindow(state) { Store = save.Store };
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/character Ro", save.Store);
 
-            var inputField = window.SubViews.OfType<TextField>().First();
-
-            inputField.Text = "/character Ro";
-
-            // Tab completes to "/character Rowan"
-            window.NewKeyDownEvent(Key.Tab);
-
-            Assert.Equal("/character Rowan", inputField.Text);
-        }
-
-        [Fact]
-        public void GameWindow_executes_character_with_no_args_when_enter_pressed_on_empty_arg()
-        {
-            using var save = Seeded();
-            var state = new GameState();
-            using var window = new GameWindow(state) { Store = save.Store };
-
-            string? entered = null;
-            window.CommandEntered += cmd => entered = cmd;
-
-            var inputField = window.SubViews.OfType<TextField>().First();
-            inputField.Text = "/character ";
-
-            // Enter on empty arg executes the command rather than completing suggestion
-            inputField.NewKeyDownEvent(Key.Enter);
-
-            Assert.Equal("/character", entered);
+            Assert.True(isChoosing);
+            Assert.Single(suggestions);
+            Assert.Equal("/character Rowan", suggestions[0].InsertText);
         }
     }
 }
