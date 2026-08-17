@@ -247,6 +247,7 @@ namespace TerminalQuest.Ui
             var currentLine = new StyledLine();
             var parser = new MarkupParser();
             var recorder = new NarrationRecorder();
+            var renderLock = new object();
 
             using var cts = new CancellationTokenSource();
             var pollTask = Task.Run(async () =>
@@ -259,11 +260,14 @@ namespace TerminalQuest.Ui
                         if (rolls.Count > 0)
                         {
                             var characters = store.ReadCharacters();
-                            foreach (var r in rolls)
+                            lock (renderLock)
                             {
-                                var roller = SaveStore.FindCharacterById(characters, r.CharacterId)?.Name ?? r.CharacterId;
-                                var rollLine = RollWatcher.Line(r, roller);
-                                SpectreRenderer.RenderRoll(rollLine.ToPlainText());
+                                foreach (var r in rolls)
+                                {
+                                    var roller = SaveStore.FindCharacterById(characters, r.CharacterId)?.Name ?? r.CharacterId;
+                                    var rollLine = RollWatcher.Line(r, roller);
+                                    SpectreRenderer.RenderRoll(rollLine.ToPlainText());
+                                }
                             }
                         }
                     }
@@ -278,21 +282,24 @@ namespace TerminalQuest.Ui
 
             Action<string> deltaHandler = delta =>
             {
-                recorder.Append(delta);
-                for (var i = 0; i < delta.Length; i++)
+                lock (renderLock)
                 {
-                    var c = delta[i];
-                    if (c == '\n')
+                    recorder.Append(delta);
+                    for (var i = 0; i < delta.Length; i++)
                     {
-                        parser.Append(c.ToString(), currentLine);
-                        lines.Add(currentLine);
-                        SpectreRenderer.RenderLine(currentLine);
-                        currentLine = new StyledLine();
-                        parser.Reset();
-                    }
-                    else
-                    {
-                        parser.Append(c.ToString(), currentLine);
+                        var c = delta[i];
+                        if (c == '\n')
+                        {
+                            parser.Append(c.ToString(), currentLine);
+                            lines.Add(currentLine);
+                            SpectreRenderer.RenderLine(currentLine);
+                            currentLine = new StyledLine();
+                            parser.Reset();
+                        }
+                        else
+                        {
+                            parser.Append(c.ToString(), currentLine);
+                        }
                     }
                 }
             };
@@ -303,10 +310,15 @@ namespace TerminalQuest.Ui
             try
             {
                 var result = await narrator.SendAsync(input, CancellationToken.None);
-                if (currentLine.Length > 0)
+                lock (renderLock)
                 {
-                    lines.Add(currentLine);
-                    SpectreRenderer.RenderLine(currentLine);
+                    if (currentLine.Length > 0)
+                    {
+                        lines.Add(currentLine);
+                        SpectreRenderer.RenderLine(currentLine);
+                        currentLine = new StyledLine();
+                        parser.Reset();
+                    }
                 }
                 AnsiConsole.WriteLine();
             }

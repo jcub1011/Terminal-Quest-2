@@ -109,88 +109,50 @@ namespace TerminalQuest.Ui
             AnsiConsole.WriteLine();
         }
 
-        private static async Task<SaveStore?> CreateNewSaveAsync(List<SaveEntry> saves, ExternalEditor editor)
+        private static void RenderNewGameHeader()
         {
-            void RenderNewGameHeader()
+            AnsiConsole.Write(new Rule("[bold cyan]Create New Game[/]")
             {
-                AnsiConsole.Write(new Rule("[bold cyan]Create New Game[/]")
+                Border = BoxBorder.Rounded,
+                Style = new Style(new Color(0x8f, 0xb2, 0x6a))
+            });
+            AnsiConsole.WriteLine();
+        }
+
+        private static Task<SaveStore?> CreateNewSaveAsync(List<SaveEntry> saves, ExternalEditor editor)
+        {
+            AnsiConsole.Clear();
+            RenderNewGameHeader();
+
+            var namePrompt = new TextPrompt<string>("[bold #e0b050]Enter name for new save (or leave empty to cancel):[/] ")
+                .AllowEmpty()
+                .Validate(name =>
                 {
-                    Border = BoxBorder.Rounded,
-                    Style = new Style(new Color(0x8f, 0xb2, 0x6a))
+                    var trimmed = name.Trim();
+                    if (string.IsNullOrEmpty(trimmed))
+                    {
+                        return ValidationResult.Success();
+                    }
+                    if (!SavePaths.IsValidName(trimmed))
+                    {
+                        return ValidationResult.Error("[red]Invalid save name. Must not contain invalid characters or reserved names.[/]");
+                    }
+                    if (saves.Any(s => string.Equals(s.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return ValidationResult.Error($"[red]A save named '{Markup.Escape(trimmed)}' already exists.[/]");
+                    }
+                    return ValidationResult.Success();
                 });
-                AnsiConsole.WriteLine();
-            }
 
-            var buffer = new StringBuilder();
-            string? errorMessage = null;
-
-            while (true)
+            var name = AnsiConsole.Prompt(namePrompt).Trim();
+            if (string.IsNullOrEmpty(name))
             {
-                AnsiConsole.Clear();
-                RenderNewGameHeader();
-
-                if (errorMessage is not null)
-                {
-                    AnsiConsole.MarkupLine($"[bold red]{Markup.Escape(errorMessage)}[/]");
-                    AnsiConsole.WriteLine();
-                }
-
-                AnsiConsole.Markup("[bold #e0b050]Enter name for new save (Esc to cancel):[/] ");
-                AnsiConsole.Markup($"[bold #ffffff]{Markup.Escape(buffer.ToString())}[/]");
-
-                var key = Console.ReadKey(intercept: true);
-
-                if (key.Key == ConsoleKey.Escape)
-                {
-                    return null;
-                }
-
-                if (key.Key == ConsoleKey.Enter)
-                {
-                    var name = buffer.ToString().Trim();
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        errorMessage = "Save name cannot be empty. Please enter a valid name.";
-                        buffer.Clear();
-                        continue;
-                    }
-
-                    if (!SavePaths.IsValidName(name))
-                    {
-                        errorMessage = "Invalid save name. Must not contain invalid characters or reserved names.";
-                        buffer.Clear();
-                        continue;
-                    }
-
-                    if (saves.Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        errorMessage = $"A save named '{name}' already exists. Please choose a different name.";
-                        buffer.Clear();
-                        continue;
-                    }
-
-                    var dir = SavePaths.Folder(name);
-                    Directory.CreateDirectory(dir);
-                    var store = new SaveStore(dir);
-
-                    return store;
-                }
-
-                if (key.Key == ConsoleKey.Backspace)
-                {
-                    if (buffer.Length > 0)
-                    {
-                        buffer.Remove(buffer.Length - 1, 1);
-                    }
-                    continue;
-                }
-
-                if (!char.IsControl(key.KeyChar))
-                {
-                    buffer.Append(key.KeyChar);
-                    errorMessage = null;
-                }
+                return Task.FromResult<SaveStore?>(null);
             }
+
+            var dir = SavePaths.Folder(name);
+            Directory.CreateDirectory(dir);
+            return Task.FromResult<SaveStore?>(new SaveStore(dir));
         }
 
         private static SaveStore? PickSave(List<SaveEntry> saves, AppSettings settings)

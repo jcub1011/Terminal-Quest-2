@@ -55,16 +55,15 @@ namespace TerminalQuest.Ui
                 AnsiConsole.Write(card);
             }
 
-            // 1. Archetype Selection with dedicated live preview card
+            // 1. Archetype Selection
             var classes = ClassTemplates.All;
             var archetypeChoice = CliMenu.Prompt(
-                "[bold #8fb26a]Choose your character archetype (↑/↓ to view details):[/]",
+                "[bold #8fb26a]Choose your character archetype:[/]",
                 classes,
-                c => c.Name,
+                c => $"{c.Name} [dim]— HP {c.MaxHealth}, {Markup.Escape(c.Aptitude)}[/]",
                 c => c.Name,
                 defaultIndex: 0,
                 renderHeader: RenderWizardHeader,
-                renderDetails: RenderArchetypeDetails,
                 allowCancel: true);
 
             if (archetypeChoice is null)
@@ -75,6 +74,8 @@ namespace TerminalQuest.Ui
             // 2. Character Name
             AnsiConsole.Clear();
             RenderWizardHeader();
+            RenderArchetypeDetails(archetypeChoice);
+            AnsiConsole.WriteLine();
 
             var name = AnsiConsole.Prompt(
                 new TextPrompt<string>("[bold #e0b050]Character Name:[/] ")
