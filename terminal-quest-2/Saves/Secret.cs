@@ -108,28 +108,36 @@ namespace TerminalQuest.Saves
         }
 
         /// <summary>
-        /// Gives a character a secret, live, stamped with the turn. The caller writes the file.
+        /// Gives a character a secret, stamped with the turn. The caller writes the file.
         /// </summary>
-        /// <remarks>
-        /// Live rather than dormant, which is the opposite of the default the stage itself carries.
-        /// Nothing yet exists to wake a dormant secret, and one created asleep with nothing able to
-        /// rouse it would be invisible for the rest of the campaign - worse than no secret at all. A
-        /// human adjudicates by editing the save, which is what the file format was built for.
-        /// </remarks>
-        public static Secret Grant(Character character, string name, string text, int turn)
+        public static Secret Grant(Character character, string name, string text, int turn, SecretStage stage = SecretStage.Live)
         {
             ArgumentNullException.ThrowIfNull(character);
 
             var secret = new Secret
             {
                 Name = CanonicalName(name) ?? string.Empty,
-                Stage = SecretStage.Live,
+                Stage = stage,
                 Text = text.Trim(),
                 Turn = turn,
             };
 
             character.Secrets.Add(secret);
             return secret;
+        }
+
+        /// <summary>
+        /// Promotes one of a character's dormant secrets to live. The caller writes the file.
+        /// </summary>
+        public static bool Promote(Character character, string? name)
+        {
+            if (Find(character, name) is not { Stage: SecretStage.Dormant } secret)
+            {
+                return false;
+            }
+
+            secret.Stage = SecretStage.Live;
+            return true;
         }
 
         /// <summary>

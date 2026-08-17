@@ -718,7 +718,7 @@ namespace TerminalQuest.Agents.LmStudio
                 writer.WriteEndArray();
 
                 writer.WriteStartArray("tools");
-                foreach (var tool in QuestTools.Definitions)
+                foreach (var tool in QuestTools.Definitions.Where(t => (t.Role & _options.Role) != 0))
                 {
                     writer.WriteStartObject();
                     writer.WriteString("type", "function");

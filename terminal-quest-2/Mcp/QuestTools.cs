@@ -32,7 +32,8 @@ namespace TerminalQuest.Mcp
                 "Read the whole world at once: the player, where they are, who is with them, "
               + "the player's inventory and purse, recent story events, and other characters/places on record. "
               + "Call this before narrating the first scene of a session.",
-                """{"type":"object","properties":{}}"""),
+                """{"type":"object","properties":{}}""",
+                Role: ToolRole.Both),
 
             new("get_transcript",
                 "The end of the last session word for word - what the player typed and the prose you "
@@ -41,7 +42,8 @@ namespace TerminalQuest.Mcp
                 {"type":"object",
                  "properties":{
                    "characters":{"type":"integer","description":"Roughly how much prose to return, in characters."}}}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("set_character",
                 "Create or update a character's state, health, description, or attributes. "
@@ -60,7 +62,8 @@ namespace TerminalQuest.Mcp
                    "attributes":{"type":"object","description":"Scores map, e.g. {\"Strength\":15,\"Dexterity\":12}."},
                    "new_name":{"type":"string","description":"If renaming this character."}},
                  "required":["name"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("get_character",
                 "Look up one character: who they are, their health, attributes, what they carry, "
@@ -69,7 +72,8 @@ namespace TerminalQuest.Mcp
                 {"type":"object",
                  "properties":{"name":{"type":"string","description":"The character's name."}},
                  "required":["name"]}
-                """),
+                """,
+                Role: ToolRole.Both),
 
             new("grant_secret",
                 "Give a character something they know and others do not: what a witness saw, "
@@ -80,9 +84,52 @@ namespace TerminalQuest.Mcp
                  "properties":{
                    "character":{"type":"string","description":"Who is keeping it."},
                    "name":{"type":"string","description":"A short handle, e.g. 'the sealed cellar'."},
-                   "detail":{"type":"string","description":"What the secret actually is. Use {This} for them and {Player} for the player."}},
+                   "detail":{"type":"string","description":"What the secret actually is. Use {This} for them and {Player} for the player."},
+                   "stage":{"type":"string","enum":["dormant","live"],"description":"Defaults to dormant. Live makes it active immediately."}},
                  "required":["character","name","detail"]}
-                """),
+                """,
+                Role: ToolRole.Director),
+
+            new("promote_secret",
+                "Promote a character's dormant secret to live, allowing them to act on it or speak of it.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "character":{"type":"string","description":"Who holds the secret."},
+                   "name":{"type":"string","description":"The secret's name handle."}},
+                 "required":["character","name"]}
+                """,
+                Role: ToolRole.Director),
+
+            new("ratify_claim",
+                "Promote an unratified claim from the ledger into canonical truth.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "sequence":{"type":"integer","description":"The ledger sequence number of the claim to ratify."}},
+                 "required":["sequence"]}
+                """,
+                Role: ToolRole.Director),
+
+            new("emit_directive",
+                "Deliver structured pacing, tension, and narrative guidance for the narrator's next turn.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "tone":{"type":"string","description":"Target mood, atmosphere, or tension level for the scene."},
+                   "pacing_note":{"type":"string","description":"Plot developments, complications, or NPC intent to convey."},
+                   "expiry_turn":{"type":"integer","description":"Turn after which this directive expires (defaults to 2 turns ahead)."}}}
+                """,
+                Role: ToolRole.Director),
+
+            new("get_unratified_claims",
+                "Read claims from the ledger that have been asserted but not yet ratified into canon.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "limit":{"type":"integer","description":"Max claims to return. Defaults to 20."}}}
+                """,
+                Role: ToolRole.Director),
 
             new("set_location",
                 "Create a place, append to its description, or rename it. Call this before moving anyone somewhere new.",
@@ -93,7 +140,8 @@ namespace TerminalQuest.Mcp
                    "description":{"type":"string","description":"Newly discovered sensory details (appended to what it says)."},
                    "new_name":{"type":"string","description":"If renaming the place."}},
                  "required":["name"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("get_location",
                 "One place in full: its description, who is standing there, items present, and recent events there.",
@@ -101,7 +149,8 @@ namespace TerminalQuest.Mcp
                 {"type":"object",
                  "properties":{"name":{"type":"string","description":"The location's name."}},
                  "required":["name"]}
-                """),
+                """,
+                Role: ToolRole.Both),
 
             new("move_character",
                 "Put a character in a place, taking them out of wherever they were. Call whenever anyone travels, player included.",
@@ -111,7 +160,8 @@ namespace TerminalQuest.Mcp
                    "character":{"type":"string","description":"Who is moving."},
                    "location":{"type":"string","description":"Destination location name."}},
                  "required":["character","location"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("modify_item",
                 "Add, give, take, or remove items. Positive quantity adds to stack; negative quantity removes. "
@@ -125,7 +175,8 @@ namespace TerminalQuest.Mcp
                    "description":{"type":"string","description":"Sensory description for newly introduced items."},
                    "location":{"type":"string","description":"Location if placing or taking from the ground/container instead of a person."}},
                  "required":["name"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("modify_money",
                 "Give or take coin. Positive amount adds coin; negative amount spends/takes coin. "
@@ -136,7 +187,8 @@ namespace TerminalQuest.Mcp
                    "amount":{"type":"integer","description":"Amount of coin to add (+) or spend (-)."},
                    "character":{"type":"string","description":"Whose purse to modify. Defaults to player."}},
                  "required":["amount"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("record_event",
                 "Log an event, memory, or milestone in the story. Name all characters, locations, and items involved. "
@@ -151,7 +203,8 @@ namespace TerminalQuest.Mcp
                    "items":{"type":"array","items":{"type":"string"},"description":"Names of items involved."},
                    "tags":{"type":"array","items":{"type":"string"},"description":"Optional topic tags."}},
                  "required":["title","detail"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("recall",
                 "Search past events and memories involving a specific character, place, or item. "
@@ -164,7 +217,8 @@ namespace TerminalQuest.Mcp
                    "item":{"type":"string","description":"Look up events involving this item."},
                    "query":{"type":"string","description":"Optional keyword search in event text."},
                    "limit":{"type":"integer","description":"Max events to return. Defaults to 10."}}}
-                """),
+                """,
+                Role: ToolRole.Both),
 
             new("roll",
                 "Settle an uncertain outcome with dice rather than deciding it yourself. "
@@ -179,7 +233,8 @@ namespace TerminalQuest.Mcp
                    "situational_modifier":{"type":"integer","description":"Optional situational bonus or penalty (e.g. 2 for favorable conditions, -5 for severe distraction/hostility) applied on top of the roll."},
                    "hidden":{"type":"boolean","description":"True keeps the total from the player."}},
                  "required":["notation","reason"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("reveal_roll",
                 "Show the player the result of a roll previously kept hidden.",
@@ -188,7 +243,8 @@ namespace TerminalQuest.Mcp
                  "properties":{
                    "character":{"type":"string","description":"Narrow to rolls this character made. Optional."},
                    "reason":{"type":"string","description":"Narrow to the roll whose reason contains this. Optional."}}}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("record_claims",
                 "Write down what this turn's prose will assert, called right before you narrate prose.",
@@ -204,25 +260,30 @@ namespace TerminalQuest.Mcp
                          "reveals":{"type":"string","description":"Name of a secret this gave away, if any."}},
                        "required":["claim"]}}},
                  "required":["claims"]}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("random_noun",
                 "Draw ordinary words at random to start somewhere you would not have chosen. Seeds only.",
                 """
                 {"type":"object",
                  "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
-                """),
+                """,
+                Role: ToolRole.Narrator),
 
             new("random_adjective",
                 "Draw qualities at random. Pair with a noun to seed new ideas. Seeds only.",
                 """
                 {"type":"object",
                  "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
-                """),
+                """,
+                Role: ToolRole.Narrator),
         ];
 
-        public static string AllowedTools() =>
-            string.Join(',', Definitions.Select(tool => $"mcp__{ServerName}__{tool.Name}"));
+        public static string AllowedTools() => AllowedTools(ToolRole.Narrator);
+
+        public static string AllowedTools(ToolRole role) =>
+            string.Join(',', Definitions.Where(tool => (tool.Role & role) != 0).Select(tool => $"mcp__{ServerName}__{tool.Name}"));
 
         public static ToolOutcome Invoke(SaveStore store, string name, JsonElement arguments)
         {
@@ -249,6 +310,10 @@ namespace TerminalQuest.Mcp
             "set_character" => SetCharacter(store, arguments),
             "get_character" => GetCharacter(store, arguments),
             "grant_secret" => GrantSecret(store, arguments),
+            "promote_secret" => PromoteSecret(store, arguments),
+            "ratify_claim" => RatifyClaim(store, arguments),
+            "emit_directive" => EmitDirective(store, arguments),
+            "get_unratified_claims" => GetUnratifiedClaims(store, arguments),
             "set_location" => SetLocation(store, arguments),
             "get_location" => GetLocation(store, arguments),
             "move_character" => MoveCharacter(store, arguments),
@@ -498,11 +563,119 @@ namespace TerminalQuest.Mcp
                 return ToolOutcome.Fail($"{character.Name} already holds a secret called '{existing.Name}'.");
             }
 
-            var granted = Secrets.Grant(character, name, detail, store.CurrentTurn());
+            var stageText = Text(arguments, "stage");
+            var stage = string.Equals(stageText, "dormant", StringComparison.OrdinalIgnoreCase)
+                ? SecretStage.Dormant
+                : SecretStage.Live;
+
+            var granted = Secrets.Grant(character, name, detail, store.CurrentTurn(), stage);
             store.WriteCharacters(file);
 
             return ToolOutcome.Ok(
                 $"{character.Name} now keeps '{granted.Name}'. Nobody else knows it.");
+        }
+
+        private static ToolOutcome PromoteSecret(SaveStore store, JsonElement arguments)
+        {
+            if (Text(arguments, "character") is not { Length: > 0 } characterName)
+            {
+                return ToolOutcome.Fail("promote_secret needs a character name.");
+            }
+
+            if (Text(arguments, "name") is not { Length: > 0 } secretName)
+            {
+                return ToolOutcome.Fail("promote_secret needs a secret name.");
+            }
+
+            var file = store.ReadCharacters();
+            var character = SaveStore.FindCharacter(file, characterName);
+            if (character is null)
+            {
+                return ToolOutcome.Fail($"No character named '{characterName}'.");
+            }
+
+            if (!Secrets.Promote(character, secretName))
+            {
+                return ToolOutcome.Fail($"No dormant secret named '{secretName}' found for {character.Name}.");
+            }
+
+            store.WriteCharacters(file);
+            return ToolOutcome.Ok($"Promoted secret '{secretName}' for {character.Name} to live.");
+        }
+
+        private static ToolOutcome RatifyClaim(SaveStore store, JsonElement arguments)
+        {
+            var sequence = Number(arguments, "sequence") ?? 0;
+            if (sequence <= 0)
+            {
+                return ToolOutcome.Fail("ratify_claim needs a positive sequence number.");
+            }
+
+            var entries = store.Ledger.Read().Entries;
+            var target = entries.FirstOrDefault(e => e.Seq == sequence);
+            if (target is null)
+            {
+                return ToolOutcome.Fail($"No ledger entry found with sequence #{sequence}.");
+            }
+
+            if (target.Truth == ClaimTruth.Ratified)
+            {
+                return ToolOutcome.Ok($"Claim #{sequence} was already ratified.");
+            }
+
+            var ratification = new LedgerEntry
+            {
+                Turn = store.CurrentTurn(),
+                Speaker = string.Empty,
+                Claim = target.Claim,
+                Truth = ClaimTruth.Ratified,
+                Adjudicates = sequence,
+            };
+
+            store.Ledger.Append(ratification);
+            return ToolOutcome.Ok($"Ratified claim #{sequence}: \"{target.Claim}\" into canon.");
+        }
+
+        private static ToolOutcome EmitDirective(SaveStore store, JsonElement arguments)
+        {
+            var tone = Text(arguments, "tone");
+            var pacingNote = Text(arguments, "pacing_note");
+            var expiryTurn = Number(arguments, "expiry_turn") ?? 0;
+
+            var currentTurn = store.CurrentTurn();
+            var directive = new DirectiveFile
+            {
+                TargetJournalSequence = store.Journal.Head(),
+                Trigger = "DirectorDecision",
+                ExpiryTurn = expiryTurn > 0 ? expiryTurn : currentTurn + 2,
+                Tone = tone ?? string.Empty,
+                PacingNote = pacingNote ?? string.Empty,
+                Consumed = false,
+            };
+
+            store.WriteDirective(directive);
+            return ToolOutcome.Ok($"Directive recorded for turn {currentTurn} (valid through turn {directive.ExpiryTurn}).");
+        }
+
+        private static ToolOutcome GetUnratifiedClaims(SaveStore store, JsonElement arguments)
+        {
+            var limit = Number(arguments, "limit") ?? 20;
+            if (limit <= 0)
+            {
+                limit = 20;
+            }
+
+            var entries = store.Ledger.Read().Entries;
+            var adjudicatedSequences = new HashSet<int>(
+                entries.Where(e => e.Adjudicates > 0 && e.Truth == ClaimTruth.Ratified)
+                       .Select(e => e.Adjudicates));
+
+            var unratified = entries
+                .Where(e => e.Adjudicates == 0 && e.Truth != ClaimTruth.Ratified && !adjudicatedSequences.Contains(e.Seq))
+                .TakeLast(limit)
+                .ToList();
+
+            return ToolOutcome.Ok(QuestRender.UnratifiedClaims(unratified));
         }
 
         private static ToolOutcome SetLocation(SaveStore store, JsonElement arguments)

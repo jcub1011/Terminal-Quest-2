@@ -70,6 +70,9 @@ namespace TerminalQuest.Agents.LmStudio
         /// </summary>
         public TimeSpan TurnTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+        /// <summary>Which role's tools to expose to the model.</summary>
+        public Mcp.ToolRole Role { get; init; } = Mcp.ToolRole.Narrator;
+
         /// <summary>How long <see cref="LmStudioSession.StartAsync"/> waits for the server to answer.</summary>
         public TimeSpan StartupTimeout { get; init; } = TimeSpan.FromSeconds(10);
     }

@@ -179,6 +179,7 @@ namespace TerminalQuest
             // prompt they were given for the whole life of their process - which is what makes
             // /system-prompt end the session rather than take effect in it.
             var systemPrompt = SystemPromptFile.Default;
+            var directorPrompt = DirectorPromptFile.Default;
 
             try
             {
@@ -191,6 +192,7 @@ namespace TerminalQuest
                 // this try, so a folder that cannot be written says so on the same path as every
                 // other save fault - and the character screen and the narrator are both skipped.
                 systemPrompt = SystemPromptFile.Ensure(store);
+                directorPrompt = DirectorPromptFile.Ensure(store);
 
                 // A save with nobody in it has never been played, whatever its metadata says.
                 needsCharacter = store.ReadCharacters().Characters.Count == 0;
@@ -266,7 +268,10 @@ namespace TerminalQuest
             using var life = new CancellationTokenSource();
             var leaving = false;
 
-            await using var narrator = AgentSessionFactory.Create(settings, store, systemPrompt);
+            await using var narrator = AgentSessionFactory.CreateNarrator(settings, store, systemPrompt);
+            await using var director = AgentSessionFactory.CreateDirector(settings, store, directorPrompt);
+            var lastDirectorTurn = 0;
+            string? lastPlayerLocationId = null;
 
             // No Title: the window draws its own title row from the state, which already knows the
             // save name, so that the place name in it can be green on its own.
@@ -390,12 +395,14 @@ namespace TerminalQuest
                 app.RequestStop(window);
             }
 
-            // Asks the narrator to abandon its turn. Best effort - we are leaving either way.
+            // Asks the narrator and director to abandon their turns. Best effort - we are leaving either way.
             async Task InterruptAsync()
             {
                 try
                 {
-                    await narrator.InterruptAsync();
+                    await Task.WhenAll(
+                        narrator.InterruptAsync(),
+                        director.InterruptAsync());
                 }
                 catch (Exception)
                 {
@@ -678,7 +685,9 @@ namespace TerminalQuest
             {
                 try
                 {
-                    await narrator.StartAsync(life.Token);
+                    await Task.WhenAll(
+                        narrator.StartAsync(life.Token),
+                        director.StartAsync(life.Token));
                 }
                 catch (OperationCanceledException)
                 {
@@ -815,7 +824,12 @@ namespace TerminalQuest
 
                 try
                 {
-                    var turn = await narrator.SendAsync(prompt, life.Token);
+                    var activeDirective = TryGetActiveDirective(store, spokenTurn);
+                    var fullPrompt = activeDirective is not null
+                        ? $"{activeDirective}\n\n{prompt}"
+                        : prompt;
+
+                    var turn = await narrator.SendAsync(fullPrompt, life.Token);
 
                     // Checked before anything is drawn: a turn that lands in the instant between
                     // the player leaving and the window closing has an answer nobody asked for any
@@ -883,6 +897,11 @@ namespace TerminalQuest
                         // left it and holds position for one who did.
                         window.IsBusy = false;
                     });
+
+                    if (!turn.IsError && !leaving)
+                    {
+                        CheckDirectorTriggers(spokenTurn);
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -911,6 +930,93 @@ namespace TerminalQuest
                 finally
                 {
                     turnLife.Cancel();
+                }
+            }
+
+            void CheckDirectorTriggers(int turn)
+            {
+                try
+                {
+                    var characters = store.ReadCharacters();
+                    var locations = store.ReadLocations();
+                    var player = SaveStore.Player(characters);
+                    var currentLocation = SaveStore.WhereIs(locations, player?.Id);
+                    var locationChanged = currentLocation?.Id != lastPlayerLocationId && lastPlayerLocationId is not null;
+                    lastPlayerLocationId = currentLocation?.Id;
+
+                    var eventsThisTurn = store.Story.Read().Entries.Any(e => e.Turn == turn);
+                    var ceilingHit = (turn - lastDirectorTurn) >= 8;
+
+                    if (locationChanged || eventsThisTurn || ceilingHit)
+                    {
+                        var triggerReason = locationChanged
+                            ? $"Player moved to {currentLocation?.Name ?? "a new location"}."
+                            : eventsThisTurn
+                                ? "Story event logged this turn."
+                                : "8 turns elapsed since last director review.";
+
+                        lastDirectorTurn = turn;
+                        _ = Task.Run(() => TriggerDirectorAsync(triggerReason, turn), life.Token);
+                    }
+                }
+                catch
+                {
+                    // Overseer trigger evaluation is best effort
+                }
+            }
+
+            async Task TriggerDirectorAsync(string reason, int turn)
+            {
+                if (leaving)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var recentStory = store.Story.Read().Entries.TakeLast(5).ToList();
+                    var recentStoryText = recentStory.Count > 0
+                        ? string.Join("\n", recentStory.Select(QuestRender.StoryEvent))
+                        : "None";
+
+                    var unratifiedCount = store.Ledger.Read().Entries.Count(e => e.Adjudicates == 0 && e.Truth != ClaimTruth.Ratified);
+
+                    var prompt = $"[DIRECTOR OVERSEER WAKE: Turn {turn}]\n"
+                               + $"Trigger: {reason}\n"
+                               + $"Recent Events:\n{recentStoryText}\n"
+                               + $"Unratified claims on record: {unratifiedCount}\n\n"
+                               + "Inspect world state and unratified claims. Ratify claims, promote or grant secrets, and emit a directive for upcoming scenes.";
+
+                    await director.SendAsync(prompt, life.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Normal on exit
+                }
+                catch (Exception)
+                {
+                    // Director is an asynchronous overseer; failures should not interrupt the game
+                }
+            }
+
+            static string? TryGetActiveDirective(SaveStore store, int turn)
+            {
+                try
+                {
+                    var directive = store.ReadDirective();
+                    if (directive is null || !directive.IsActive(turn))
+                    {
+                        return null;
+                    }
+
+                    var rendered = QuestRender.Directive(directive);
+                    directive.Consumed = true;
+                    store.WriteDirective(directive);
+                    return rendered;
+                }
+                catch
+                {
+                    return null;
                 }
             }
 

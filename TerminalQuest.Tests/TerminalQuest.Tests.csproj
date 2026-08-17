@@ -45,4 +45,13 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="CopyAssets" AfterTargets="Build">
+    <ItemGroup>
+      <AssetFiles Include="$(MSBuildThisFileDirectory)..\terminal-quest-2\assets\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AssetFiles)"
+          DestinationFolder="$(OutDir)assets\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

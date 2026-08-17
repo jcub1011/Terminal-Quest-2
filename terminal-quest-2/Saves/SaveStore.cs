@@ -22,6 +22,8 @@ namespace TerminalQuest.Saves
         private const string DiagnosticsFileName = "diagnostics.jsonl";
 
         private const string SystemPromptFileName = "system-prompt.txt";
+        private const string DirectorPromptFileName = "director-prompt.txt";
+        private const string DirectiveFileName = "directive.json";
 
         internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -57,6 +59,10 @@ namespace TerminalQuest.Saves
 
         public void WriteMetadata(SaveMetadata metadata) => Write(MetadataFileName, metadata, SaveJsonContext.Readable.SaveMetadata);
 
+        public DirectiveFile ReadDirective() => Read(DirectiveFileName, SaveJsonContext.Readable.DirectiveFile);
+
+        public void WriteDirective(DirectiveFile directive) => Write(DirectiveFileName, directive, SaveJsonContext.Readable.DirectiveFile);
+
         public int CurrentTurn() => ReadMetadata().Turn;
 
         public string SystemPromptPath => Path.Combine(Directory, SystemPromptFileName);
@@ -64,6 +70,12 @@ namespace TerminalQuest.Saves
         public string? ReadSystemPrompt() => ReadText(SystemPromptFileName);
 
         public void WriteSystemPrompt(string text) => WriteText(SystemPromptFileName, text);
+
+        public string DirectorPromptPath => Path.Combine(Directory, DirectorPromptFileName);
+
+        public string? ReadDirectorPrompt() => ReadText(DirectorPromptFileName);
+
+        public void WriteDirectorPrompt(string text) => WriteText(DirectorPromptFileName, text);
 
         public AppendLog<StoryEvent> Story =>
             field ??= new(Path.Combine(Directory, StoryFileName), LogJsonContext.Readable.StoryEvent);

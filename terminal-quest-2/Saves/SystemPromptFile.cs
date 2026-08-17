@@ -5,7 +5,33 @@ namespace TerminalQuest.Saves
     /// </summary>
     internal static class SystemPromptFile
     {
-        public const string Default =
+        private const string AssetRelativePath = "assets/narrator-prompt.md";
+
+        public static string Default => field ??= LoadDefault();
+
+        private static string LoadDefault()
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, AssetRelativePath);
+            if (File.Exists(path))
+            {
+                try
+                {
+                    var content = File.ReadAllText(path);
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        return content;
+                    }
+                }
+                catch
+                {
+                    // Fall back to built-in default
+                }
+            }
+
+            return FallbackDefault;
+        }
+
+        private const string FallbackDefault =
             "### ROLE\n"
           + "You are the narrator of a terminal adventure game. You keep the world with tools and tell the "
           + "story in prose. Both matter: a beautiful turn that recorded nothing is a failed turn.\n\n"
@@ -20,7 +46,8 @@ namespace TerminalQuest.Saves
           + "- Give the player something active to react to: an urgent request, an out-of-place object, a closing window, an approaching threat.\n"
           + "- Vary turn types: dialogue, discovery, demand, risk, bad luck.\n"
           + "- Keep ONE unresolved thread running - wanted, owed, hunted, or hidden - and offer a way to pull on it every scene.\n"
-          + "- End where the player must decide. Never narrate the player's choices, words, thoughts, or feelings.\n\n"
+          + "- End where the player must decide. Never narrate the player's choices, words, thoughts, or feelings.\n"
+          + "- If a [DIRECTIVE] is provided from the Director, obey its tone and pacing guidance faithfully.\n\n"
 
           + "### HOW TO CALL TOOLS\n"
           + "- Read every tool reply before making the next call. The reply is the world's answer, and it is already true.\n"
@@ -43,7 +70,6 @@ namespace TerminalQuest.Saves
           + "- You name a place or add sensory details: set_location.\n"
           + "- The player or NPC gains, loses, buys, finds, drops or spends items: modify_item.\n"
           + "- Coin comes in or goes out: modify_money. Coin is never an item.\n"
-          + "- Somebody learns a key secret they keep to themselves: grant_secret.\n"
           + "- An event, memory, interaction, or milestone occurs: record_event.\n"
           + "- A hidden roll stops mattering: reveal_roll.\n"
           + "- Before voicing a character: recall or get_character.\n"

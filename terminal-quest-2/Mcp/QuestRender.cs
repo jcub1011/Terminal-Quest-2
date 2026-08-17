@@ -222,6 +222,52 @@ namespace TerminalQuest.Mcp
             return text.ToString().TrimEnd();
         }
 
+        public static string Directive(DirectiveFile directive)
+        {
+            ArgumentNullException.ThrowIfNull(directive);
+
+            var text = new StringBuilder();
+            text.AppendLine("[DIRECTIVE from Director]");
+
+            if (!string.IsNullOrWhiteSpace(directive.Tone))
+            {
+                text.AppendLine($"Tone/Tension: {directive.Tone.Trim()}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(directive.PacingNote))
+            {
+                text.AppendLine($"Pacing Guidance: {directive.PacingNote.Trim()}");
+            }
+
+            if (directive.SecretPromotions.Count > 0)
+            {
+                text.AppendLine($"Activated Secrets in Play: {string.Join(", ", directive.SecretPromotions)}");
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
+        public static string UnratifiedClaims(IReadOnlyList<LedgerEntry> claims)
+        {
+            ArgumentNullException.ThrowIfNull(claims);
+
+            if (claims.Count == 0)
+            {
+                return "No unratified claims on record.";
+            }
+
+            var text = new StringBuilder();
+            text.AppendLine("Unratified claims on record:");
+
+            foreach (var claim in claims)
+            {
+                var speaker = string.IsNullOrWhiteSpace(claim.Speaker) ? "Narrator" : claim.Speaker;
+                text.AppendLine($"  #{claim.Seq} [turn {claim.Turn}] {speaker}: \"{claim.Claim}\"");
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
         public static string Kind(CharacterKind kind) => kind == CharacterKind.Player ? "player" : "npc";
     }
 }

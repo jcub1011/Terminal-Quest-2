@@ -4,16 +4,29 @@ using System.Text.Json;
 
 namespace TerminalQuest.Mcp
 {
+    /// <summary>
+    /// Which agent roles are permitted to see and call a tool.
+    /// </summary>
+    [Flags]
+    internal enum ToolRole
+    {
+        None = 0,
+        Narrator = 1 << 0,
+        Director = 1 << 1,
+        Both = Narrator | Director,
+    }
+
     /// <summary>One tool as advertised to the model.</summary>
     /// <param name="Name">
     /// Underscored, never spaced. The model reaches it as <c>mcp__quest__{Name}</c>.
     /// </param>
     /// <param name="Description">
-    /// Written for the narrator, not for a programmer: it has to say when to reach for the tool,
+    /// Written for the model: it has to say when to reach for the tool,
     /// because that judgement is the whole of the model's side of this contract.
     /// </param>
     /// <param name="InputSchema">A JSON Schema object, emitted into <c>tools/list</c>.</param>
-    internal sealed record QuestTool(string Name, string Description, string InputSchema)
+    /// <param name="Role">Which role(s) may invoke this tool.</param>
+    internal sealed record QuestTool(string Name, string Description, string InputSchema, ToolRole Role = ToolRole.Narrator)
     {
         // Declaring the property by hand stops the primary constructor assigning it, so the
         // parameter has to be consumed here instead.

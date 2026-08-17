@@ -74,6 +74,16 @@ if ($LASTEXITCODE -ne 0) {
 Get-ChildItem -LiteralPath $releaseDir -Recurse -Force -Include '*.pdb' |
     Remove-Item -Force
 
+# Copy assets folder to release output
+$assetsSrc = Join-Path $PSScriptRoot 'terminal-quest-2\assets'
+$assetsDst = Join-Path $releaseDir 'assets'
+if (Test-Path -LiteralPath $assetsSrc) {
+    if (-not (Test-Path -LiteralPath $assetsDst)) {
+        New-Item -ItemType Directory -Path $assetsDst | Out-Null
+    }
+    Copy-Item (Join-Path $assetsSrc '*') -Destination $assetsDst -Recurse -Force
+}
+
 $exePath = Join-Path $releaseDir 'TerminalQuest.exe'
 if (-not (Test-Path -LiteralPath $exePath)) {
     throw "Publish reported success but '$exePath' was not produced."

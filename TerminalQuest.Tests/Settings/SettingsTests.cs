@@ -141,9 +141,11 @@ namespace TerminalQuest.Tests.Settings
             {
                 Provider = AgentProvider.OpenAiApi,
                 ClaudeModel = "claude-opus-5",
+                DirectorClaudeModel = "claude-director-3",
                 OpenAiPreset = "Google",
                 LmStudioBaseUrl = "https://example.test/v1",
                 LmStudioModel = "some-model",
+                DirectorLmStudioModel = "director-model",
                 LmStudioApiKey = "secret",
                 EditorCommand = "code -w",
                 TranscriptRecallCharacters = 1234,

@@ -63,5 +63,11 @@ namespace TerminalQuest.Saves
         /// </summary>
         [JsonStringEnumMemberName("contradiction")]
         Contradiction,
+
+        /// <summary>
+        /// Explicitly ratified into canon by the Director.
+        /// </summary>
+        [JsonStringEnumMemberName("ratified")]
+        Ratified,
     }
 }

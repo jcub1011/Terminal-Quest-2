@@ -111,12 +111,28 @@ namespace TerminalQuest.Tests.Mcp
         {
             // Built from Definitions so a tool cannot be added and then silently left unavailable
             // to the CLI.
-            var allowed = QuestTools.AllowedTools().Split(',');
+            var allAllowed = QuestTools.AllowedTools(ToolRole.Narrator | ToolRole.Director).Split(',');
 
-            Assert.Equal(QuestTools.Definitions.Count, allowed.Length);
+            Assert.Equal(QuestTools.Definitions.Count, allAllowed.Length);
             Assert.Equal(
                 QuestTools.Definitions.Select(tool => $"mcp__{QuestTools.ServerName}__{tool.Name}").Order().ToList(),
-                allowed.Order().ToList());
+                allAllowed.Order().ToList());
+
+            var narratorAllowed = QuestTools.AllowedTools(ToolRole.Narrator).Split(',');
+            var expectedNarrator = QuestTools.Definitions
+                .Where(t => t.Role.HasFlag(ToolRole.Narrator))
+                .Select(t => $"mcp__{QuestTools.ServerName}__{t.Name}")
+                .Order()
+                .ToList();
+            Assert.Equal(expectedNarrator, narratorAllowed.Order().ToList());
+
+            var directorAllowed = QuestTools.AllowedTools(ToolRole.Director).Split(',');
+            var expectedDirector = QuestTools.Definitions
+                .Where(t => t.Role.HasFlag(ToolRole.Director))
+                .Select(t => $"mcp__{QuestTools.ServerName}__{t.Name}")
+                .Order()
+                .ToList();
+            Assert.Equal(expectedDirector, directorAllowed.Order().ToList());
         }
 
         [Fact]
@@ -124,7 +140,7 @@ namespace TerminalQuest.Tests.Mcp
         {
             Assert.Equal("quest", QuestTools.ServerName);
             Assert.All(
-                QuestTools.AllowedTools().Split(','),
+                QuestTools.AllowedTools(ToolRole.Narrator | ToolRole.Director).Split(','),
                 entry => Assert.StartsWith("mcp__quest__", entry, StringComparison.Ordinal));
         }
 

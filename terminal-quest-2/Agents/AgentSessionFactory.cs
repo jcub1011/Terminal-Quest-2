@@ -20,7 +20,36 @@ namespace TerminalQuest.Agents
         /// The save being played. Claude Code reaches it through the MCP server, which is launched
         /// pointed at its folder; LM Studio is handed the store itself and calls the tools here.
         /// </param>
-        public static IAgentSession Create(AppSettings settings, SaveStore store, string systemPrompt)
+        /// <summary>Creates the Narrator session with Narrator-scoped tools.</summary>
+        public static IAgentSession CreateNarrator(AppSettings settings, SaveStore store, string systemPrompt)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            ArgumentNullException.ThrowIfNull(store);
+
+            return Create(settings, store, systemPrompt, ToolRole.Narrator, settings.ClaudeModel, settings.LmStudioModel);
+        }
+
+        /// <summary>Creates the Director session with Director-scoped tools.</summary>
+        public static IAgentSession CreateDirector(AppSettings settings, SaveStore store, string directorPrompt)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            ArgumentNullException.ThrowIfNull(store);
+
+            var claudeModel = Or(settings.DirectorClaudeModel, settings.ClaudeModel);
+            var lmStudioModel = Or(settings.DirectorLmStudioModel, settings.LmStudioModel);
+            return Create(settings, store, directorPrompt, ToolRole.Director, claudeModel, lmStudioModel);
+        }
+
+        public static IAgentSession Create(AppSettings settings, SaveStore store, string systemPrompt) =>
+            CreateNarrator(settings, store, systemPrompt);
+
+        private static IAgentSession Create(
+            AppSettings settings,
+            SaveStore store,
+            string systemPrompt,
+            ToolRole role,
+            string? claudeModel,
+            string? lmStudioModel)
         {
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(store);
@@ -31,18 +60,19 @@ namespace TerminalQuest.Agents
                     new LmStudioSessionOptions
                     {
                         BaseUrl = Or(settings.LmStudioBaseUrl, AppSettings.DefaultLmStudioBaseUrl),
-                        Model = Trimmed(settings.LmStudioModel),
+                        Model = Trimmed(lmStudioModel),
                         SystemPrompt = systemPrompt,
                         ApiKey = settings.LmStudioApiKey?.Trim() ?? string.Empty,
+                        Role = role,
                     },
                     store),
 
                 _ => new ClaudeSession(new ClaudeSessionOptions
                 {
-                    Model = Trimmed(settings.ClaudeModel),
+                    Model = Trimmed(claudeModel),
                     SystemPrompt = systemPrompt,
                     McpConfigJson = QuestServerConfig.Build(store.Directory),
-                    AllowedTools = QuestTools.AllowedTools(),
+                    AllowedTools = QuestTools.AllowedTools(role),
                 }),
             };
         }

@@ -20,6 +20,9 @@ namespace TerminalQuest.Settings
         /// </summary>
         public string ClaudeModel { get; set; } = DefaultClaudeModel;
 
+        /// <summary>The Claude model for the Director. Empty uses whatever is configured for the narrator.</summary>
+        public string DirectorClaudeModel { get; set; } = string.Empty;
+
         /// <summary>The selected preset for OpenAI API (Google, OpenAI, Anthropic, Custom).</summary>
         public string OpenAiPreset { get; set; } = OpenAiPresets.Custom.Name;
 
@@ -28,6 +31,9 @@ namespace TerminalQuest.Settings
 
         /// <summary>The model id, exactly as the server lists it. Empty means whatever is loaded.</summary>
         public string LmStudioModel { get; set; } = string.Empty;
+
+        /// <summary>The model id for the Director. Empty uses whatever is configured for the narrator.</summary>
+        public string DirectorLmStudioModel { get; set; } = string.Empty;
 
         /// <summary>
         /// Bearer token. Only needed once the endpoint requires authentication (e.g. Google, OpenAI, Anthropic, or configured LM Studio).
@@ -117,9 +123,11 @@ namespace TerminalQuest.Settings
 
             Provider = other.Provider;
             ClaudeModel = other.ClaudeModel;
+            DirectorClaudeModel = other.DirectorClaudeModel;
             OpenAiPreset = other.OpenAiPreset;
             LmStudioBaseUrl = other.LmStudioBaseUrl;
             LmStudioModel = other.LmStudioModel;
+            DirectorLmStudioModel = other.DirectorLmStudioModel;
             LmStudioApiKey = other.LmStudioApiKey;
             EditorCommand = other.EditorCommand;
             TranscriptRecallCharacters = other.TranscriptRecallCharacters;
@@ -129,9 +137,11 @@ namespace TerminalQuest.Settings
         public void Normalize()
         {
             ClaudeModel ??= string.Empty;
+            DirectorClaudeModel ??= string.Empty;
             OpenAiPreset = string.IsNullOrWhiteSpace(OpenAiPreset) ? OpenAiPresets.Custom.Name : OpenAiPreset.Trim();
             LmStudioBaseUrl = string.IsNullOrWhiteSpace(LmStudioBaseUrl) ? DefaultLmStudioBaseUrl : LmStudioBaseUrl.Trim();
             LmStudioModel ??= string.Empty;
+            DirectorLmStudioModel ??= string.Empty;
             LmStudioApiKey = string.IsNullOrWhiteSpace(LmStudioApiKey) ? DefaultLmStudioApiKey : LmStudioApiKey.Trim();
             EditorCommand = string.IsNullOrWhiteSpace(EditorCommand) ? DefaultEditorCommand : EditorCommand.Trim();
             if (TranscriptRecallCharacters < Saves.TranscriptRecall.MinCharacters || TranscriptRecallCharacters > Saves.TranscriptRecall.MaxCharacters)
