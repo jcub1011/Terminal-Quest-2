@@ -230,6 +230,46 @@ namespace TerminalQuest.Mcp
             return text.ToString().TrimEnd();
         }
 
+        public static string TranscriptSearch(
+            IReadOnlyList<TranscriptEntry> entries,
+            int page,
+            int totalPages,
+            int totalMatches,
+            string? criteriaSummary = null)
+        {
+            ArgumentNullException.ThrowIfNull(entries);
+
+            if (totalMatches == 0 || entries.Count == 0)
+            {
+                return criteriaSummary is { Length: > 0 }
+                    ? $"No transcript entries found matching: {criteriaSummary}."
+                    : "No transcript entries on record.";
+            }
+
+            var text = new StringBuilder();
+            text.AppendLine($"Chat History (Page {page} of {totalPages}, {totalMatches} total match{(totalMatches == 1 ? string.Empty : "es")}):");
+
+            if (criteriaSummary is { Length: > 0 })
+            {
+                text.AppendLine($"Filter: {criteriaSummary}");
+            }
+            text.AppendLine();
+
+            foreach (var entry in entries)
+            {
+                var voiceLabel = entry.Voice == TranscriptVoice.Player ? "PLAYER" : "NARRATOR";
+                text.AppendLine($"[Turn {entry.Turn}, #{entry.Seq}] {voiceLabel}: {entry.Text}");
+            }
+
+            if (page < totalPages)
+            {
+                text.AppendLine();
+                text.AppendLine($"Page {page} of {totalPages}. To view the next page, call search_chat_history with page: {page + 1}.");
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
         public static string Directive(DirectiveFile directive)
         {
             ArgumentNullException.ThrowIfNull(directive);

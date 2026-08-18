@@ -45,6 +45,22 @@ namespace TerminalQuest.Mcp
                 """,
                 Role: ToolRole.Narrator),
 
+            new("search_chat_history",
+                "Search previous dialogue and narration across all turns by keyword, turn index, or entity ID. "
+              + "Returns paginated entries (default 5 per page) to manage context.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "query":{"type":"string","description":"Keyword or text to search for across transcript entries."},
+                   "turn":{"type":"integer","description":"Specific turn index to inspect."},
+                   "from_turn":{"type":"integer","description":"Starting turn index for range search."},
+                   "to_turn":{"type":"integer","description":"Ending turn index for range search."},
+                   "entity_id":{"type":"string","description":"Entity ID (e.g. 'chr_1', 'loc_1', 'itm_1') or name to find all mentions."},
+                   "page":{"type":"integer","description":"Page number (1-indexed). Defaults to 1."},
+                   "page_size":{"type":"integer","description":"Entries per page. Defaults to 5 (min 1, max 20)."}}}
+                """,
+                Role: ToolRole.Both),
+
             new("set_character",
                 "Create or update a character's state, health, description, or attributes. "
               + "Creating the player is the first thing to do in an empty save. "
@@ -307,6 +323,7 @@ namespace TerminalQuest.Mcp
         {
             "get_state" => GetState(store),
             "get_transcript" => GetTranscript(store, arguments),
+            "search_chat_history" => SearchChatHistory(store, arguments),
             "set_character" => SetCharacter(store, arguments),
             "get_character" => GetCharacter(store, arguments),
             "grant_secret" => GrantSecret(store, arguments),
@@ -415,6 +432,107 @@ namespace TerminalQuest.Mcp
             var recent = store.Transcript.Tail(Math.Max(TranscriptTailBytes, characters * 4));
 
             return ToolOutcome.Ok(QuestRender.Transcript(TranscriptRecall.Tail(recent, characters)));
+        }
+
+        private static ToolOutcome SearchChatHistory(SaveStore store, JsonElement arguments)
+        {
+            var query = Text(arguments, "query");
+            var turn = Number(arguments, "turn");
+            var fromTurn = Number(arguments, "from_turn") ?? Number(arguments, "fromTurn");
+            var toTurn = Number(arguments, "to_turn") ?? Number(arguments, "toTurn");
+            var entityParam = Text(arguments, "entity_id") ?? Text(arguments, "entityId") ?? Text(arguments, "entity");
+            var page = Math.Max(1, Number(arguments, "page") ?? 1);
+            var pageSize = Math.Clamp(Number(arguments, "page_size") ?? Number(arguments, "pageSize") ?? Number(arguments, "limit") ?? 5, 1, 20);
+
+            var entries = store.Transcript.Read().Entries;
+            var matched = entries.AsEnumerable();
+
+            var criteria = new List<string>();
+
+            if (turn is { } specificTurn)
+            {
+                matched = matched.Where(e => e.Turn == specificTurn);
+                criteria.Add($"turn: {specificTurn}");
+            }
+            else
+            {
+                if (fromTurn is { } start)
+                {
+                    matched = matched.Where(e => e.Turn >= start);
+                    criteria.Add($"from turn: {start}");
+                }
+
+                if (toTurn is { } end)
+                {
+                    matched = matched.Where(e => e.Turn <= end);
+                    criteria.Add($"to turn: {end}");
+                }
+            }
+
+            if (query is { Length: > 0 } q && !q.AsSpan().IsWhiteSpace())
+            {
+                matched = matched.Where(e => e.Text.Contains(q, StringComparison.OrdinalIgnoreCase));
+                criteria.Add($"query: '{q.Trim()}'");
+            }
+
+            if (entityParam is { Length: > 0 } entityStr && !entityStr.AsSpan().IsWhiteSpace())
+            {
+                var trimmed = entityStr.Trim();
+                var searchTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { trimmed };
+
+                var characters = store.ReadCharacters();
+                var locations = store.ReadLocations();
+                var items = store.ReadItems();
+
+                if (SaveStore.FindCharacterById(characters, trimmed) is { } cById)
+                {
+                    searchTerms.Add(cById.Name);
+                    searchTerms.Add(cById.Id);
+                }
+                else if (SaveStore.FindCharacter(characters, trimmed) is { } cByName)
+                {
+                    searchTerms.Add(cByName.Name);
+                    searchTerms.Add(cByName.Id);
+                }
+
+                if (SaveStore.FindLocationById(locations, trimmed) is { } lById)
+                {
+                    searchTerms.Add(lById.Name);
+                    searchTerms.Add(lById.Id);
+                }
+                else if (SaveStore.FindLocation(locations, trimmed) is { } lByName)
+                {
+                    searchTerms.Add(lByName.Name);
+                    searchTerms.Add(lByName.Id);
+                }
+
+                if (SaveStore.FindItemById(items, trimmed) is { } iById)
+                {
+                    searchTerms.Add(iById.Name);
+                    searchTerms.Add(iById.Id);
+                }
+                else if (SaveStore.FindItem(items, trimmed) is { } iByName)
+                {
+                    searchTerms.Add(iByName.Name);
+                    searchTerms.Add(iByName.Id);
+                }
+
+                matched = matched.Where(e => searchTerms.Any(term => e.Text.Contains(term, StringComparison.OrdinalIgnoreCase)));
+                criteria.Add($"entity: '{trimmed}'");
+            }
+
+            var matchList = matched.ToList();
+            var totalMatches = matchList.Count;
+            var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalMatches / pageSize));
+            var currentPage = Math.Clamp(page, 1, totalPages);
+
+            var pageEntries = matchList
+                .Skip((currentPage - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            var criteriaSummary = criteria.Count > 0 ? string.Join(", ", criteria) : null;
+            return ToolOutcome.Ok(QuestRender.TranscriptSearch(pageEntries, currentPage, totalPages, totalMatches, criteriaSummary));
         }
 
         private static ToolOutcome SetCharacter(SaveStore store, JsonElement arguments)

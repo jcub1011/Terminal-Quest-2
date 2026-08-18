@@ -184,7 +184,7 @@ namespace TerminalQuest.Ui
                             ? (hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace)
                             : ContinuePrompt;
 
-                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, openingInstruction, store, watcher);
+                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, openingInstruction, store, watcher, state.Turn);
                     }
 
                     // Main gameplay REPL loop
@@ -256,6 +256,20 @@ namespace TerminalQuest.Ui
                         }
 
                         state.Turn++;
+                        try
+                        {
+                            store.Transcript.Append(new TranscriptEntry
+                            {
+                                Turn = state.Turn,
+                                Voice = TranscriptVoice.Player,
+                                Text = actionText,
+                            });
+                        }
+                        catch
+                        {
+                            // Best-effort
+                        }
+
                         if (!TryTouch(store, state.Turn))
                         {
                             break;
@@ -286,7 +300,7 @@ namespace TerminalQuest.Ui
                         }
 
                         // Run Narrator Turn
-                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, actionText, store, watcher);
+                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, actionText, store, watcher, state.Turn);
                     }
                 }
                 finally
@@ -302,7 +316,8 @@ namespace TerminalQuest.Ui
             IAgentSession narrator,
             string input,
             SaveStore store,
-            RollWatcher watcher)
+            RollWatcher watcher,
+            int turn)
         {
             var lines = new List<StyledLine>();
             var currentLine = new StyledLine();
@@ -381,6 +396,26 @@ namespace TerminalQuest.Ui
                         parser.Reset();
                     }
                 }
+
+                var spoken = recorder.TakeAndClear();
+                var prose = string.IsNullOrWhiteSpace(spoken) ? result.Text : spoken;
+                if (!string.IsNullOrWhiteSpace(prose) && !result.IsError)
+                {
+                    try
+                    {
+                        store.Transcript.Append(new TranscriptEntry
+                        {
+                            Turn = turn,
+                            Voice = TranscriptVoice.Narrator,
+                            Text = prose,
+                        });
+                    }
+                    catch
+                    {
+                        // Best-effort
+                    }
+                }
+
                 AnsiConsole.WriteLine();
             }
             catch (Exception ex)

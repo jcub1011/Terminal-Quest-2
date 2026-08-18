@@ -10,6 +10,8 @@ namespace TerminalQuest.Ui
         public static readonly IReadOnlyList<PlayerCommandInfo> All =
         [
             new("story", "", "everything that has happened"),
+            new("history", "[page|query]", "read the full dialogue and narration history"),
+            new("transcript", "[page|query]", "read the full dialogue and narration history", IsAlias: true),
             new("rolls", "", "every die the world has thrown"),
             new("inventory", "", "what you are carrying"),
             new("inv", "", "what you are carrying", IsAlias: true),
@@ -222,6 +224,10 @@ namespace TerminalQuest.Ui
                     case "story":
                         Story(lines, store);
                         break;
+                    case "history":
+                    case "transcript":
+                        History(lines, store, argument);
+                        break;
                     case "rolls":
                         Rolls(lines, store);
                         break;
@@ -307,6 +313,93 @@ namespace TerminalQuest.Ui
                 {
                     lines.Add(StyledLine.FromText($"        {entry.Detail}", TextRole.System));
                 }
+            }
+        }
+
+        private static void History(List<StyledLine> lines, SaveStore store, string argument)
+        {
+            var entries = store.Transcript.Read().Entries;
+
+            if (entries.Count == 0)
+            {
+                lines.Add(StyledLine.FromText("Nothing has been spoken or narrated yet.", TextRole.System));
+                return;
+            }
+
+            const int PageSize = 10;
+            var trimmedArg = argument.Trim();
+
+            IEnumerable<TranscriptEntry> filtered = entries;
+            string? filterTitle = null;
+
+            if (trimmedArg.StartsWith("turn ", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(trimmedArg[5..].Trim(), out var turnNum))
+            {
+                filtered = entries.Where(e => e.Turn == turnNum);
+                filterTitle = $"Turn {turnNum}";
+            }
+            else if (int.TryParse(trimmedArg, out _))
+            {
+                // Numeric argument is handled as page index below
+            }
+            else if (trimmedArg.Length > 0)
+            {
+                filtered = entries.Where(e => e.Text.Contains(trimmedArg, StringComparison.OrdinalIgnoreCase));
+                filterTitle = $"Search: '{trimmedArg}'";
+            }
+
+            var matchList = filtered.ToList();
+
+            if (matchList.Count == 0)
+            {
+                lines.Add(StyledLine.FromText($"No chat history matching '{trimmedArg}'.", TextRole.System));
+                return;
+            }
+
+            var totalPages = Math.Max(1, (int)Math.Ceiling((double)matchList.Count / PageSize));
+            int page;
+
+            if (int.TryParse(trimmedArg, out var requestedPage))
+            {
+                page = Math.Clamp(requestedPage, 1, totalPages);
+            }
+            else
+            {
+                page = 1;
+            }
+
+            var pagedEntries = matchList.Skip((page - 1) * PageSize).Take(PageSize).ToList();
+
+            var header = filterTitle is not null
+                ? $"Chat History — {filterTitle} (Page {page} of {totalPages}, {matchList.Count} entries)"
+                : $"Chat History (Page {page} of {totalPages}, {matchList.Count} entries)";
+
+            lines.Add(StyledLine.FromText(header, TextRole.System));
+
+            foreach (var entry in pagedEntries)
+            {
+                var line = new StyledLine();
+                line.Append($"  {entry.Turn,4}  ", TextRole.System);
+
+                if (entry.Voice == TranscriptVoice.Player)
+                {
+                    line.Append($"> {entry.Text}", TextRole.Command);
+                    lines.Add(line);
+                }
+                else
+                {
+                    var parsed = MarkupParser.Parse(entry.Text);
+                    foreach (var span in parsed.Spans)
+                    {
+                        line.Append(span);
+                    }
+                    lines.Add(line);
+                }
+            }
+
+            if (totalPages > 1)
+            {
+                lines.Add(StyledLine.FromText($"Page {page} of {totalPages}. Type /history <page> or /history <query>.", TextRole.System));
             }
         }
 
