@@ -663,5 +663,19 @@ namespace TerminalQuest.Tests.Saves
             var names = SavePaths.ListNames().Order(StringComparer.Ordinal).ToList();
             Assert.Equal(["Alpha", "Beta"], names);
         }
+
+        [Fact]
+        public void UpdatePrompts_updates_narrator_and_director_story_prompts_to_defaults()
+        {
+            using var root = new SavesRoot();
+            var store = SavePaths.Open("StoryCampaign");
+            store.WriteNarratorStory("Old custom narrator text");
+            store.WriteDirectorStory("Old custom director text");
+
+            SavePaths.UpdatePrompts("StoryCampaign");
+
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), store.ReadNarratorStory());
+            Assert.Equal(DirectorPromptFile.StoryDefault.ReplaceLineEndings(), store.ReadDirectorStory());
+        }
     }
 }

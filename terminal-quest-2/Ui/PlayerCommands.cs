@@ -26,7 +26,11 @@ namespace TerminalQuest.Ui
             new("inspect", "<name|id>", "open details and ID for a character, location, or item"),
             new("saves", "", "every save on this machine"),
             new("delete", "<name>", "destroy another save, for good"),
-            new("system-prompt", "", "rewrite the narrator's instructions (ends the session)"),
+            new("story-prompt", "", "rewrite the narrator's story instructions (ends the session)", IsAlias: true),
+            new("system-prompt", "", "rewrite the narrator's story instructions (ends the session)"),
+            new("update-prompts", "", "update narrator and director story prompts to latest asset defaults"),
+            new("sync-prompts", "", "update narrator and director story prompts to latest asset defaults", IsAlias: true),
+            new("reset-prompts", "", "update narrator and director story prompts to latest asset defaults", IsAlias: true),
             new("help", "", "this list"),
             new("quit", "", "leave this save and go back to the menu"),
             new("exit", "", "leave this save and go back to the menu", IsAlias: true),
@@ -362,8 +366,14 @@ namespace TerminalQuest.Ui
                     case "delete":
                         Delete(lines, store, argument);
                         break;
+                    case "story-prompt":
                     case "system-prompt":
                         return SystemPrompt(lines);
+                    case "update-prompts":
+                    case "sync-prompts":
+                    case "reset-prompts":
+                        UpdatePrompts(lines, store);
+                        break;
                     case "quit":
                     case "exit":
                         return new PlayerCommandResult { Lines = lines, Quit = true };
@@ -818,10 +828,24 @@ namespace TerminalQuest.Ui
             lines.Add(StyledLine.FromText($"Deleted '{argument}'.", TextRole.System));
         }
 
+        private static void UpdatePrompts(List<StyledLine> lines, SaveStore store)
+        {
+            try
+            {
+                store.UpdatePrompts();
+                lines.Add(StyledLine.FromText("Updated narrator and director story prompts to latest asset defaults.", TextRole.System));
+                lines.Add(StyledLine.FromText("Tool instructions are always loaded fresh from game assets on each turn.", TextRole.System));
+            }
+            catch (Exception ex)
+            {
+                lines.Add(StyledLine.FromText($"Could not update prompts: {ex.Message}", TextRole.Danger));
+            }
+        }
+
         private static PlayerCommandResult SystemPrompt(List<StyledLine> lines)
         {
             lines.Add(StyledLine.FromText(
-                "Editing the narrator's instructions ends this session: the narrator is built once, when the save opens.",
+                "Editing the narrator's story instructions ends this session: the narrator is built once, when the save opens.",
                 TextRole.System));
 
             lines.Add(StyledLine.FromText(

@@ -33,6 +33,7 @@ namespace TerminalQuest.Ui
         private readonly Button _renameButton;
         private readonly Button _duplicateButton;
         private readonly Button _resetButton;
+        private readonly Button _updatePromptsButton;
         private readonly Button _revealButton;
         private readonly Button _deleteButton;
         private readonly Button _settingsButton;
@@ -101,7 +102,7 @@ namespace TerminalQuest.Ui
                 Y = Pos.Bottom(_savesTable),
                 Width = Dim.Fill() - 2,
                 Height = 1,
-                Text = "Enter: Load | N: New | R: Rename | D: Duplicate | Ctrl+R: Reset | F: Folder | Del: Delete | S: Settings | Q: Quit",
+                Text = "Enter: Load | N: New | R: Rename | D: Duplicate | Ctrl+R: Reset | U: Prompts | F: Folder | Del: Delete | S: Settings | Q: Quit",
             };
             _statusLabel.SetScheme(Theme.CreateScheme());
 
@@ -118,7 +119,8 @@ namespace TerminalQuest.Ui
             var row2Y = Pos.Bottom(_loadButton);
 
             _revealButton = new Button { Text = "Folder (F)", X = 1, Y = row2Y };
-            _deleteButton = new Button { Text = "Delete (Del)", X = Pos.Right(_revealButton) + 1, Y = row2Y };
+            _updatePromptsButton = new Button { Text = "Prompts (U)", X = Pos.Right(_revealButton) + 1, Y = row2Y };
+            _deleteButton = new Button { Text = "Delete (Del)", X = Pos.Right(_updatePromptsButton) + 1, Y = row2Y };
             _settingsButton = new Button { Text = "Settings (S)", X = Pos.Right(_deleteButton) + 1, Y = row2Y };
             _quitButton = new Button { Text = "Quit (Q)", X = Pos.Right(_settingsButton) + 1, Y = row2Y };
 
@@ -127,6 +129,7 @@ namespace TerminalQuest.Ui
             _renameButton.SetScheme(Theme.CreateScheme());
             _duplicateButton.SetScheme(Theme.CreateScheme());
             _resetButton.SetScheme(Theme.CreateScheme());
+            _updatePromptsButton.SetScheme(Theme.CreateScheme());
             _revealButton.SetScheme(Theme.CreateScheme());
             _deleteButton.SetScheme(Theme.CreateScheme());
             _settingsButton.SetScheme(Theme.CreateScheme());
@@ -153,6 +156,13 @@ namespace TerminalQuest.Ui
                 if (SelectedSave is { } save)
                 {
                     ConfirmReset(save);
+                }
+            };
+            _updatePromptsButton.Accepting += (_, _) =>
+            {
+                if (SelectedSave is { } save)
+                {
+                    ConfirmUpdatePrompts(save);
                 }
             };
             _revealButton.Accepting += (_, _) =>
@@ -182,6 +192,7 @@ namespace TerminalQuest.Ui
                 _renameButton,
                 _duplicateButton,
                 _resetButton,
+                _updatePromptsButton,
                 _revealButton,
                 _deleteButton,
                 _settingsButton,
@@ -255,6 +266,15 @@ namespace TerminalQuest.Ui
                 if (SelectedSave is { } save)
                 {
                     ConfirmReset(save);
+                }
+                return true;
+            }
+
+            if (Letter(key, Key.U))
+            {
+                if (SelectedSave is { } save)
+                {
+                    ConfirmUpdatePrompts(save);
                 }
                 return true;
             }
@@ -601,6 +621,30 @@ namespace TerminalQuest.Ui
                 catch (Exception ex)
                 {
                     _statusLabel.Text = $"Reset failed: {ex.Message}";
+                }
+            }
+        }
+
+        private void ConfirmUpdatePrompts(SaveEntry save)
+        {
+            var result = MessageBox.Query(
+                _app,
+                "Update Prompts",
+                $"Update story prompts in '{save.Name}' to the latest asset defaults?\nCustom changes in narrator-story.txt and director-story.txt will be overwritten.",
+                "Update",
+                "Cancel");
+
+            if (result == 0)
+            {
+                try
+                {
+                    SavePaths.UpdatePrompts(save.Name);
+                    Reload();
+                    _statusLabel.Text = $"Updated story prompts in '{save.Name}' to latest defaults.";
+                }
+                catch (Exception ex)
+                {
+                    _statusLabel.Text = $"Update failed: {ex.Message}";
                 }
             }
         }

@@ -367,6 +367,7 @@ namespace TerminalQuest.Tests.Ui
         [Theory]
         [InlineData("/system-prompt")]
         [InlineData("/SYSTEM-PROMPT")]
+        [InlineData("/story-prompt")]
         public void Rewriting_the_brief_asks_the_host_to_open_an_editor(string input)
         {
             using var save = Seeded();
@@ -385,10 +386,28 @@ namespace TerminalQuest.Tests.Ui
         {
             using var save = Seeded();
 
-            foreach (var command in PlayerCommands.All.Where(c => c.Name != "system-prompt"))
+            foreach (var command in PlayerCommands.All.Where(c => c.Name is not ("system-prompt" or "story-prompt")))
             {
                 Assert.False(PlayerCommands.Execute($"/{command.Name}", save.Store).EditSystemPrompt);
             }
+        }
+
+        [Theory]
+        [InlineData("/update-prompts")]
+        [InlineData("/sync-prompts")]
+        [InlineData("/reset-prompts")]
+        public void Update_prompts_updates_story_files_and_reports_success(string input)
+        {
+            using var save = Seeded();
+            save.Store.WriteNarratorStory("Old custom narrator text");
+            save.Store.WriteDirectorStory("Old custom director text");
+
+            var result = PlayerCommands.Execute(input, save.Store);
+            var text = TextOf(result);
+
+            Assert.Contains("Updated narrator and director story prompts", text, StringComparison.Ordinal);
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), save.Store.ReadNarratorStory());
+            Assert.Equal(DirectorPromptFile.StoryDefault.ReplaceLineEndings(), save.Store.ReadDirectorStory());
         }
 
         [Fact]
@@ -412,7 +431,7 @@ namespace TerminalQuest.Tests.Ui
             const string Written = "ZZQX-the-whole-prompt-must-not-be-echoed-ZZQX";
 
             using var save = Seeded();
-            save.Store.WriteSystemPrompt(Written);
+            save.Store.WriteNarratorStory(Written);
 
             var text = TextOf(PlayerCommands.Execute("/system-prompt", save.Store));
 
@@ -425,6 +444,9 @@ namespace TerminalQuest.Tests.Ui
             Assert.Contains(
                 "system-prompt",
                 PlayerCommands.Matching("/sys").Select(command => command.Name));
+            Assert.Contains(
+                "update-prompts",
+                PlayerCommands.Matching("/upd").Select(command => command.Name));
         }
 
         // ---- Argument suggestions -------------------------------------------------------------------

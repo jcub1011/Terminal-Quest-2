@@ -21,6 +21,8 @@ namespace TerminalQuest.Saves
         private const string TranscriptFileName = "transcript.jsonl";
         private const string DiagnosticsFileName = "diagnostics.jsonl";
 
+        private const string NarratorStoryFileName = "narrator-story.txt";
+        private const string DirectorStoryFileName = "director-story.txt";
         private const string SystemPromptFileName = "system-prompt.txt";
         private const string DirectorPromptFileName = "director-prompt.txt";
         private const string DirectiveFileName = "directive.json";
@@ -72,17 +74,39 @@ namespace TerminalQuest.Saves
 
         public int CurrentTurn() => ReadMetadata().Turn;
 
-        public string SystemPromptPath => Path.Combine(Directory, SystemPromptFileName);
+        public string NarratorStoryPath => Path.Combine(Directory, NarratorStoryFileName);
+
+        public string? ReadNarratorStory() => ReadText(NarratorStoryFileName);
+
+        public void WriteNarratorStory(string text) => WriteText(NarratorStoryFileName, text);
+
+        public string DirectorStoryPath => Path.Combine(Directory, DirectorStoryFileName);
+
+        public string? ReadDirectorStory() => ReadText(DirectorStoryFileName);
+
+        public void WriteDirectorStory(string text) => WriteText(DirectorStoryFileName, text);
+
+        public string SystemPromptPath => File.Exists(NarratorStoryPath) || !File.Exists(Path.Combine(Directory, SystemPromptFileName))
+            ? NarratorStoryPath
+            : Path.Combine(Directory, SystemPromptFileName);
 
         public string? ReadSystemPrompt() => ReadText(SystemPromptFileName);
 
         public void WriteSystemPrompt(string text) => WriteText(SystemPromptFileName, text);
 
-        public string DirectorPromptPath => Path.Combine(Directory, DirectorPromptFileName);
+        public string DirectorPromptPath => File.Exists(DirectorStoryPath) || !File.Exists(Path.Combine(Directory, DirectorPromptFileName))
+            ? DirectorStoryPath
+            : Path.Combine(Directory, DirectorPromptFileName);
 
         public string? ReadDirectorPrompt() => ReadText(DirectorPromptFileName);
 
         public void WriteDirectorPrompt(string text) => WriteText(DirectorPromptFileName, text);
+
+        public void UpdatePrompts()
+        {
+            NarratorPromptFile.UpdateStory(this);
+            DirectorPromptFile.UpdateStory(this);
+        }
 
         public AppendLog<StoryEvent> Story =>
             field ??= new(Path.Combine(Directory, StoryFileName), LogJsonContext.Readable.StoryEvent);

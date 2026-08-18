@@ -487,6 +487,24 @@ namespace TerminalQuest.Saves
         }
 
         /// <summary>
+        /// Updates the save's narrator and director story prompts with the current asset defaults.
+        /// </summary>
+        /// <exception cref="ArgumentException">The name could never have been a save.</exception>
+        /// <exception cref="SaveException">There was no such save.</exception>
+        public static void UpdatePrompts(string name)
+        {
+            var directory = Resolve(name, nameof(name));
+
+            if (!Directory.Exists(directory))
+            {
+                throw new SaveException($"There is no save called '{name.Trim()}'.");
+            }
+
+            var store = new SaveStore(directory);
+            store.UpdatePrompts();
+        }
+
+        /// <summary>
         /// Whether a name can be a folder. Rejects path separators and reserved characters rather
         /// than silently rewriting them, so the name in the menu is always the name on disk.
         /// </summary>

@@ -10,12 +10,12 @@ using Xunit;
 namespace TerminalQuest.Tests.Saves
 {
     /// <summary>
-    /// The one document in a save folder the player writes for the narrator: that it is seeded once, never seeded
-    /// over, and read back exactly as they left it.
+    /// The narrator's instructions: tools loaded fresh from assets, and story prompt saved per-save.
     /// </summary>
     public sealed class NarratorPromptFileTests
     {
-        private const string FileName = "system-prompt.txt";
+        private const string FileName = "narrator-story.txt";
+        private const string LegacyFileName = "system-prompt.txt";
 
         // ---- Falling back -------------------------------------------------------------------------
 
@@ -24,7 +24,7 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave();
 
-            Assert.Equal(NarratorPromptFile.Default, NarratorPromptFile.Read(save.Store));
+            Assert.Equal(NarratorPromptFile.StoryDefault, NarratorPromptFile.Read(save.Store));
 
             // Reading must not create it. Only Ensure does that, and only where it is safe to.
             Assert.False(save.Has(FileName));
@@ -33,11 +33,9 @@ namespace TerminalQuest.Tests.Saves
         [Fact]
         public void An_absent_file_reads_as_null_rather_than_empty()
         {
-            // The store's own answer, below the fallback: "nobody wrote one" has to stay separable
-            // from "somebody emptied it", even though the policy above treats them alike.
             using var save = new TempSave();
 
-            Assert.Null(save.Store.ReadSystemPrompt());
+            Assert.Null(save.Store.ReadNarratorStory());
         }
 
         [Theory]
@@ -46,13 +44,11 @@ namespace TerminalQuest.Tests.Saves
         [InlineData("\r\n\r\n")]
         public void An_empty_file_falls_back_to_the_default(string contents)
         {
-            // What a crash mid-write leaves behind, and an accident far more often than a request to
-            // narrate with no instructions at all.
             using var save = new TempSave();
 
             save.WriteRaw(FileName, contents);
 
-            Assert.Equal(NarratorPromptFile.Default, NarratorPromptFile.Read(save.Store));
+            Assert.Equal(NarratorPromptFile.StoryDefault, NarratorPromptFile.Read(save.Store));
         }
 
         // ---- Seeding ------------------------------------------------------------------------------
@@ -65,36 +61,48 @@ namespace TerminalQuest.Tests.Saves
             var seeded = NarratorPromptFile.Ensure(save.Store);
 
             Assert.True(save.Has(FileName));
-            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), seeded);
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), seeded);
             Assert.Equal(seeded, save.ReadRaw(FileName));
         }
 
         [Fact]
         public void The_seeded_file_uses_this_platforms_line_endings()
         {
-            // The first thing that happens to this file is that somebody opens it in Notepad.
             using var save = new TempSave();
 
             var seeded = NarratorPromptFile.Ensure(save.Store);
 
             Assert.Contains(Environment.NewLine, seeded, StringComparison.Ordinal);
-            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), seeded);
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), seeded);
         }
 
         [Fact]
         public void Ensure_leaves_an_edited_file_alone()
         {
-            // The promise the whole feature rests on: a prompt the player has written is never
-            // improved, replaced or topped up by the game.
             const string Written = "You are a laconic narrator. Two sentences, never three.";
 
             using var save = new TempSave();
 
             NarratorPromptFile.Ensure(save.Store);
-            save.Store.WriteSystemPrompt(Written);
+            save.Store.WriteNarratorStory(Written);
 
             Assert.Equal(Written, NarratorPromptFile.Ensure(save.Store));
             Assert.Equal(Written, save.ReadRaw(FileName));
+        }
+
+        [Fact]
+        public void Ensure_migrates_legacy_system_prompt_file()
+        {
+            const string LegacyPrompt = "Legacy custom narrator instructions.";
+
+            using var save = new TempSave();
+            save.WriteRaw(LegacyFileName, LegacyPrompt);
+
+            var result = NarratorPromptFile.Ensure(save.Store);
+
+            Assert.Equal(LegacyPrompt, result);
+            Assert.True(save.Has(FileName));
+            Assert.Equal(LegacyPrompt, save.ReadRaw(FileName));
         }
 
         [Fact]
@@ -104,7 +112,7 @@ namespace TerminalQuest.Tests.Saves
 
             save.WriteRaw(FileName, "   ");
 
-            Assert.Equal(NarratorPromptFile.Default.ReplaceLineEndings(), NarratorPromptFile.Ensure(save.Store));
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), NarratorPromptFile.Ensure(save.Store));
         }
 
         [Fact]
@@ -115,36 +123,60 @@ namespace TerminalQuest.Tests.Saves
             Assert.Equal(NarratorPromptFile.Ensure(save.Store), NarratorPromptFile.Ensure(save.Store));
         }
 
+        [Fact]
+        public void UpdateStory_overwrites_custom_file_with_latest_default()
+        {
+            using var save = new TempSave();
+
+            save.Store.WriteNarratorStory("Old custom prompt");
+            var updated = NarratorPromptFile.UpdateStory(save.Store);
+
+            Assert.Equal(NarratorPromptFile.StoryDefault.ReplaceLineEndings(), updated);
+            Assert.Equal(updated, save.Store.ReadNarratorStory());
+        }
+
+        // ---- Composition --------------------------------------------------------------------------
+
+        [Fact]
+        public void Compose_combines_tools_and_story_prompts()
+        {
+            using var save = new TempSave();
+            const string CustomStory = "Custom dark fantasy setting.";
+            save.Store.WriteNarratorStory(CustomStory);
+
+            var composed = NarratorPromptFile.Compose(save.Store);
+
+            Assert.Contains(CustomStory, composed, StringComparison.Ordinal);
+            Assert.Contains(NarratorPromptFile.ToolsDefault.Trim(), composed, StringComparison.Ordinal);
+            Assert.Contains("---", composed, StringComparison.Ordinal);
+        }
+
         // ---- Fidelity -----------------------------------------------------------------------------
 
         [Fact]
         public void What_the_player_writes_comes_back_byte_for_byte()
         {
-            // Line endings included, and unmixed. A document store that tidied what it was handed
-            // would make the file on disk stop matching what the editor saved.
             const string Written = "First line.\nSecond line.\r\nThird\tline, indented\n  and trailing.  ";
 
             using var save = new TempSave();
 
-            save.Store.WriteSystemPrompt(Written);
+            save.Store.WriteNarratorStory(Written);
 
-            Assert.Equal(Written, save.Store.ReadSystemPrompt());
+            Assert.Equal(Written, save.Store.ReadNarratorStory());
             Assert.Equal(Written, NarratorPromptFile.Read(save.Store));
         }
 
         [Fact]
         public void Markup_rules_and_braces_survive_the_round_trip()
         {
-            // The prompt is largely about square brackets and placeholder braces. Nothing may treat
-            // either as syntax of its own.
             const string Written =
                 "Mark items as [item](itm_1) and use {This} and {Player} in memories.";
 
             using var save = new TempSave();
 
-            save.Store.WriteSystemPrompt(Written);
+            save.Store.WriteNarratorStory(Written);
 
-            Assert.Equal(Written, save.Store.ReadSystemPrompt());
+            Assert.Equal(Written, save.Store.ReadNarratorStory());
         }
 
         [Fact]
@@ -154,16 +186,14 @@ namespace TerminalQuest.Tests.Saves
 
             using var save = new TempSave();
 
-            save.Store.WriteSystemPrompt(Written);
+            save.Store.WriteNarratorStory(Written);
 
-            Assert.Equal(Written, save.Store.ReadSystemPrompt());
+            Assert.Equal(Written, save.Store.ReadNarratorStory());
         }
 
         [Fact]
         public void The_file_is_written_without_a_byte_order_mark()
         {
-            // Shared with every other document here: a preamble is invisible in an editor and would
-            // reach the model as a stray character at the head of its instructions.
             using var save = new TempSave();
 
             NarratorPromptFile.Ensure(save.Store);
@@ -176,8 +206,6 @@ namespace TerminalQuest.Tests.Saves
         [Fact]
         public void A_file_saved_with_a_byte_order_mark_reads_without_it()
         {
-            // Notepad's encoding dropdown is right there, and a prompt that began with an invisible
-            // character would be handed to the narrator that way.
             const string Written = "Be brief.";
 
             using var save = new TempSave();
@@ -187,7 +215,7 @@ namespace TerminalQuest.Tests.Saves
                 Written,
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-            Assert.Equal(Written, save.Store.ReadSystemPrompt());
+            Assert.Equal(Written, save.Store.ReadNarratorStory());
         }
 
         [Fact]
@@ -196,7 +224,7 @@ namespace TerminalQuest.Tests.Saves
             using var save = new TempSave();
 
             NarratorPromptFile.Ensure(save.Store);
-            save.Store.WriteSystemPrompt("Rewritten.");
+            save.Store.WriteNarratorStory("Rewritten.");
 
             Assert.Empty(save.TempFiles);
         }
@@ -206,64 +234,61 @@ namespace TerminalQuest.Tests.Saves
         {
             using var save = new TempSave("Riverbend");
 
-            Assert.Equal(Path.Combine(save.Directory, FileName), save.Store.SystemPromptPath);
+            Assert.Equal(Path.Combine(save.Directory, FileName), save.Store.NarratorStoryPath);
         }
 
-        // ---- The default itself -------------------------------------------------------------------
+        // ---- The tools & story defaults -----------------------------------------------------------
 
         [Fact]
-        public void The_default_still_teaches_the_markup_the_parser_reads()
+        public void The_tools_default_teaches_the_markup_the_parser_reads()
         {
-            // The prompt and MarkupParser are a pair. This does not stop a player breaking that in
-            // their own save - they are allowed to - but it stops the shipped default drifting from
-            // the parser without anybody noticing.
-            Assert.Contains("[Entity Name](id)", NarratorPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("[\"Spoken words go here.\"]", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("[Entity Name](id)", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
+            Assert.Contains("[\"Spoken words go here.\"]", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
         }
 
         [Fact]
-        public void The_default_still_teaches_the_numbered_choices()
+        public void The_tools_default_teaches_the_numbered_choices()
         {
-            Assert.Contains("present_options", NarratorPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("NUMBERED CHOICES", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("present_options", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
+            Assert.Contains("NUMBERED CHOICES", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
         }
 
         [Fact]
-        public void The_default_is_well_inside_the_length_worth_warning_about()
+        public void The_composed_default_is_well_inside_the_length_worth_warning_about()
         {
-            // If the shipped text ever crossed this line, every new save would open on a warning.
+            var composed = NarratorPromptFile.Compose(NarratorPromptFile.ToolsDefault, NarratorPromptFile.StoryDefault);
             Assert.True(
-                NarratorPromptFile.Default.Length < NarratorPromptFile.WarnAboveCharacters,
-                $"the default prompt is {NarratorPromptFile.Default.Length} characters");
+                composed.Length < NarratorPromptFile.WarnAboveCharacters,
+                $"the composed default prompt is {composed.Length} characters");
         }
 
         [Fact]
-        public void Every_tool_the_default_names_is_a_tool_that_exists()
+        public void Every_tool_the_tools_default_names_is_a_tool_that_exists()
         {
             var known = QuestTools.Definitions.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
 
             var named = Regex
-                .Matches(NarratorPromptFile.Default, @"\b[a-z]+(?:_[a-z]+)+\b")
+                .Matches(NarratorPromptFile.ToolsDefault, @"\b[a-z]+(?:_[a-z]+)+\b")
                 .Select(match => match.Value)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
 
-            // Guards the guard: a prompt that stopped naming tools would pass vacuously.
             Assert.NotEmpty(named);
             Assert.DoesNotContain(named, name => !known.Contains(name));
         }
 
         [Fact]
-        public void The_default_still_names_the_one_tool_this_cannot_spell_check()
+        public void The_tools_default_names_call_roll()
         {
-            Assert.Contains("call roll", NarratorPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("Set hidden true", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("call roll", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
+            Assert.Contains("Set hidden true", NarratorPromptFile.ToolsDefault, StringComparison.Ordinal);
         }
 
         [Fact]
-        public void The_default_is_plain_ascii()
+        public void The_defaults_are_plain_ascii()
         {
-            Assert.DoesNotContain(NarratorPromptFile.Default, character => character > '\x7f');
+            Assert.DoesNotContain(NarratorPromptFile.ToolsDefault, character => character > '\x7f');
+            Assert.DoesNotContain(NarratorPromptFile.StoryDefault, character => character > '\x7f');
         }
     }
 }

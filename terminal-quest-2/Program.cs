@@ -178,8 +178,8 @@ namespace TerminalQuest
             // What this save tells the narrator. Read once, here, because both providers keep the
             // prompt they were given for the whole life of their process - which is what makes
             // /system-prompt end the session rather than take effect in it.
-            var systemPrompt = NarratorPromptFile.Default;
-            var directorPrompt = DirectorPromptFile.Default;
+            var systemPrompt = NarratorPromptFile.Compose(NarratorPromptFile.ToolsDefault, NarratorPromptFile.StoryDefault);
+            var directorPrompt = DirectorPromptFile.Compose(DirectorPromptFile.ToolsDefault, DirectorPromptFile.StoryDefault);
 
             try
             {
@@ -191,8 +191,11 @@ namespace TerminalQuest
                 // now and can be edited from the character screen and from /system-prompt. Inside
                 // this try, so a folder that cannot be written says so on the same path as every
                 // other save fault - and the character screen and the narrator are both skipped.
-                systemPrompt = NarratorPromptFile.Ensure(store);
-                directorPrompt = DirectorPromptFile.Ensure(store);
+                NarratorPromptFile.Ensure(store);
+                DirectorPromptFile.Ensure(store);
+
+                systemPrompt = NarratorPromptFile.Compose(store);
+                directorPrompt = DirectorPromptFile.Compose(store);
 
                 // A save with nobody in it has never been played, whatever its metadata says.
                 needsCharacter = store.ReadCharacters().Characters.Count == 0;
@@ -339,9 +342,9 @@ namespace TerminalQuest
                 if (systemPrompt.Length > NarratorPromptFile.WarnAboveCharacters)
                 {
                     window.Narration.AddLine(
-                        $"system-prompt.txt is {systemPrompt.Length:N0} characters. Past about "
+                        $"Narrator prompt is {systemPrompt.Length:N0} characters. Past about "
                       + $"{NarratorPromptFile.WarnAboveCharacters:N0} the Claude narrator may refuse to start, "
-                      + "because the prompt is passed to it on the command line. Shorten the file if it does.",
+                      + "because the prompt is passed to it on the command line. Shorten narrator-story.txt if it does.",
                         TextRole.Danger);
                     window.Narration.AddBlankLine();
                 }

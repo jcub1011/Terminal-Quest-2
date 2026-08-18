@@ -1,23 +1,30 @@
 namespace TerminalQuest.Saves
 {
     /// <summary>
-    /// The narrator's brief, and where each save keeps its own copy of it.
+    /// The narrator's instructions: tool/engine contract loaded dynamically from assets,
+    /// and story/voice persona kept per-save.
     /// </summary>
     internal static class NarratorPromptFile
     {
-        private const string AssetRelativePath = "assets/narrator-prompt.md";
+        private const string ToolsAssetRelativePath = "assets/narrator-tools.md";
+        private const string StoryAssetRelativePath = "assets/narrator-story.md";
 
-        public const string FileName = "system-prompt.txt";
+        public const string FileName = "narrator-story.txt";
+        public const string LegacyFileName = "system-prompt.txt";
 
-        public static string Default => field ??= LoadDefault();
+        public static string ToolsDefault => field ??= LoadAsset(ToolsAssetRelativePath);
 
-        private static string LoadDefault()
+        public static string StoryDefault => field ??= LoadAsset(StoryAssetRelativePath);
+
+        public static string Default => StoryDefault;
+
+        private static string LoadAsset(string relativePath)
         {
-            var path = Path.Combine(AppContext.BaseDirectory, AssetRelativePath);
+            var path = Path.Combine(AppContext.BaseDirectory, relativePath);
             if (!File.Exists(path))
             {
                 throw new FileNotFoundException(
-                    $"Required narrator prompt file '{AssetRelativePath}' was not found at '{path}'. " +
+                    $"Required narrator prompt asset file '{relativePath}' was not found at '{path}'. " +
                     "Please obtain a replacement from the repository.",
                     path);
             }
@@ -26,7 +33,7 @@ namespace TerminalQuest.Saves
             if (string.IsNullOrWhiteSpace(content))
             {
                 throw new InvalidOperationException(
-                    $"Required narrator prompt file at '{path}' is empty. " +
+                    $"Required narrator prompt asset file at '{path}' is empty. " +
                     "Please obtain a replacement from the repository.");
             }
 
@@ -39,33 +46,88 @@ namespace TerminalQuest.Saves
         public const int WarnAboveCharacters = 24_000;
 
         /// <summary>
-        /// This save's prompt: what is in the file, or <see cref="Default"/> when there is nothing
-        /// usable there.
+        /// This save's story prompt: what is in the save file, or <see cref="StoryDefault"/> when empty.
         /// </summary>
         public static string Read(SaveStore store)
         {
             ArgumentNullException.ThrowIfNull(store);
 
-            return store.ReadSystemPrompt() is { } text && !text.AsSpan().IsWhiteSpace()
-                ? text
-                : Default;
+            if (store.ReadNarratorStory() is { } story && !story.AsSpan().IsWhiteSpace())
+            {
+                return story;
+            }
+
+            if (store.ReadSystemPrompt() is { } legacy && !legacy.AsSpan().IsWhiteSpace())
+            {
+                return legacy;
+            }
+
+            return StoryDefault;
         }
 
         /// <summary>
-        /// Makes sure the save has a prompt file, and returns the prompt it now holds.
+        /// Makes sure the save has a narrator story file, migrating legacy file if present, and returns what it holds.
         /// </summary>
         public static string Ensure(SaveStore store)
         {
             ArgumentNullException.ThrowIfNull(store);
 
-            if (store.ReadSystemPrompt() is { } existing && !existing.AsSpan().IsWhiteSpace())
+            if (store.ReadNarratorStory() is { } existing && !existing.AsSpan().IsWhiteSpace())
             {
                 return existing;
             }
 
-            var seeded = Default.ReplaceLineEndings();
-            store.WriteSystemPrompt(seeded);
+            if (store.ReadSystemPrompt() is { } legacy && !legacy.AsSpan().IsWhiteSpace())
+            {
+                store.WriteNarratorStory(legacy);
+                return legacy;
+            }
+
+            var seeded = StoryDefault.ReplaceLineEndings();
+            store.WriteNarratorStory(seeded);
             return seeded;
+        }
+
+        /// <summary>
+        /// Overwrites the save's story prompt with the current asset default.
+        /// </summary>
+        public static string UpdateStory(SaveStore store)
+        {
+            ArgumentNullException.ThrowIfNull(store);
+
+            var seeded = StoryDefault.ReplaceLineEndings();
+            store.WriteNarratorStory(seeded);
+            return seeded;
+        }
+
+        /// <summary>
+        /// Composes the complete prompt delivered to the narrator agent session (fresh tools asset + save's story prompt).
+        /// </summary>
+        public static string Compose(SaveStore store)
+        {
+            ArgumentNullException.ThrowIfNull(store);
+            return Compose(ToolsDefault, Read(store));
+        }
+
+        /// <summary>
+        /// Combines tool instructions and story instructions into a complete prompt.
+        /// </summary>
+        public static string Compose(string tools, string story)
+        {
+            var trimmedTools = tools?.Trim() ?? string.Empty;
+            var trimmedStory = story?.Trim() ?? string.Empty;
+
+            if (trimmedStory.Length == 0)
+            {
+                return trimmedTools;
+            }
+
+            if (trimmedTools.Length == 0)
+            {
+                return trimmedStory;
+            }
+
+            return $"{trimmedStory}{Environment.NewLine}{Environment.NewLine}---{Environment.NewLine}{Environment.NewLine}{trimmedTools}";
         }
     }
 }
