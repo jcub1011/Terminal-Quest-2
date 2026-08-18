@@ -59,7 +59,7 @@ namespace TerminalQuest.Agents
                 AgentProvider.LmStudio => new LmStudioSession(
                     new LmStudioSessionOptions
                     {
-                        BaseUrl = Or(settings.LmStudioBaseUrl, AppSettings.DefaultLmStudioBaseUrl),
+                        BaseUrl = AppSettings.NormalizeBaseUrl(Or(settings.LmStudioBaseUrl, AppSettings.DefaultLmStudioBaseUrl)),
                         Model = Trimmed(lmStudioModel),
                         SystemPrompt = systemPrompt,
                         ApiKey = settings.LmStudioApiKey?.Trim() ?? string.Empty,

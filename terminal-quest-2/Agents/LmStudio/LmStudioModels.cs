@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
+using TerminalQuest.Settings;
+
 namespace TerminalQuest.Agents.LmStudio
 {
     /// <summary>
@@ -29,7 +31,8 @@ namespace TerminalQuest.Agents.LmStudio
             CancellationToken cancellationToken = default,
             HttpMessageHandler? handler = null)
         {
-            var address = $"{baseUrl.TrimEnd('/')}/models";
+            var normalizedUrl = AppSettings.NormalizeBaseUrl(baseUrl);
+            var address = $"{normalizedUrl.TrimEnd('/')}/models";
 
             using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
             {
@@ -105,7 +108,8 @@ namespace TerminalQuest.Agents.LmStudio
         {
             // The configured base url points at the OpenAI-compatible surface; the native one is a
             // sibling of it, so the /v1 has to come off rather than be appended to.
-            var root = baseUrl.TrimEnd('/');
+            var normalizedUrl = AppSettings.NormalizeBaseUrl(baseUrl);
+            var root = normalizedUrl.TrimEnd('/');
             if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
             {
                 root = root[..^"/v1".Length];

@@ -111,6 +111,30 @@ namespace TerminalQuest.Settings
             Uri.TryCreate(value, UriKind.Absolute, out var uri)
             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
+        /// <summary>
+        /// Normalizes an OpenAI-compatible API base URL by ensuring it trims trailing slashes
+        /// and appends /v1 if no subpath was provided on a root host address.
+        /// </summary>
+        public static string NormalizeBaseUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return DefaultLmStudioBaseUrl;
+            }
+
+            var trimmed = url.Trim().TrimEnd('/');
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                if (string.IsNullOrEmpty(uri.AbsolutePath) || uri.AbsolutePath == "/")
+                {
+                    return $"{trimmed}/v1";
+                }
+            }
+
+            return trimmed;
+        }
+
         /// <summary>Takes every value from another instance.</summary>
         /// <remarks>
         /// The settings screen edits a copy and the host adopts it wholesale once the player
@@ -139,7 +163,7 @@ namespace TerminalQuest.Settings
             ClaudeModel ??= string.Empty;
             DirectorClaudeModel ??= string.Empty;
             OpenAiPreset = string.IsNullOrWhiteSpace(OpenAiPreset) ? OpenAiPresets.Custom.Name : OpenAiPreset.Trim();
-            LmStudioBaseUrl = string.IsNullOrWhiteSpace(LmStudioBaseUrl) ? DefaultLmStudioBaseUrl : LmStudioBaseUrl.Trim();
+            LmStudioBaseUrl = NormalizeBaseUrl(LmStudioBaseUrl);
             LmStudioModel ??= string.Empty;
             DirectorLmStudioModel ??= string.Empty;
             LmStudioApiKey = string.IsNullOrWhiteSpace(LmStudioApiKey) ? DefaultLmStudioApiKey : LmStudioApiKey.Trim();

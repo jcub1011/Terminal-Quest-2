@@ -121,13 +121,38 @@ namespace TerminalQuest.Tests.Settings
         [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "Google")]
         [InlineData("https://generativelanguage.googleapis.com/v1beta/openai/", "Google")]
         [InlineData("https://api.openai.com/v1", "OpenAI")]
+        [InlineData("https://api.openai.com", "OpenAI")]
+        [InlineData("https://api.openai.com/", "OpenAI")]
         [InlineData("https://api.anthropic.com/v1", "Anthropic")]
+        [InlineData("https://api.anthropic.com", "Anthropic")]
+        [InlineData("https://api.anthropic.com/", "Anthropic")]
         [InlineData("http://localhost:1234/v1", "Custom")]
+        [InlineData("http://localhost:1234", "Custom")]
         [InlineData("http://127.0.0.1:11434/v1", "Custom")]
+        [InlineData("http://127.0.0.1:11434", "Custom")]
         public void DetectPreset_matches_url_to_preset(string url, string expectedPreset)
         {
             var preset = OpenAiPresets.DetectPreset(url);
             Assert.Equal(expectedPreset, preset.Name);
+        }
+
+        [Theory]
+        [InlineData(null, AppSettings.DefaultLmStudioBaseUrl)]
+        [InlineData("", AppSettings.DefaultLmStudioBaseUrl)]
+        [InlineData("   ", AppSettings.DefaultLmStudioBaseUrl)]
+        [InlineData("http://localhost:1234", "http://localhost:1234/v1")]
+        [InlineData("http://localhost:1234/", "http://localhost:1234/v1")]
+        [InlineData("http://127.0.0.1:1234", "http://127.0.0.1:1234/v1")]
+        [InlineData("http://localhost:11434", "http://localhost:11434/v1")]
+        [InlineData("https://api.openai.com", "https://api.openai.com/v1")]
+        [InlineData("https://api.openai.com/", "https://api.openai.com/v1")]
+        [InlineData("http://localhost:1234/v1", "http://localhost:1234/v1")]
+        [InlineData("http://localhost:1234/v1/", "http://localhost:1234/v1")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "https://generativelanguage.googleapis.com/v1beta/openai")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai/", "https://generativelanguage.googleapis.com/v1beta/openai")]
+        public void NormalizeBaseUrl_normalizes_root_and_preserves_path_endpoints(string? input, string expected)
+        {
+            Assert.Equal(expected, AppSettings.NormalizeBaseUrl(input));
         }
 
         // ---- Copying ---------------------------------------------------------------------------

@@ -779,12 +779,14 @@ namespace TerminalQuest.Ui
 
         private async Task ProbeLmStudioModelsAsync()
         {
-            var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
-            if (string.IsNullOrEmpty(baseUrl) || !AppSettings.IsAddress(baseUrl))
+            var rawUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(rawUrl) || !AppSettings.IsAddress(rawUrl))
             {
                 _probeStatus.Text = "Enter a valid server URL before probing.";
                 return;
             }
+
+            var baseUrl = AppSettings.NormalizeBaseUrl(rawUrl);
 
             _probe?.Cancel();
             _probe?.Dispose();
@@ -891,13 +893,13 @@ namespace TerminalQuest.Ui
                 _statusLabel.Text = "OpenAI API Base URL must be a valid http:// or https:// address.";
                 return;
             }
-            _draft.LmStudioBaseUrl = baseUrl;
+            _draft.LmStudioBaseUrl = AppSettings.NormalizeBaseUrl(baseUrl);
             _draft.LmStudioApiKey = _lmStudioApiKey.Text?.Trim() ?? string.Empty;
             _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(_draft.OpenAiPreset))
             {
-                _draft.OpenAiPreset = OpenAiPresets.DetectPreset(baseUrl).Name;
+                _draft.OpenAiPreset = OpenAiPresets.DetectPreset(_draft.LmStudioBaseUrl).Name;
             }
 
             var recallText = _recallChars.Text?.Trim() ?? string.Empty;

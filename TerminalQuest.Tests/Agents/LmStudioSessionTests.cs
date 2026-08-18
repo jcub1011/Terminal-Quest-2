@@ -659,6 +659,56 @@ namespace TerminalQuest.Tests.Agents
             Assert.Equal("/v1/chat/completions", handler.Paths[^1]);
         }
 
+        [Fact]
+        public async Task Bare_root_base_url_is_normalized_to_v1_endpoints()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("a-model").Says("text");
+            var options = new LmStudioSessionOptions
+            {
+                BaseUrl = "http://localhost:1234",
+                Model = "a-model",
+                SystemPrompt = "You narrate.",
+            };
+            await using var session = new LmStudioSession(options, save.Store, handler);
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(["/v1/models", "/api/v0/models", "/v1/chat/completions"], handler.Paths);
+        }
+
+        [Fact]
+        public async Task An_endpoint_returning_two_hundred_with_non_sse_error_payload_fails_the_turn()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Json("{\"error\":\"Unexpected endpoint or method. (POST /chat/completions). Returning 200 anyway\"}");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+
+            var ex = await Assert.ThrowsAsync<AgentException>(() => session.SendAsync("Look around.", Token));
+            Assert.Contains("unexpected response", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Unexpected endpoint or method", ex.Detail, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task An_endpoint_returning_two_hundred_with_empty_stream_fails_the_turn()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Stream("data: [DONE]");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            await session.StartAsync(Token);
+
+            var ex = await Assert.ThrowsAsync<AgentException>(() => session.SendAsync("Look around.", Token));
+            Assert.Contains("empty response", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         // ---- Guards -------------------------------------------------------------------------------------
 
         [Fact]

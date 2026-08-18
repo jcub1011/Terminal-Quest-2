@@ -6,6 +6,7 @@ using System.Text.Json;
 
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
+using TerminalQuest.Settings;
 
 namespace TerminalQuest.Agents.LmStudio
 {
@@ -88,7 +89,7 @@ namespace TerminalQuest.Agents.LmStudio
             ArgumentNullException.ThrowIfNull(options);
             ArgumentNullException.ThrowIfNull(store);
 
-            _options = options;
+            _options = options with { BaseUrl = AppSettings.NormalizeBaseUrl(options.BaseUrl) };
             _store = store;
 
             _handler = handler;
@@ -463,6 +464,7 @@ namespace TerminalQuest.Agents.LmStudio
 
             var filter = _options.StripThinkTags ? new ThinkTagFilter() : null;
             var text = new StringBuilder();
+            var nonSseContent = new StringBuilder();
             var calls = new List<PartialToolCall>();
             var inputTokens = 0;
             var outputTokens = 0;
@@ -472,8 +474,17 @@ namespace TerminalQuest.Agents.LmStudio
             {
                 // Blank lines separate events and a leading colon is a keep-alive comment; neither
                 // carries a payload.
-                if (line.Length == 0 || line[0] == ':' || !line.StartsWith("data:", StringComparison.Ordinal))
+                if (line.Length == 0 || line[0] == ':')
                 {
+                    continue;
+                }
+
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    if (nonSseContent.Length < MaxQuotedErrorChars)
+                    {
+                        nonSseContent.AppendLine(line);
+                    }
                     continue;
                 }
 
@@ -576,9 +587,28 @@ namespace TerminalQuest.Agents.LmStudio
                 }
             }
 
+            var builtCalls = calls
+                .Select(static (call, index) => call.Build(index))
+                .Where(static call => call.Name.Length > 0)
+                .ToList();
+
+            if (text.Length == 0 && builtCalls.Count == 0)
+            {
+                var nonSse = nonSseContent.ToString().Trim();
+                if (nonSse.Length > 0)
+                {
+                    throw new AgentException(
+                        $"{_options.BaseUrl} returned an unexpected response.",
+                        Quote(nonSse));
+                }
+
+                throw new AgentException(
+                    $"{_options.BaseUrl} returned an empty response with no narration or tool calls.");
+            }
+
             return new Reply(
                 text.ToString(),
-                [.. calls.Select(static (call, index) => call.Build(index)).Where(static call => call.Name.Length > 0)],
+                builtCalls,
                 inputTokens,
                 outputTokens,
                 thoughtSignature);
@@ -813,60 +843,77 @@ namespace TerminalQuest.Agents.LmStudio
             try
             {
                 using var doc = JsonDocument.Parse(body);
-                if (doc.RootElement.ValueKind == JsonValueKind.Object
-                    && doc.RootElement.TryGetProperty("error", out var errorObj)
-                    && errorObj.ValueKind == JsonValueKind.Object)
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
-                    var msg = ReadString(errorObj, "message");
-                    if (errorObj.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Array)
+                    if (doc.RootElement.TryGetProperty("error", out var errorObj))
                     {
-                        var parts = new List<string>();
-                        if (!string.IsNullOrEmpty(msg))
+                        if (errorObj.ValueKind == JsonValueKind.String)
                         {
-                            parts.Add(msg);
+                            var str = errorObj.GetString();
+                            if (!string.IsNullOrEmpty(str))
+                            {
+                                return str.Length <= MaxQuotedErrorChars ? str : str[..MaxQuotedErrorChars];
+                            }
                         }
-
-                        foreach (var item in details.EnumerateArray())
+                        else if (errorObj.ValueKind == JsonValueKind.Object)
                         {
-                            if (item.ValueKind != JsonValueKind.Object)
+                            var msg = ReadString(errorObj, "message");
+                            if (errorObj.TryGetProperty("details", out var details) && details.ValueKind == JsonValueKind.Array)
                             {
-                                continue;
-                            }
-
-                            if (ReadString(item, "description") is { Length: > 0 } desc)
-                            {
-                                parts.Add(desc);
-                            }
-                            else if (ReadString(item, "reason") is { Length: > 0 } reason)
-                            {
-                                parts.Add(reason);
-                            }
-                            else if (item.TryGetProperty("fieldViolations", out var fvs) && fvs.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var fv in fvs.EnumerateArray())
+                                var parts = new List<string>();
+                                if (!string.IsNullOrEmpty(msg))
                                 {
-                                    if (fv.ValueKind != JsonValueKind.Object)
+                                    parts.Add(msg);
+                                }
+
+                                foreach (var item in details.EnumerateArray())
+                                {
+                                    if (item.ValueKind != JsonValueKind.Object)
                                     {
                                         continue;
                                     }
 
-                                    var field = ReadString(fv, "field");
-                                    var fvDesc = ReadString(fv, "description");
-                                    parts.Add($"{field}: {fvDesc}");
+                                    if (ReadString(item, "description") is { Length: > 0 } desc)
+                                    {
+                                        parts.Add(desc);
+                                    }
+                                    else if (ReadString(item, "reason") is { Length: > 0 } reason)
+                                    {
+                                        parts.Add(reason);
+                                    }
+                                    else if (item.TryGetProperty("fieldViolations", out var fvs) && fvs.ValueKind == JsonValueKind.Array)
+                                    {
+                                        foreach (var fv in fvs.EnumerateArray())
+                                        {
+                                            if (fv.ValueKind != JsonValueKind.Object)
+                                            {
+                                                continue;
+                                            }
+
+                                            var field = ReadString(fv, "field");
+                                            var fvDesc = ReadString(fv, "description");
+                                            parts.Add($"{field}: {fvDesc}");
+                                        }
+                                    }
+                                }
+
+                                if (parts.Count > 0)
+                                {
+                                    var full = string.Join(" - ", parts);
+                                    return full.Length <= MaxQuotedErrorChars ? full : full[..MaxQuotedErrorChars];
                                 }
                             }
-                        }
 
-                        if (parts.Count > 0)
-                        {
-                            var full = string.Join(" - ", parts);
-                            return full.Length <= MaxQuotedErrorChars ? full : full[..MaxQuotedErrorChars];
+                            if (!string.IsNullOrEmpty(msg))
+                            {
+                                return msg;
+                            }
                         }
                     }
 
-                    if (!string.IsNullOrEmpty(msg))
+                    if (ReadString(doc.RootElement, "message") is { Length: > 0 } directMsg)
                     {
-                        return msg;
+                        return directMsg;
                     }
                 }
             }

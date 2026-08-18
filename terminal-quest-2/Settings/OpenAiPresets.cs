@@ -53,7 +53,8 @@ namespace TerminalQuest.Settings
             }
 
             var trimmed = baseUrl.TrimEnd('/');
-            return All.FirstOrDefault(p => !p.IsCustom && string.Equals(p.BaseUrl.TrimEnd('/'), trimmed, StringComparison.OrdinalIgnoreCase))
+            var normalized = AppSettings.NormalizeBaseUrl(baseUrl);
+            return All.FirstOrDefault(p => !p.IsCustom && (string.Equals(p.BaseUrl.TrimEnd('/'), trimmed, StringComparison.OrdinalIgnoreCase) || string.Equals(p.BaseUrl.TrimEnd('/'), normalized, StringComparison.OrdinalIgnoreCase)))
                 ?? Custom;
         }
     }
