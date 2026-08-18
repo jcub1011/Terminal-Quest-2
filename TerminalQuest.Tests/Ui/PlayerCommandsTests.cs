@@ -564,5 +564,100 @@ namespace TerminalQuest.Tests.Ui
 
             Assert.Equal("/character", entered);
         }
+
+        [Fact]
+        public void History_command_returns_messages_for_turn()
+        {
+            using var save = Seeded();
+            save.Store.Transcript.Append(new TranscriptEntry { Turn = 1, Voice = TranscriptVoice.Player, Text = "hello world" });
+            save.Store.Transcript.Append(new TranscriptEntry { Turn = 1, Voice = TranscriptVoice.Narrator, Text = "The world replies." });
+
+            var result = PlayerCommands.Execute("/history 1", save.Store);
+            var text = TextOf(result);
+
+            Assert.Contains("Messages for turn 1:", text, StringComparison.Ordinal);
+            Assert.Contains("> hello world", text, StringComparison.Ordinal);
+            Assert.Contains("The world replies.", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void History_command_returns_messages_for_entity_with_pagination()
+        {
+            using var save = Seeded();
+            for (var i = 1; i <= 7; i++)
+            {
+                save.Store.Transcript.Append(new TranscriptEntry
+                {
+                    Turn = i,
+                    Voice = TranscriptVoice.Narrator,
+                    Text = $"Turn {i} mentioning [Rowan](chr_1)."
+                });
+            }
+
+            var page1 = PlayerCommands.Execute("/history chr_1 1", save.Store);
+            var text1 = TextOf(page1);
+            Assert.Contains("Page 1 of 2", text1, StringComparison.Ordinal);
+            Assert.Contains("5 of 7 matches", text1, StringComparison.Ordinal);
+            Assert.Contains("Turn 1", text1, StringComparison.Ordinal);
+            Assert.Contains("Turn 5", text1, StringComparison.Ordinal);
+
+            var page2 = PlayerCommands.Execute("/history chr_1 2", save.Store);
+            var text2 = TextOf(page2);
+            Assert.Contains("Page 2 of 2", text2, StringComparison.Ordinal);
+            Assert.Contains("2 of 7 matches", text2, StringComparison.Ordinal);
+            Assert.Contains("Turn 6", text2, StringComparison.Ordinal);
+            Assert.Contains("Turn 7", text2, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void History_command_suggests_entities()
+        {
+            using var save = Seeded();
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/history ", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Contains(suggestions, s => s.DisplayText.Contains("Rowan"));
+            Assert.Contains(suggestions, s => s.DisplayText.Contains("The Ford"));
+        }
+
+        [Fact]
+        public void Inspect_command_without_args_prompts_for_name()
+        {
+            using var save = Seeded();
+            var result = PlayerCommands.Execute("/inspect", save.Store);
+
+            Assert.Null(result.InspectEntityId);
+            Assert.Contains("Name the character, location, or item to inspect", TextOf(result), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Inspect_command_sets_InspectEntityId_for_character_location_or_item()
+        {
+            using var save = Seeded();
+            var player = SaveStore.Player(save.Store.ReadCharacters())!;
+
+            var charResult = PlayerCommands.Execute("/inspect Rowan", save.Store);
+            Assert.Equal(player.Id, charResult.InspectEntityId);
+
+            var loc = save.Store.ReadLocations().Locations.First();
+            var locResult = PlayerCommands.Execute($"/inspect {loc.Name}", save.Store);
+            Assert.Equal(loc.Id, locResult.InspectEntityId);
+
+            var item = save.Store.ReadItems().Items.First();
+            var itemResult = PlayerCommands.Execute($"/inspect {item.Name}", save.Store);
+            Assert.Equal(item.Id, itemResult.InspectEntityId);
+        }
+
+        [Fact]
+        public void Inspect_command_suggests_all_entity_types()
+        {
+            using var save = Seeded();
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/inspect ", save.Store);
+
+            Assert.True(isChoosing);
+            Assert.Contains(suggestions, s => s.DisplayText.StartsWith("Rowan") && s.Role == TextRole.Character);
+            Assert.Contains(suggestions, s => s.DisplayText.StartsWith("The Ford") && s.Role == TextRole.Place);
+            Assert.Contains(suggestions, s => s.DisplayText.Contains("longsword") && s.Role == TextRole.Item);
+        }
     }
 }

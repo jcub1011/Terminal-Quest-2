@@ -45,6 +45,20 @@ namespace TerminalQuest.Mcp
                 """,
                 Role: ToolRole.Narrator),
 
+            new("get_history",
+                "Search through full chat and dialogue history by entity ID or specific turn number without reading all history. "
+              + "Pass entity_id (with optional page and page_size, default 5) to find messages mentioning an entity, "
+              + "or pass turn to get all messages from that turn.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "entity_id":{"type":"string","description":"The entity ID (e.g. chr_1, loc_1, itm_1) or name to search for across history."},
+                   "turn":{"type":"integer","description":"Specific turn index to retrieve messages for."},
+                   "page":{"type":"integer","description":"Page number (1-based, defaults to 1)."},
+                   "page_size":{"type":"integer","description":"Number of entries per page (defaults to 5)."}}}
+                """,
+                Role: ToolRole.Both),
+
             new("set_character",
                 "Create or update a character's state, health, description, or attributes. "
               + "Creating the player is the first thing to do in an empty save. "
@@ -307,6 +321,8 @@ namespace TerminalQuest.Mcp
         {
             "get_state" => GetState(store),
             "get_transcript" => GetTranscript(store, arguments),
+            "get_history" => GetHistory(store, arguments),
+            "history" => GetHistory(store, arguments),
             "set_character" => SetCharacter(store, arguments),
             "get_character" => GetCharacter(store, arguments),
             "grant_secret" => GrantSecret(store, arguments),
@@ -415,6 +431,119 @@ namespace TerminalQuest.Mcp
             var recent = store.Transcript.Tail(Math.Max(TranscriptTailBytes, characters * 4));
 
             return ToolOutcome.Ok(QuestRender.Transcript(TranscriptRecall.Tail(recent, characters)));
+        }
+
+        private static ToolOutcome GetHistory(SaveStore store, JsonElement arguments)
+        {
+            var turn = Number(arguments, "turn");
+            var entityId = Text(arguments, "entity_id")
+                ?? Text(arguments, "entityId")
+                ?? Text(arguments, "entity")
+                ?? Text(arguments, "id");
+            var page = Math.Max(1, Number(arguments, "page") ?? 1);
+            var pageSize = Math.Max(1, Number(arguments, "page_size")
+                ?? Number(arguments, "pageSize")
+                ?? Number(arguments, "limit")
+                ?? 5);
+
+            if (turn is { } specificTurn)
+            {
+                var turnEntries = store.Transcript.ForTurn(specificTurn);
+                if (entityId is { Length: > 0 } filterEntity)
+                {
+                    var resolved = ResolveEntity(store, filterEntity);
+                    turnEntries = turnEntries.Where(e => MatchesEntity(e, filterEntity, resolved)).ToList();
+                }
+                return ToolOutcome.Ok(QuestRender.HistoryTurn(turnEntries, specificTurn));
+            }
+
+            var allEntries = store.Transcript.Read().Entries;
+
+            if (entityId is { Length: > 0 } targetEntity)
+            {
+                var resolved = ResolveEntity(store, targetEntity);
+                var matches = allEntries.Where(e => MatchesEntity(e, targetEntity, resolved)).ToList();
+                var totalMatches = matches.Count;
+                var totalPages = Math.Max(1, (totalMatches + pageSize - 1) / pageSize);
+
+                if (totalMatches == 0)
+                {
+                    return ToolOutcome.Ok($"No messages found matching entity '{targetEntity}'.");
+                }
+
+                if (page > totalPages)
+                {
+                    return ToolOutcome.Ok($"Page {page} is out of range. There are {totalPages} page(s) (total {totalMatches} matching messages).");
+                }
+
+                var pageEntries = matches.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return ToolOutcome.Ok(QuestRender.History(pageEntries, targetEntity, page, totalPages, totalMatches));
+            }
+            else
+            {
+                var totalMatches = allEntries.Count;
+                var totalPages = Math.Max(1, (totalMatches + pageSize - 1) / pageSize);
+
+                if (totalMatches == 0)
+                {
+                    return ToolOutcome.Ok("The transcript is empty.");
+                }
+
+                if (page > totalPages)
+                {
+                    return ToolOutcome.Ok($"Page {page} is out of range. There are {totalPages} page(s) (total {totalMatches} messages).");
+                }
+
+                var pageEntries = allEntries.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return ToolOutcome.Ok(QuestRender.History(pageEntries, null, page, totalPages, totalMatches));
+            }
+        }
+
+        internal static (string? Id, string? Name) ResolveEntity(SaveStore store, string query)
+        {
+            var trimmed = query.Trim();
+            var characters = store.ReadCharacters();
+            var c = SaveStore.FindCharacterById(characters, trimmed) ?? SaveStore.FindCharacter(characters, trimmed);
+            if (c is not null)
+            {
+                return (c.Id, c.Name);
+            }
+
+            var locations = store.ReadLocations();
+            var l = SaveStore.FindLocationById(locations, trimmed) ?? SaveStore.FindLocation(locations, trimmed);
+            if (l is not null)
+            {
+                return (l.Id, l.Name);
+            }
+
+            var items = store.ReadItems();
+            var i = SaveStore.FindItemById(items, trimmed) ?? SaveStore.FindItem(items, trimmed);
+            if (i is not null)
+            {
+                return (i.Id, i.Name);
+            }
+
+            return (null, null);
+        }
+
+        internal static bool MatchesEntity(TranscriptEntry entry, string query, (string? Id, string? Name) resolved)
+        {
+            if (entry.Text.Contains(query, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (resolved.Id is { Length: > 0 } id && entry.Text.Contains(id, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (resolved.Name is { Length: > 0 } name && entry.Text.Contains(name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static ToolOutcome SetCharacter(SaveStore store, JsonElement arguments)

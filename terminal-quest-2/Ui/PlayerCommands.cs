@@ -19,6 +19,8 @@ namespace TerminalQuest.Ui
             new("location", "[name]", "where you have been, and what happened there"),
             new("locations", "[name]", "where you have been, and what happened there", IsAlias: true),
             new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
+            new("history", "[<id|turn>] [page]", "search chat history by entity ID or turn number"),
+            new("inspect", "<name|id>", "open details and ID for a character, location, or item"),
             new("saves", "", "every save on this machine"),
             new("delete", "<name>", "destroy another save, for good"),
             new("system-prompt", "", "rewrite the narrator's instructions (ends the session)"),
@@ -59,7 +61,7 @@ namespace TerminalQuest.Ui
                 {
                     var items = matches
                         .Select(c => new SuggestionItem(
-                            InsertText: $"/{c.Name} ",
+                             InsertText: $"/{c.Name} ",
                             DisplayText: c.Usage,
                             Summary: c.Summary,
                             Role: TextRole.Command))
@@ -159,6 +161,86 @@ namespace TerminalQuest.Ui
                         return [];
                     }
 
+                case "inspect":
+                    if (store is null) return [];
+                    try
+                    {
+                        var list = new List<SuggestionItem>();
+                        var chars = store.ReadCharacters().Characters;
+                        foreach (var c in chars.Where(c => c.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || c.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {c.Name}",
+                                DisplayText: $"{c.Name} ({c.Id})",
+                                Summary: c.Kind == CharacterKind.Player
+                                    ? "(you)"
+                                    : (c.Description.Length > 0 ? c.Description : $"Health {c.Health}/{c.MaxHealth}"),
+                                Role: TextRole.Character));
+                        }
+                        var locs = store.ReadLocations().Locations;
+                        foreach (var l in locs.Where(l => l.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || l.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {l.Name}",
+                                DisplayText: $"{l.Name} ({l.Id})",
+                                Summary: l.Description,
+                                Role: TextRole.Place));
+                        }
+                        var items = store.ReadItems().Items;
+                        foreach (var itm in items.Where(i => i.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || i.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {itm.Name}",
+                                DisplayText: $"{itm.Name} ({itm.Id})",
+                                Summary: itm.Description,
+                                Role: TextRole.Item));
+                        }
+                        return list;
+                    }
+                    catch (SaveException)
+                    {
+                        return [];
+                    }
+
+                case "history":
+                    if (store is null) return [];
+                    try
+                    {
+                        var list = new List<SuggestionItem>();
+                        var chars = store.ReadCharacters().Characters;
+                        foreach (var c in chars.Where(c => c.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || c.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {c.Id}",
+                                DisplayText: $"{c.Id} ({c.Name})",
+                                Summary: c.Kind == CharacterKind.Player ? "(you)" : c.Description,
+                                Role: TextRole.Character));
+                        }
+                        var locs = store.ReadLocations().Locations;
+                        foreach (var l in locs.Where(l => l.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || l.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {l.Id}",
+                                DisplayText: $"{l.Id} ({l.Name})",
+                                Summary: l.Description,
+                                Role: TextRole.Place));
+                        }
+                        var items = store.ReadItems().Items;
+                        foreach (var itm in items.Where(i => i.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || i.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            list.Add(new SuggestionItem(
+                                InsertText: $"/{commandName} {itm.Id}",
+                                DisplayText: $"{itm.Id} ({itm.Name})",
+                                Summary: itm.Description,
+                                Role: TextRole.Item));
+                        }
+                        return list;
+                    }
+                    catch (SaveException)
+                    {
+                        return [];
+                    }
+
                 case "delete":
                     try
                     {
@@ -239,6 +321,11 @@ namespace TerminalQuest.Ui
                     case "where":
                         Locations(lines, store, argument);
                         break;
+                    case "history":
+                        History(lines, store, argument);
+                        break;
+                    case "inspect":
+                        return Inspect(lines, store, argument);
                     case "saves":
                         Saves(lines, store);
                         break;
@@ -665,6 +752,234 @@ namespace TerminalQuest.Ui
                 TextRole.System));
 
             return new PlayerCommandResult { Lines = lines, EditSystemPrompt = true };
+        }
+
+        private static PlayerCommandResult Inspect(List<StyledLine> lines, SaveStore store, string argument)
+        {
+            if (string.IsNullOrWhiteSpace(argument))
+            {
+                lines.Add(StyledLine.FromText("Name the character, location, or item to inspect: /inspect <name|id>.", TextRole.System));
+                return new PlayerCommandResult { Lines = lines };
+            }
+
+            var query = argument.Trim();
+            var characters = store.ReadCharacters();
+            var character = SaveStore.FindCharacterById(characters, query) ?? SaveStore.FindCharacter(characters, query);
+            if (character is not null)
+            {
+                return new PlayerCommandResult
+                {
+                    Lines = lines,
+                    InspectEntityId = character.Id,
+                };
+            }
+
+            var locations = store.ReadLocations();
+            var location = SaveStore.FindLocationById(locations, query) ?? SaveStore.FindLocation(locations, query);
+            if (location is not null)
+            {
+                return new PlayerCommandResult
+                {
+                    Lines = lines,
+                    InspectEntityId = location.Id,
+                };
+            }
+
+            var items = store.ReadItems();
+            var item = SaveStore.FindItemById(items, query) ?? SaveStore.FindItem(items, query);
+            if (item is not null)
+            {
+                return new PlayerCommandResult
+                {
+                    Lines = lines,
+                    InspectEntityId = item.Id,
+                };
+            }
+
+            lines.Add(StyledLine.FromText($"No character, location, or item found matching '{query}'.", TextRole.Danger));
+            return new PlayerCommandResult { Lines = lines };
+        }
+
+        private static void History(List<StyledLine> lines, SaveStore store, string argument)
+        {
+            var parts = argument.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            int? turn = null;
+            string? entity = null;
+            var page = 1;
+            var pageSize = 5;
+
+            if (parts.Length > 0)
+            {
+                if (parts[0].Equals("turn", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (parts.Length > 1 && int.TryParse(parts[1], out var t))
+                    {
+                        turn = t;
+                    }
+                    else
+                    {
+                        lines.Add(StyledLine.FromText("Specify a turn number: /history turn <number>.", TextRole.System));
+                        return;
+                    }
+                }
+                else if (parts[0].Equals("page", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (parts.Length > 1 && int.TryParse(parts[1], out var p))
+                    {
+                        page = Math.Max(1, p);
+                    }
+                }
+                else if (int.TryParse(parts[0], out var t))
+                {
+                    turn = t;
+                }
+                else
+                {
+                    entity = parts[0];
+                    if (parts.Length > 1 && int.TryParse(parts[1], out var p))
+                    {
+                        page = Math.Max(1, p);
+                    }
+                    if (parts.Length > 2 && int.TryParse(parts[2], out var ps))
+                    {
+                        pageSize = Math.Max(1, ps);
+                    }
+                }
+            }
+
+            if (turn is { } specificTurn)
+            {
+                var turnEntries = store.Transcript.ForTurn(specificTurn);
+                if (turnEntries.Count == 0)
+                {
+                    lines.Add(StyledLine.FromText($"No messages recorded for turn {specificTurn}.", TextRole.System));
+                    return;
+                }
+
+                lines.Add(StyledLine.FromText($"Messages for turn {specificTurn}:", TextRole.System));
+                lines.Add(new StyledLine());
+
+                foreach (var entry in turnEntries)
+                {
+                    if (entry.Voice == TranscriptVoice.Player)
+                    {
+                        lines.Add(StyledLine.FromText($"> {entry.Text}", TextRole.Command));
+                    }
+                    else
+                    {
+                        lines.Add(MarkupParser.Parse(entry.Text));
+                    }
+                    lines.Add(new StyledLine());
+                }
+
+                return;
+            }
+
+            var allEntries = store.Transcript.Read().Entries;
+            if (allEntries.Count == 0)
+            {
+                lines.Add(StyledLine.FromText("The transcript is empty.", TextRole.System));
+                return;
+            }
+
+            if (entity is { Length: > 0 } targetEntity)
+            {
+                var resolved = Mcp.QuestTools.ResolveEntity(store, targetEntity);
+                var matches = allEntries.Where(e => Mcp.QuestTools.MatchesEntity(e, targetEntity, resolved)).ToList();
+                var totalMatches = matches.Count;
+                var totalPages = Math.Max(1, (totalMatches + pageSize - 1) / pageSize);
+
+                if (totalMatches == 0)
+                {
+                    lines.Add(StyledLine.FromText($"No messages found matching entity '{targetEntity}'.", TextRole.System));
+                    return;
+                }
+
+                if (page > totalPages)
+                {
+                    lines.Add(StyledLine.FromText($"Page {page} is out of range. There are {totalPages} page(s) (total {totalMatches} matching messages).", TextRole.System));
+                    return;
+                }
+
+                var pageEntries = matches.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                lines.Add(StyledLine.FromText($"History matching '{targetEntity}' (Page {page} of {totalPages}, {pageEntries.Count} of {totalMatches} matches):", TextRole.System));
+                lines.Add(new StyledLine());
+
+                foreach (var entry in pageEntries)
+                {
+                    var header = new StyledLine();
+                    header.Append($"  Turn {entry.Turn,4}  ", TextRole.System);
+                    header.Append(entry.Voice == TranscriptVoice.Player ? "Player" : "Narrator", TextRole.System);
+                    lines.Add(header);
+
+                    if (entry.Voice == TranscriptVoice.Player)
+                    {
+                        lines.Add(StyledLine.FromText($"    > {entry.Text}", TextRole.Command));
+                    }
+                    else
+                    {
+                        var parsed = MarkupParser.Parse(entry.Text);
+                        var indented = new StyledLine();
+                        indented.Append("    ", TextRole.Normal);
+                        foreach (var span in parsed.Spans)
+                        {
+                            indented.Append(span);
+                        }
+                        lines.Add(indented);
+                    }
+                    lines.Add(new StyledLine());
+                }
+
+                if (page < totalPages)
+                {
+                    lines.Add(StyledLine.FromText($"Type '/history {targetEntity} {page + 1}' for next page.", TextRole.System));
+                }
+            }
+            else
+            {
+                var totalMatches = allEntries.Count;
+                var totalPages = Math.Max(1, (totalMatches + pageSize - 1) / pageSize);
+
+                if (page > totalPages)
+                {
+                    lines.Add(StyledLine.FromText($"Page {page} is out of range. There are {totalPages} page(s) (total {totalMatches} messages).", TextRole.System));
+                    return;
+                }
+
+                var pageEntries = allEntries.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                lines.Add(StyledLine.FromText($"History (Page {page} of {totalPages}, {pageEntries.Count} of {totalMatches} messages):", TextRole.System));
+                lines.Add(new StyledLine());
+
+                foreach (var entry in pageEntries)
+                {
+                    var header = new StyledLine();
+                    header.Append($"  Turn {entry.Turn,4}  ", TextRole.System);
+                    header.Append(entry.Voice == TranscriptVoice.Player ? "Player" : "Narrator", TextRole.System);
+                    lines.Add(header);
+
+                    if (entry.Voice == TranscriptVoice.Player)
+                    {
+                        lines.Add(StyledLine.FromText($"    > {entry.Text}", TextRole.Command));
+                    }
+                    else
+                    {
+                        var parsed = MarkupParser.Parse(entry.Text);
+                        var indented = new StyledLine();
+                        indented.Append("    ", TextRole.Normal);
+                        foreach (var span in parsed.Spans)
+                        {
+                            indented.Append(span);
+                        }
+                        lines.Add(indented);
+                    }
+                    lines.Add(new StyledLine());
+                }
+
+                if (page < totalPages)
+                {
+                    lines.Add(StyledLine.FromText($"Type '/history page {page + 1}' for next page.", TextRole.System));
+                }
+            }
         }
 
         private static void Describe(List<StyledLine> lines, string command, string meaning)

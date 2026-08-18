@@ -57,8 +57,8 @@ namespace TerminalQuest.Tests.Ui
 
             var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "chr_2");
 
-            Assert.Equal("Character: Bess", title);
-            Assert.Contains("Bess (npc)", content, StringComparison.Ordinal);
+            Assert.Equal("Character: Bess (chr_2)", title);
+            Assert.Contains("Bess (ID: chr_2, npc)", content, StringComparison.Ordinal);
             Assert.Contains("Health: 12/15", content, StringComparison.Ordinal);
             Assert.Contains("A wise herbalist with grey hair.", content, StringComparison.Ordinal);
             Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
@@ -72,8 +72,8 @@ namespace TerminalQuest.Tests.Ui
 
             var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "loc_1");
 
-            Assert.Equal("Location: The Ford", title);
-            Assert.Contains("The Ford", content, StringComparison.Ordinal);
+            Assert.Equal("Location: The Ford (loc_1)", title);
+            Assert.Contains("The Ford (ID: loc_1)", content, StringComparison.Ordinal);
             Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
         }
 
@@ -85,8 +85,8 @@ namespace TerminalQuest.Tests.Ui
             var item = save.Store.ReadItems().Items.First(i => i.Name == "Rusted Key");
             var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, item.Id);
 
-            Assert.Equal("Item: Rusted Key", title);
-            Assert.Contains("Rusted Key", content, StringComparison.Ordinal);
+            Assert.Equal($"Item: Rusted Key ({item.Id})", title);
+            Assert.Contains($"Rusted Key (ID: {item.Id})", content, StringComparison.Ordinal);
             Assert.Contains("An old iron key found near the river.", content, StringComparison.Ordinal);
             Assert.Contains("Met Bess at the river", content, StringComparison.Ordinal);
         }
@@ -100,7 +100,8 @@ namespace TerminalQuest.Tests.Ui
             var item = save.Store.ReadItems().Items.First(i => i.Name == "iron longsword");
             var (title, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, item.Id);
 
-            Assert.Equal("Item: iron longsword", title);
+            Assert.Equal($"Item: iron longsword ({item.Id})", title);
+            Assert.Contains($"iron longsword (ID: {item.Id})", content, StringComparison.Ordinal);
             Assert.Contains("Location / Possession:", content, StringComparison.Ordinal);
             Assert.Contains("Carried by Rowan (x1)", content, StringComparison.Ordinal);
         }

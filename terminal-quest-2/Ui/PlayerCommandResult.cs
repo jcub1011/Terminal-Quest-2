@@ -21,5 +21,10 @@ namespace TerminalQuest.Ui
         /// it is replaced by a new one.
         /// </remarks>
         public bool EditSystemPrompt { get; init; }
+
+        /// <summary>
+        /// If set, requests opening the Entity Details modal for the specified entity ID.
+        /// </summary>
+        public string? InspectEntityId { get; init; }
     }
 }

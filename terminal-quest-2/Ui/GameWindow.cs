@@ -440,7 +440,6 @@ namespace TerminalQuest.Ui
 
             Narration.AddBlankLine();
             Narration.AddLine(StyledLine.FromText($"> {text}", TextRole.Command));
-            Narration.AddBlankLine();
             Narration.ScrollToBottom();
 
             CommandEntered?.Invoke(text);

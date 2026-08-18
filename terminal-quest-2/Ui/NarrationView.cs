@@ -72,6 +72,8 @@ namespace TerminalQuest.Ui
         /// </summary>
         public event Action<string>? EntityClicked;
 
+        internal IReadOnlyList<StyledLine> CommittedLines => _committed;
+
         /// <summary>
         /// The 1-based option number currently selected and highlighted in the UI, or null if none.
         /// </summary>
@@ -212,8 +214,16 @@ namespace TerminalQuest.Ui
 
         public void AddLine(string text, TextRole role) => AddLine(StyledLine.FromText(text, role));
 
-        /// <summary>Inserts a blank spacer row.</summary>
-        public void AddBlankLine() => AddLine(new StyledLine());
+        /// <summary>Inserts a blank spacer row, collapsing duplicate adjacent blank rows.</summary>
+        public void AddBlankLine()
+        {
+            if (_committed.Count > 0 && _committed[^1].Length == 0 && _current is null)
+            {
+                return;
+            }
+
+            AddLine(new StyledLine());
+        }
 
         public void ScrollToBottom()
         {

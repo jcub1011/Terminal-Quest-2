@@ -276,6 +276,70 @@ namespace TerminalQuest.Mcp
             return text.ToString().TrimEnd();
         }
 
+        public static string History(
+            IReadOnlyList<TranscriptEntry> pageEntries,
+            string? entityId,
+            int page,
+            int totalPages,
+            int totalMatches)
+        {
+            ArgumentNullException.ThrowIfNull(pageEntries);
+
+            if (pageEntries.Count == 0)
+            {
+                return entityId is { Length: > 0 }
+                    ? $"No messages found matching entity '{entityId}'."
+                    : "The transcript is empty.";
+            }
+
+            var text = new StringBuilder();
+            if (entityId is { Length: > 0 })
+            {
+                text.AppendLine($"History matching '{entityId}' (Page {page} of {totalPages}, {pageEntries.Count} of {totalMatches} matches):");
+            }
+            else
+            {
+                text.AppendLine($"History (Page {page} of {totalPages}, {pageEntries.Count} of {totalMatches} messages):");
+            }
+            text.AppendLine();
+
+            foreach (var entry in pageEntries)
+            {
+                text.AppendLine(
+                    $"[Turn {entry.Turn}] {(entry.Voice == TranscriptVoice.Player ? "PLAYER" : "NARRATOR")}: {entry.Text}");
+            }
+
+            if (page < totalPages)
+            {
+                text.AppendLine();
+                text.AppendLine($"Use page: {page + 1} to see more.");
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
+        public static string HistoryTurn(IReadOnlyList<TranscriptEntry> turnEntries, int turn)
+        {
+            ArgumentNullException.ThrowIfNull(turnEntries);
+
+            if (turnEntries.Count == 0)
+            {
+                return $"No messages recorded for turn {turn}.";
+            }
+
+            var text = new StringBuilder();
+            text.AppendLine($"Messages for turn {turn}:");
+            text.AppendLine();
+
+            foreach (var entry in turnEntries)
+            {
+                text.AppendLine(
+                    $"[Turn {entry.Turn}] {(entry.Voice == TranscriptVoice.Player ? "PLAYER" : "NARRATOR")}: {entry.Text}");
+            }
+
+            return text.ToString().TrimEnd();
+        }
+
         public static string Kind(CharacterKind kind) => kind == CharacterKind.Player ? "player" : "npc";
     }
 }

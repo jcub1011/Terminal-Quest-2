@@ -120,10 +120,10 @@ namespace TerminalQuest.Ui
             ItemFile itemFile,
             IReadOnlyList<StoryEvent> allEvents)
         {
-            var title = $"Character: {character.Name}";
+            var title = $"Character: {character.Name} ({character.Id})";
             var sb = new StringBuilder();
 
-            sb.AppendLine($"{character.Name} ({QuestRender.Kind(character.Kind)})");
+            sb.AppendLine($"{character.Name} (ID: {character.Id}, {QuestRender.Kind(character.Kind)})");
             sb.AppendLine($"Health: {character.Health}/{character.MaxHealth}");
 
             if (!string.IsNullOrWhiteSpace(character.Description))
@@ -178,10 +178,10 @@ namespace TerminalQuest.Ui
             ItemFile itemFile,
             IReadOnlyList<StoryEvent> allEvents)
         {
-            var title = $"Location: {location.Name}";
+            var title = $"Location: {location.Name} ({location.Id})";
             var sb = new StringBuilder();
 
-            sb.AppendLine(location.Name);
+            sb.AppendLine($"{location.Name} (ID: {location.Id})");
             if (!string.IsNullOrWhiteSpace(location.Description))
             {
                 sb.AppendLine();
@@ -240,10 +240,10 @@ namespace TerminalQuest.Ui
             InventoryFile inventoryFile,
             IReadOnlyList<StoryEvent> allEvents)
         {
-            var title = $"Item: {item.Name}";
+            var title = $"Item: {item.Name} ({item.Id})";
             var sb = new StringBuilder();
 
-            sb.AppendLine(item.Name);
+            sb.AppendLine($"{item.Name} (ID: {item.Id})");
             if (!string.IsNullOrWhiteSpace(item.Description))
             {
                 sb.AppendLine();

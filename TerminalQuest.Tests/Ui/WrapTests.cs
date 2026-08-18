@@ -207,5 +207,22 @@ namespace TerminalQuest.Tests.Ui
                 Assert.Equal(Prose, wrapped);
             }
         }
+
+        [Fact]
+        public void AddBlankLine_collapses_consecutive_blank_lines()
+        {
+            var view = new NarrationView();
+            view.AddLine("Line 1", TextRole.Normal);
+            view.AddBlankLine();
+            view.AddBlankLine();
+            view.AddBlankLine();
+            view.AddLine("Line 2", TextRole.Normal);
+
+            // Line 1, 1 blank line, Line 2 = 3 lines total
+            Assert.Equal(3, view.CommittedLines.Count);
+            Assert.Equal("Line 1", view.CommittedLines[0].Spans[0].Text);
+            Assert.Equal(0, view.CommittedLines[1].Length);
+            Assert.Equal("Line 2", view.CommittedLines[2].Spans[0].Text);
+        }
     }
 }

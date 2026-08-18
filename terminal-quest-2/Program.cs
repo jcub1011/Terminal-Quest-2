@@ -440,6 +440,8 @@ namespace TerminalQuest
                     return;
                 }
 
+                window.Narration.AddBlankLine();
+
                 state.Turn++;
 
                 // Stamped before the turn runs, because the state server reads the turn number out
@@ -562,16 +564,14 @@ namespace TerminalQuest
 
                 try
                 {
-                    var recalled = TranscriptRecall.Tail(
-                        store.Transcript.Read().Entries,
-                        settings.TranscriptRecallCharacters);
+                    var entries = store.Transcript.Read().Entries;
 
-                    if (recalled.Count == 0)
+                    if (entries.Count == 0)
                     {
                         return;
                     }
 
-                    lines = TranscriptReplay.Lines(recalled, store.Rolls.Read().Entries, store.ReadCharacters());
+                    lines = TranscriptReplay.Lines(entries, store.Rolls.Read().Entries, store.ReadCharacters());
                 }
                 catch (SaveException ex)
                 {
@@ -599,8 +599,17 @@ namespace TerminalQuest
                     window.Narration.AddLine(line);
                 }
 
-                window.Narration.AddBlankLine();
+                if (result.Lines.Count > 0)
+                {
+                    window.Narration.AddBlankLine();
+                }
+
                 window.Narration.ScrollToBottom();
+
+                if (result.InspectEntityId is { Length: > 0 } inspectId)
+                {
+                    EntityDetailsDialog.Show(app, store, inspectId);
+                }
 
                 if (result.EditSystemPrompt)
                 {
