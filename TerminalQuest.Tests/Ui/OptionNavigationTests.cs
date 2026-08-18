@@ -6,7 +6,6 @@ using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.Views;
 using TerminalQuest.Ui;
-
 using Xunit;
 
 namespace TerminalQuest.Tests.Ui
@@ -14,16 +13,12 @@ namespace TerminalQuest.Tests.Ui
     public sealed class OptionNavigationTests
     {
         [Fact]
-        public void NarrationView_exposes_and_updates_highlighted_option()
+        public void OptionsView_exposes_and_updates_highlighted_option()
         {
-            var view = new NarrationView();
-            view.AddLine("What do you do?", TextRole.Normal);
-            view.AddLine("1. Go North", TextRole.Normal);
-            view.AddLine("2. Go South", TextRole.Normal);
+            var view = new OptionsView();
+            view.SetOptions(["Go North", "Go South"]);
 
-            var options = view.GetActiveOptions();
-            Assert.Equal(2, options.Count);
-
+            Assert.Equal(2, view.Options.Count);
             Assert.Null(view.HighlightedOption);
 
             view.HighlightedOption = 1;
@@ -37,125 +32,124 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void Adding_a_line_clears_the_highlighted_option()
+        public void ClearOptions_hides_and_empties_OptionsView()
         {
-            var view = new NarrationView();
-            view.AddLine("1. Go North", TextRole.Normal);
-            view.HighlightedOption = 1;
-            Assert.Equal(1, view.HighlightedOption);
+            var view = new OptionsView();
+            view.SetOptions(["Go North", "Go South"]);
+            Assert.True(view.Visible);
+            Assert.Equal(2, view.Options.Count);
 
-            view.AddLine("> 1", TextRole.Command);
+            view.ClearOptions();
+            Assert.False(view.Visible);
+            Assert.Empty(view.Options);
             Assert.Null(view.HighlightedOption);
+            Assert.Equal(0, view.Height);
         }
 
         [Fact]
-        public void Appending_a_delta_clears_the_highlighted_option()
-        {
-            var view = new NarrationView();
-            view.AddLine("1. Go North", TextRole.Normal);
-            view.HighlightedOption = 1;
-            Assert.Equal(1, view.HighlightedOption);
-
-            view.AppendDelta("New turn starting...");
-            Assert.Null(view.HighlightedOption);
-        }
-
-        [Fact]
-        public void Down_arrow_selects_first_option_and_populates_textbox()
+        public void Down_arrow_selects_first_option_and_populates_textbox_with_full_text()
         {
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
-            window.Narration.AddLine("3. Rest at the campfire", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village", "Rest at the campfire"]);
 
-            // Press Down arrow
+            var inputField = window.SubViews.OfType<TextField>().First();
+
+            // Press Down arrow -> Option 1
             var handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
+            Assert.Equal("Explore the ruins", inputField.Text);
 
             // Press Down arrow again -> Option 2
             handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(2, window.Narration.HighlightedOption);
+            Assert.Equal(2, window.Options.HighlightedOption);
+            Assert.Equal("Return to the village", inputField.Text);
 
             // Press Down arrow again -> Option 3
             handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(3, window.Narration.HighlightedOption);
+            Assert.Equal(3, window.Options.HighlightedOption);
+            Assert.Equal("Rest at the campfire", inputField.Text);
 
             // Press Down arrow again -> clamped at Option 3
             handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(3, window.Narration.HighlightedOption);
+            Assert.Equal(3, window.Options.HighlightedOption);
+            Assert.Equal("Rest at the campfire", inputField.Text);
 
             // Press Up arrow -> Option 2
             handled = window.NewKeyDownEvent(Key.CursorUp);
             Assert.True(handled);
-            Assert.Equal(2, window.Narration.HighlightedOption);
+            Assert.Equal(2, window.Options.HighlightedOption);
+            Assert.Equal("Return to the village", inputField.Text);
 
             // Press Up arrow -> Option 1
             handled = window.NewKeyDownEvent(Key.CursorUp);
             Assert.True(handled);
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
+            Assert.Equal("Explore the ruins", inputField.Text);
 
             // Press Up arrow -> clamped at Option 1
             handled = window.NewKeyDownEvent(Key.CursorUp);
             Assert.True(handled);
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
+            Assert.Equal("Explore the ruins", inputField.Text);
         }
 
         [Fact]
-        public void Up_arrow_from_unselected_selects_last_option()
+        public void Up_arrow_from_unselected_selects_last_option_with_full_text()
         {
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
-            window.Narration.AddLine("3. Rest at the campfire", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village", "Rest at the campfire"]);
+
+            var inputField = window.SubViews.OfType<TextField>().First();
 
             // Press Up arrow from empty input
             var handled = window.NewKeyDownEvent(Key.CursorUp);
             Assert.True(handled);
 
-            Assert.Equal(3, window.Narration.HighlightedOption);
+            Assert.Equal(3, window.Options.HighlightedOption);
+            Assert.Equal("Rest at the campfire", inputField.Text);
         }
 
         [Fact]
-        public void Typing_option_number_manually_updates_highlight()
+        public void Typing_option_number_or_text_manually_updates_highlight()
         {
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village"]);
 
             var inputField = window.SubViews.OfType<TextField>().First();
 
             // Typing "2" highlights Option 2
             inputField.Text = "2";
-            Assert.Equal(2, window.Narration.HighlightedOption);
+            Assert.Equal(2, window.Options.HighlightedOption);
 
             // Typing "1" highlights Option 1
             inputField.Text = "1";
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
+
+            // Typing full option text highlights Option 1
+            inputField.Text = "Explore the ruins";
+            Assert.Equal(1, window.Options.HighlightedOption);
 
             // Typing non-matching number "99" clears highlight
             inputField.Text = "99";
-            Assert.Null(window.Narration.HighlightedOption);
+            Assert.Null(window.Options.HighlightedOption);
 
             // Typing custom text clears highlight
             inputField.Text = "look around";
-            Assert.Null(window.Narration.HighlightedOption);
+            Assert.Null(window.Options.HighlightedOption);
 
             // Clearing text clears highlight
             inputField.Text = string.Empty;
-            Assert.Null(window.Narration.HighlightedOption);
+            Assert.Null(window.Options.HighlightedOption);
         }
 
         [Fact]
@@ -164,68 +158,83 @@ namespace TerminalQuest.Tests.Ui
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("No choices here, just narration.", TextRole.Normal);
-
             var handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.False(handled);
-            Assert.Null(window.Narration.HighlightedOption);
+            Assert.Null(window.Options.HighlightedOption);
         }
 
         [Fact]
-        public void Navigating_after_manual_typing_continues_from_typed_option()
+        public void Navigating_after_manual_typing_continues_from_matching_option()
         {
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
-            window.Narration.AddLine("3. Rest at the campfire", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village", "Rest at the campfire"]);
 
             var inputField = window.SubViews.OfType<TextField>().First();
 
             // Type "2" manually
             inputField.Text = "2";
-            Assert.Equal(2, window.Narration.HighlightedOption);
+            Assert.Equal(2, window.Options.HighlightedOption);
 
-            // Press Down arrow -> moves to Option 3
+            // Press Down arrow -> moves to Option 3 with full text
             var handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(3, window.Narration.HighlightedOption);
-            Assert.Equal("3", inputField.Text);
+            Assert.Equal(3, window.Options.HighlightedOption);
+            Assert.Equal("Rest at the campfire", inputField.Text);
 
-            // Press Up arrow -> moves back to Option 2
+            // Press Up arrow -> moves back to Option 2 with full text
             handled = window.NewKeyDownEvent(Key.CursorUp);
             Assert.True(handled);
-            Assert.Equal(2, window.Narration.HighlightedOption);
-            Assert.Equal("2", inputField.Text);
+            Assert.Equal(2, window.Options.HighlightedOption);
+            Assert.Equal("Return to the village", inputField.Text);
         }
 
         [Fact]
-        public void Submitting_command_clears_highlight()
+        public void Clicking_an_option_selects_it_and_populates_textbox()
         {
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village", "Rest at the campfire"]);
+
+            var inputField = window.SubViews.OfType<TextField>().First();
+
+            // Simulate clicking row 1 (Option 2)
+            window.Options.NewMouseEvent(new Mouse
+            {
+                Flags = MouseFlags.LeftButtonClicked,
+                Position = new Point(5, 1),
+            });
+
+            Assert.Equal(2, window.Options.HighlightedOption);
+            Assert.Equal("Return to the village", inputField.Text);
+        }
+
+        [Fact]
+        public void Submitting_world_command_clears_options_and_highlight()
+        {
+            var state = new GameState();
+            using var window = new GameWindow(state);
+
+            window.SetOptions(["Explore the ruins", "Return to the village"]);
 
             string? entered = null;
             window.CommandEntered += cmd => entered = cmd;
 
             // Select Option 1
             window.NewKeyDownEvent(Key.CursorDown);
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
 
             var inputField = window.SubViews.OfType<TextField>().First();
-            Assert.Equal("1", inputField.Text);
+            Assert.Equal("Explore the ruins", inputField.Text);
 
             // Submit via Enter on input field
             inputField.NewKeyDownEvent(Key.Enter);
 
-            Assert.Equal("1", entered);
-            Assert.Null(window.Narration.HighlightedOption);
+            Assert.Equal("Explore the ruins", entered);
+            Assert.Null(window.Options.HighlightedOption);
+            Assert.Empty(window.Options.Options);
             Assert.Equal(string.Empty, inputField.Text);
         }
 
@@ -235,9 +244,7 @@ namespace TerminalQuest.Tests.Ui
             var state = new GameState();
             using var window = new GameWindow(state);
 
-            window.Narration.AddLine("What do you do?", TextRole.Normal);
-            window.Narration.AddLine("1. Explore the ruins", TextRole.Normal);
-            window.Narration.AddLine("2. Return to the village", TextRole.Normal);
+            window.SetOptions(["Explore the ruins", "Return to the village"]);
 
             // Simulate executing a player command (/character)
             window.Narration.AddBlankLine();
@@ -246,19 +253,22 @@ namespace TerminalQuest.Tests.Ui
             window.Narration.AddLine("  Rowan  10/10  (you)", TextRole.Normal);
             window.Narration.AddBlankLine();
 
-            // Press Down arrow -> should select Option 1 from earlier narration turn
+            // Options should still be active and visible at the bottom
+            Assert.Equal(2, window.Options.Options.Count);
+
+            // Press Down arrow -> should select Option 1
             var handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(1, window.Narration.HighlightedOption);
+            Assert.Equal(1, window.Options.HighlightedOption);
 
             var inputField = window.SubViews.OfType<TextField>().First();
-            Assert.Equal("1", inputField.Text);
+            Assert.Equal("Explore the ruins", inputField.Text);
 
             // Press Down arrow again -> Option 2
             handled = window.NewKeyDownEvent(Key.CursorDown);
             Assert.True(handled);
-            Assert.Equal(2, window.Narration.HighlightedOption);
-            Assert.Equal("2", inputField.Text);
+            Assert.Equal(2, window.Options.HighlightedOption);
+            Assert.Equal("Return to the village", inputField.Text);
         }
 
         [Fact]
@@ -269,21 +279,24 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void GetActiveOptions_caches_result_until_content_changes()
+        public void Layout_and_dimensions_are_correct_when_options_are_set()
         {
-            var view = new NarrationView();
-            view.AddLine("1. First choice", TextRole.Normal);
-            view.AddLine("2. Second choice", TextRole.Normal);
+            var state = new GameState();
+            using var window = new GameWindow(state);
 
-            var first = view.GetActiveOptions();
-            var second = view.GetActiveOptions();
-            Assert.Same(first, second);
+            Assert.False(window.Options.Visible);
+            Assert.Equal(0, window.Options.Height);
 
-            // Adding a line invalidates the cache
-            view.AddLine("3. Third choice", TextRole.Normal);
-            var third = view.GetActiveOptions();
-            Assert.NotSame(first, third);
-            Assert.Equal(3, third.Count);
+            window.SetOptions([
+                "Kneel by the warding circle and examine what's disturbing it.",
+                "Go to the window for a longer look at the wreck on the shoal.",
+                "Grab the staff and head down into the village toward the bell.",
+                "Consult the spellbook for anything on wards reacting like this."
+            ]);
+
+            Assert.True(window.Options.Visible);
+            Assert.Equal(4, window.Options.Options.Count);
+            Assert.True(window.Options.CalculateRequiredHeight(80) >= 4);
         }
 
         [Fact]

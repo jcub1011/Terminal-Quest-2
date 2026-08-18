@@ -70,6 +70,15 @@ namespace TerminalQuest.Ui
                 Height = Dim.Fill() - CommandAreaHeight,
             };
 
+            Options = new OptionsView
+            {
+                X = 0,
+                Y = Pos.Bottom(Narration),
+                Width = Dim.Fill() - StatusWidth,
+                Height = 0,
+                Visible = false,
+            };
+
             Status = new StatusView(state)
             {
                 X = Pos.Right(Narration) + 1,
@@ -82,7 +91,7 @@ namespace TerminalQuest.Ui
             {
                 Text = IdleTitle,
                 X = 0,
-                Y = Pos.Bottom(Narration) + 1,
+                Y = Pos.AnchorEnd(2),
                 Width = Dim.Fill(),
                 Height = 1,
             };
@@ -91,7 +100,7 @@ namespace TerminalQuest.Ui
             _input = new TextField
             {
                 X = 0,
-                Y = Pos.Bottom(_commandTitleLabel),
+                Y = Pos.AnchorEnd(1),
                 Width = Dim.Fill(),
                 Height = 1,
             };
@@ -113,17 +122,27 @@ namespace TerminalQuest.Ui
                 SyncOptionHighlight();
             };
 
+            Options.OptionClicked += opt =>
+            {
+                _input.Text = opt.Text;
+                _input.InsertionPoint = _input.Text.Length;
+                _input.SetFocus();
+                SyncOptionHighlight();
+            };
+
             Narration.EntityClicked += OnEntityClicked;
             Status.EntityClicked += OnEntityClicked;
 
             // The suggestions are added last so they draw over the foot of the transcript, the
             // same layering the settings screen uses to drop its editor onto a drawn row.
-            Add(TitleBar, Narration, Status, _commandTitleLabel, _input, _suggestions);
+            Add(TitleBar, Narration, Status, Options, _commandTitleLabel, _input, _suggestions);
         }
 
         public TitleBarView TitleBar { get; }
 
         public NarrationView Narration { get; }
+
+        public OptionsView Options { get; }
 
         public StatusView Status { get; }
 
@@ -176,7 +195,7 @@ namespace TerminalQuest.Ui
 
                 if (value)
                 {
-                    Narration.HighlightedOption = null;
+                    Options.HighlightedOption = null;
                 }
                 else
                 {
@@ -436,7 +455,12 @@ namespace TerminalQuest.Ui
             Editor?.Forget(_input);
 
             HideSuggestions();
-            Narration.HighlightedOption = null;
+            Options.HighlightedOption = null;
+
+            if (!PlayerCommands.IsCommand(text))
+            {
+                ClearOptions();
+            }
 
             Narration.AddBlankLine();
             Narration.AddLine(StyledLine.FromText($"> {text}", TextRole.Command));
@@ -519,7 +543,7 @@ namespace TerminalQuest.Ui
 
             // Measured up from the input frame rather than down from the top, so the list always
             // sits against the box it is about to fill and grows away from it.
-            _suggestions.Y = Pos.Bottom(Narration) - height;
+            _suggestions.Y = Pos.AnchorEnd(CommandAreaHeight) - height;
             _suggestions.Visible = true;
             _suggestions.SetNeedsDraw();
         }
@@ -559,21 +583,89 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Moves the selection through the numbered choices currently offered by the narrator,
-        /// populating the input field with the chosen option number and highlighting it in the transcript.
+        /// Updates the options displayed below the transcript.
+        /// </summary>
+        public void SetOptions(IReadOnlyList<string> options)
+        {
+            Options.SetOptions(options);
+            UpdateOptionsLayout();
+        }
+
+        /// <summary>
+        /// Sets the active narration options directly.
+        /// </summary>
+        public void SetOptions(IReadOnlyList<NarrationOption> options)
+        {
+            Options.SetOptions(options);
+            UpdateOptionsLayout();
+        }
+
+        /// <summary>
+        /// Clears all active options and collapses the options pane.
+        /// </summary>
+        public void ClearOptions()
+        {
+            Options.ClearOptions();
+            UpdateOptionsLayout();
+        }
+
+        public void UpdateOptionsLayout()
+        {
+            var width = Viewport.Width > 0 ? Math.Max(1, Viewport.Width - StatusWidth) : (Narration.Viewport.Width > 0 ? Narration.Viewport.Width : 80);
+            var requiredHeight = Options.CalculateRequiredHeight(width);
+
+            if (requiredHeight > 0 && Options.Options.Count > 0)
+            {
+                Narration.Height = Dim.Fill() - CommandAreaHeight - requiredHeight;
+                Options.Y = Pos.Bottom(Narration);
+                Options.Height = requiredHeight;
+                Options.Visible = true;
+            }
+            else
+            {
+                Narration.Height = Dim.Fill() - CommandAreaHeight;
+                Options.Height = 0;
+                Options.Visible = false;
+            }
+
+            SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// The active choices currently presented to the player.
+        /// </summary>
+        public IReadOnlyList<NarrationOption> GetActiveOptions() => Options.Options;
+
+        /// <summary>
+        /// Moves the selection through the choices currently offered by the narrator,
+        /// populating the input field with the chosen option text and highlighting it in the options pane.
         /// </summary>
         private bool NavigateOptions(int delta)
         {
-            var options = Narration.GetActiveOptions();
+            var options = Options.Options;
             if (options.Count == 0)
             {
                 return false;
             }
 
+            var text = _input.Text?.Trim() ?? string.Empty;
             var currentIndex = -1;
-            if (int.TryParse(_input.Text?.Trim(), out var parsed) && parsed >= 1 && parsed <= options.Count)
+
+            if (Options.HighlightedOption is { } highlighted && highlighted >= 1 && highlighted <= options.Count)
             {
-                currentIndex = parsed - 1;
+                currentIndex = highlighted - 1;
+            }
+            else
+            {
+                for (var i = 0; i < options.Count; i++)
+                {
+                    if (string.Equals(options[i].Text, text, StringComparison.OrdinalIgnoreCase)
+                        || options[i].Number.ToString() == text)
+                    {
+                        currentIndex = i;
+                        break;
+                    }
+                }
             }
 
             int nextIndex;
@@ -587,36 +679,37 @@ namespace TerminalQuest.Ui
             }
 
             var selected = options[nextIndex];
-            _input.Text = selected.Number.ToString();
+            _input.Text = selected.Text;
             _input.InsertionPoint = _input.Text.Length;
-            Narration.HighlightedOption = selected.Number;
+            Options.HighlightedOption = selected.Number;
             return true;
         }
 
         /// <summary>
         /// Keeps the highlighted choice in step with whatever the player types into the command box.
-        /// A number corresponding to an active option highlights that option; anything else clears the highlight.
+        /// A matching option text or number highlights that option; anything else clears the highlight.
         /// </summary>
         private void SyncOptionHighlight()
         {
             if (IsBusy)
             {
-                Narration.HighlightedOption = null;
+                Options.HighlightedOption = null;
                 return;
             }
 
             var text = _input.Text?.Trim() ?? string.Empty;
-            if (int.TryParse(text, out var parsed))
+            if (text.Length == 0)
             {
-                var options = Narration.GetActiveOptions();
-                if (options.Any(o => o.Number == parsed))
-                {
-                    Narration.HighlightedOption = parsed;
-                    return;
-                }
+                Options.HighlightedOption = null;
+                return;
             }
 
-            Narration.HighlightedOption = null;
+            var options = Options.Options;
+            var match = options.FirstOrDefault(o =>
+                string.Equals(o.Text, text, StringComparison.OrdinalIgnoreCase)
+                || (int.TryParse(text, out var parsed) && o.Number == parsed));
+
+            Options.HighlightedOption = match?.Number;
         }
 
         private void OnEntityClicked(string entityId)

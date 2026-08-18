@@ -18,6 +18,7 @@ namespace TerminalQuest.Saves
     [JsonSerializable(typeof(InventoryFile))]
     [JsonSerializable(typeof(SaveMetadata))]
     [JsonSerializable(typeof(DirectiveFile))]
+    [JsonSerializable(typeof(OptionsFile))]
     internal sealed partial class SaveJsonContext : JsonSerializerContext
     {
         public static SaveJsonContext Readable => field ??= CreateReadable();

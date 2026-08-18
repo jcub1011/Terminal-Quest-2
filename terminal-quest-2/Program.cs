@@ -444,6 +444,14 @@ namespace TerminalQuest
 
                 state.Turn++;
 
+                try
+                {
+                    store.ClearOptions();
+                }
+                catch (SaveException)
+                {
+                }
+
                 // Stamped before the turn runs, because the state server reads the turn number out
                 // of save.json to date the memories and events the narrator is about to write.
                 if (!TryTouch(store, state.Turn))
@@ -588,6 +596,18 @@ namespace TerminalQuest
                 }
 
                 window.Narration.AddBlankLine();
+
+                try
+                {
+                    var optionsFile = store.ReadOptions();
+                    if (optionsFile.Options.Count > 0)
+                    {
+                        window.SetOptions(optionsFile.Options);
+                    }
+                }
+                catch (SaveException)
+                {
+                }
             }
 
             void RunPlayerCommand(string text)
@@ -904,6 +924,23 @@ namespace TerminalQuest
                         // The narrator's writes happened in another process, so this is the only
                         // point at which the pane learns what the turn actually changed.
                         RefreshStatus();
+
+                        try
+                        {
+                            var optionsFile = store.ReadOptions();
+                            if (optionsFile.Turn == spokenTurn && optionsFile.Options.Count > 0)
+                            {
+                                window.SetOptions(optionsFile.Options);
+                            }
+                            else
+                            {
+                                window.ClearOptions();
+                            }
+                        }
+                        catch (SaveException)
+                        {
+                            window.ClearOptions();
+                        }
 
                         // The turn ending is the narrator finishing a thought, not the player asking
                         // to be taken anywhere, so the pane is left exactly where it is. It is

@@ -318,6 +318,17 @@ namespace TerminalQuest.Mcp
                  "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
                 """,
                 Role: ToolRole.Narrator),
+
+            new("present_options",
+                "Present 2-4 numbered action choices for the player to decide what to do next. "
+              + "Call this at the end of every narrator turn instead of writing options in prose.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "options":{"type":"array","items":{"type":"string"},"description":"List of 2 to 4 choices for the player."}},
+                 "required":["options"]}
+                """,
+                Role: ToolRole.Narrator),
         ];
 
         public static string AllowedTools() => AllowedTools(ToolRole.Narrator);
@@ -369,6 +380,9 @@ namespace TerminalQuest.Mcp
             "roll" => Roll(store, arguments),
             "reveal_roll" => RevealRoll(store, arguments),
             "record_claims" => RecordClaims(store, arguments),
+            "present_options" => PresentOptions(store, arguments),
+            "options" => PresentOptions(store, arguments),
+            "present" => PresentOptions(store, arguments),
             "random_noun" => RandomWords(arguments, WordBank.Nouns),
             "random_adjective" => RandomWords(arguments, WordBank.Adjectives),
             _ => ToolOutcome.Fail($"There is no tool called '{name}'."),
@@ -1616,6 +1630,30 @@ namespace TerminalQuest.Mcp
 
             store.WriteCharacters(file);
             return ToolOutcome.Ok(result.ToString());
+        }
+
+        private static ToolOutcome PresentOptions(SaveStore store, JsonElement arguments)
+        {
+            var options = Strings(arguments, "options");
+            if (options.Count == 0)
+            {
+                return ToolOutcome.Fail("present_options needs a non-empty array of options.");
+            }
+
+            var cleaned = options.Select(o => o.Trim()).Where(o => o.Length > 0).ToList();
+            if (cleaned.Count == 0)
+            {
+                return ToolOutcome.Fail("present_options received only blank options.");
+            }
+
+            var file = new OptionsFile
+            {
+                Turn = store.CurrentTurn(),
+                Options = cleaned,
+            };
+
+            store.WriteOptions(file);
+            return ToolOutcome.Ok($"Presented {cleaned.Count} option{(cleaned.Count == 1 ? string.Empty : "s")} to the player.");
         }
 
         private static bool IsNarration(string speaker) =>

@@ -65,8 +65,6 @@ namespace TerminalQuest.Ui
         private bool _stickToBottom = true;
 
         private bool _isWaiting;
-        private int? _highlightedOption;
-        private IReadOnlyList<NarrationOption>? _activeOptionsCache;
 
         /// <summary>
         /// Raised when the player clicks on a rendered entity in the transcript.
@@ -74,47 +72,6 @@ namespace TerminalQuest.Ui
         public event Action<string>? EntityClicked;
 
         internal IReadOnlyList<StyledLine> CommittedLines => _committed;
-
-        /// <summary>
-        /// The 1-based option number currently selected and highlighted in the UI, or null if none.
-        /// </summary>
-        public int? HighlightedOption
-        {
-            get => _highlightedOption;
-            set
-            {
-                if (_highlightedOption == value)
-                {
-                    return;
-                }
-
-                _highlightedOption = value;
-                SetNeedsDraw();
-            }
-        }
-
-        /// <summary>
-        /// The active numbered choices currently present at the end of the transcript.
-        /// </summary>
-        public IReadOnlyList<NarrationOption> GetActiveOptions()
-        {
-            if (_activeOptionsCache is not null)
-            {
-                return _activeOptionsCache;
-            }
-
-            if (_committedRows.Count > 0)
-            {
-                return _activeOptionsCache = NarrationOptionDetector.Detect(_committedRows);
-            }
-
-            if (_committed.Count > 0)
-            {
-                return _activeOptionsCache = NarrationOptionDetector.Detect(_committed);
-            }
-
-            return _activeOptionsCache = [];
-        }
 
         /// <summary>
         /// Whether a narrator turn is in flight with nothing streamed back yet. While it is, a
@@ -172,7 +129,6 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            _highlightedOption = null;
             _current ??= new StyledLine();
             _parser.Append(text, _current);
 
@@ -212,7 +168,6 @@ namespace TerminalQuest.Ui
         /// <summary>Adds a complete paragraph that is not part of the narration stream.</summary>
         public void AddLine(StyledLine line)
         {
-            _highlightedOption = null;
             _committed.Add(line);
             _committedRows.AddRange(Wrap(line.Spans, _wrapWidth));
             AfterContentChanged();
@@ -288,7 +243,6 @@ namespace TerminalQuest.Ui
 
         private void AfterContentChanged()
         {
-            _activeOptionsCache = null;
             SyncContentSize();
             SetNeedsDraw();
         }
@@ -419,16 +373,6 @@ namespace TerminalQuest.Ui
             // bottom without going through any of the callers that would have re-synced it.
             SyncContentSize();
 
-            HashSet<int>? highlightedRows = null;
-            if (_highlightedOption is { } optionNum)
-            {
-                var option = GetActiveOptions().FirstOrDefault(o => o.Number == optionNum);
-                if (option is not null)
-                {
-                    highlightedRows = [.. option.RowIndices];
-                }
-            }
-
             var totalRows = TotalRows;
             var showScrollBar = totalRows > height;
             var maxOffset = Math.Max(0, totalRows - height);
@@ -449,49 +393,24 @@ namespace TerminalQuest.Ui
                 if (index < totalRows)
                 {
                     var row = RowAt(index);
-
-                    if (highlightedRows is not null && highlightedRows.Contains(index))
+                    var drawn = 0;
+                    foreach (var span in row.Spans)
                     {
-                        SetAttribute(Theme.OptionSelection);
-                        var drawn = 0;
-                        foreach (var span in row.Spans)
+                        if (drawn >= textWidth)
                         {
-                            if (drawn >= textWidth)
-                            {
-                                break;
-                            }
-
-                            var text = span.Text.Length > textWidth - drawn ? span.Text[..(textWidth - drawn)] : span.Text;
-                            AddStr(text);
-                            drawn += text.Length;
+                            break;
                         }
 
-                        if (drawn < textWidth)
-                        {
-                            AddStr(Blank(textWidth - drawn));
-                        }
+                        var text = span.Text.Length > textWidth - drawn ? span.Text[..(textWidth - drawn)] : span.Text;
+                        SetRole(span.Role);
+                        AddStr(text);
+                        drawn += text.Length;
                     }
-                    else
+
+                    if (drawn < textWidth)
                     {
-                        var drawn = 0;
-                        foreach (var span in row.Spans)
-                        {
-                            if (drawn >= textWidth)
-                            {
-                                break;
-                            }
-
-                            var text = span.Text.Length > textWidth - drawn ? span.Text[..(textWidth - drawn)] : span.Text;
-                            SetRole(span.Role);
-                            AddStr(text);
-                            drawn += text.Length;
-                        }
-
-                        if (drawn < textWidth)
-                        {
-                            SetRole(TextRole.Normal);
-                            AddStr(Blank(textWidth - drawn));
-                        }
+                        SetRole(TextRole.Normal);
+                        AddStr(Blank(textWidth - drawn));
                     }
                 }
                 else
@@ -565,7 +484,6 @@ namespace TerminalQuest.Ui
 
         private void RebuildAllRows()
         {
-            _activeOptionsCache = null;
             _committedRows = [];
             foreach (var line in _committed)
             {
