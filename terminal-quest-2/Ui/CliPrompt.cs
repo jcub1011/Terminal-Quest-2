@@ -1,5 +1,6 @@
 using System.Text;
 using Spectre.Console;
+using TerminalQuest.Saves;
 
 namespace TerminalQuest.Ui
 {
@@ -9,20 +10,41 @@ namespace TerminalQuest.Ui
     internal sealed class CliPrompt
     {
         private readonly ExternalEditor _editor;
+        private readonly SaveStore? _store;
 
-        public CliPrompt(ExternalEditor editor)
+        public CliPrompt(ExternalEditor editor, SaveStore? store = null)
         {
             _editor = editor ?? throw new ArgumentNullException(nameof(editor));
+            _store = store;
         }
 
         public async Task<string?> ReadLineAsync(
             IReadOnlyList<NarrationOption>? activeOptions = null,
-            string promptSymbol = "❯")
+            string promptSymbol = "❯",
+            SaveStore? store = null)
         {
             if (Console.IsInputRedirected)
             {
                 var line = Console.ReadLine();
                 return line?.Trim();
+            }
+
+            var effectiveStore = store ?? _store;
+
+            try
+            {
+                const int spaceNeeded = 8;
+                if (Console.CursorTop + spaceNeeded >= Console.BufferHeight)
+                {
+                    for (var i = 0; i < spaceNeeded; i++)
+                    {
+                        Console.WriteLine();
+                    }
+                    Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - spaceNeeded));
+                }
+            }
+            catch
+            {
             }
 
             AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
@@ -41,7 +63,35 @@ namespace TerminalQuest.Ui
             }
 
             var lastLength = 0;
+            var lastRenderedSuggestions = 0;
             var cancelled = false;
+
+            const int MaxVisibleSuggestions = 6;
+            IReadOnlyList<SuggestionItem> currentSuggestions = [];
+            var isChoosing = false;
+            var selectedIndex = -1;
+
+            void RefreshSuggestions()
+            {
+                var (items, choosing) = PlayerCommands.GetSuggestions(buffer.ToString(), effectiveStore);
+                currentSuggestions = items;
+                isChoosing = choosing;
+                if (!isChoosing || currentSuggestions.Count == 0)
+                {
+                    selectedIndex = -1;
+                }
+                else if (selectedIndex >= currentSuggestions.Count)
+                {
+                    selectedIndex = currentSuggestions.Count - 1;
+                }
+            }
+
+            void RenderAll()
+            {
+                RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                RenderSuggestions(startTop, currentSuggestions, selectedIndex, isChoosing, ref lastRenderedSuggestions, MaxVisibleSuggestions);
+                SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+            }
 
             while (true)
             {
@@ -49,15 +99,85 @@ namespace TerminalQuest.Ui
 
                 if (key.Key == ConsoleKey.Escape)
                 {
+                    ClearSuggestions(startTop, lastRenderedSuggestions);
                     cancelled = true;
                     break;
                 }
                 else if (key.Key == ConsoleKey.Enter)
                 {
+                    if (isChoosing && currentSuggestions.Count > 0 && selectedIndex >= 0 && selectedIndex < currentSuggestions.Count)
+                    {
+                        var chosen = currentSuggestions[selectedIndex];
+                        if (!string.IsNullOrEmpty(chosen.InsertText))
+                        {
+                            buffer.Clear().Append(chosen.InsertText);
+                            cursorIndex = buffer.Length;
+                            selectedIndex = -1;
+                            RefreshSuggestions();
+                            RenderAll();
+                            continue;
+                        }
+                    }
+
+                    ClearSuggestions(startTop, lastRenderedSuggestions);
                     break;
+                }
+                else if (key.Key == ConsoleKey.DownArrow)
+                {
+                    if (isChoosing && currentSuggestions.Count > 0)
+                    {
+                        selectedIndex = (selectedIndex + 1) % currentSuggestions.Count;
+                        RenderAll();
+                    }
+                }
+                else if (key.Key == ConsoleKey.UpArrow)
+                {
+                    if (isChoosing && currentSuggestions.Count > 0)
+                    {
+                        selectedIndex = selectedIndex <= 0 ? currentSuggestions.Count - 1 : selectedIndex - 1;
+                        RenderAll();
+                    }
+                }
+                else if (key.Key == ConsoleKey.Tab)
+                {
+                    if (isChoosing && currentSuggestions.Count > 0)
+                    {
+                        var pickIndex = (selectedIndex >= 0 && selectedIndex < currentSuggestions.Count) ? selectedIndex : 0;
+                        var chosen = currentSuggestions[pickIndex];
+                        if (!string.IsNullOrEmpty(chosen.InsertText))
+                        {
+                            buffer.Clear().Append(chosen.InsertText);
+                            cursorIndex = buffer.Length;
+                            selectedIndex = -1;
+                            RefreshSuggestions();
+                            RenderAll();
+                        }
+                    }
+                }
+                else if (key.Key == ConsoleKey.RightArrow)
+                {
+                    if (cursorIndex < buffer.Length)
+                    {
+                        cursorIndex++;
+                        SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+                    }
+                    else if (isChoosing && currentSuggestions.Count > 0)
+                    {
+                        var pickIndex = (selectedIndex >= 0 && selectedIndex < currentSuggestions.Count) ? selectedIndex : 0;
+                        var chosen = currentSuggestions[pickIndex];
+                        if (!string.IsNullOrEmpty(chosen.InsertText))
+                        {
+                            buffer.Clear().Append(chosen.InsertText);
+                            cursorIndex = buffer.Length;
+                            selectedIndex = -1;
+                            RefreshSuggestions();
+                            RenderAll();
+                        }
+                    }
                 }
                 else if (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key == ConsoleKey.G)
                 {
+                    ClearSuggestions(startTop, lastRenderedSuggestions);
                     Console.WriteLine();
                     var edited = await _editor.EditStringAsync(buffer.ToString(), "Player Command");
                     if (!string.IsNullOrWhiteSpace(edited))
@@ -78,7 +198,9 @@ namespace TerminalQuest.Ui
                     {
                     }
                     lastLength = 0;
-                    RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                    lastRenderedSuggestions = 0;
+                    RefreshSuggestions();
+                    RenderAll();
                     continue;
                 }
                 else if (key.Key == ConsoleKey.Backspace)
@@ -87,7 +209,9 @@ namespace TerminalQuest.Ui
                     {
                         buffer.Remove(cursorIndex - 1, 1);
                         cursorIndex--;
-                        RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                        selectedIndex = -1;
+                        RefreshSuggestions();
+                        RenderAll();
                     }
                 }
                 else if (key.Key == ConsoleKey.Delete)
@@ -95,7 +219,9 @@ namespace TerminalQuest.Ui
                     if (cursorIndex < buffer.Length)
                     {
                         buffer.Remove(cursorIndex, 1);
-                        RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                        selectedIndex = -1;
+                        RefreshSuggestions();
+                        RenderAll();
                     }
                 }
                 else if (key.Key == ConsoleKey.LeftArrow)
@@ -103,14 +229,6 @@ namespace TerminalQuest.Ui
                     if (cursorIndex > 0)
                     {
                         cursorIndex--;
-                        SetCursorPositionSafe(startLeft + cursorIndex, startTop);
-                    }
-                }
-                else if (key.Key == ConsoleKey.RightArrow)
-                {
-                    if (cursorIndex < buffer.Length)
-                    {
-                        cursorIndex++;
                         SetCursorPositionSafe(startLeft + cursorIndex, startTop);
                     }
                 }
@@ -128,7 +246,9 @@ namespace TerminalQuest.Ui
                 {
                     buffer.Insert(cursorIndex, key.KeyChar);
                     cursorIndex++;
-                    RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                    selectedIndex = -1;
+                    RefreshSuggestions();
+                    RenderAll();
                 }
             }
 
@@ -426,6 +546,96 @@ namespace TerminalQuest.Ui
                 Console.Write(text + new string(' ', spaces));
                 lastLength = text.Length;
                 SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void RenderSuggestions(
+            int startTop,
+            IReadOnlyList<SuggestionItem> suggestions,
+            int selectedIndex,
+            bool isChoosing,
+            ref int lastRenderedLines,
+            int maxVisible)
+        {
+            ClearSuggestions(startTop, lastRenderedLines);
+
+            if (suggestions.Count == 0)
+            {
+                lastRenderedLines = 0;
+                return;
+            }
+
+            var linesToDraw = new List<string>();
+
+            var windowStart = 0;
+            if (selectedIndex >= 0 && selectedIndex >= maxVisible)
+            {
+                windowStart = selectedIndex - maxVisible + 1;
+            }
+            var windowEnd = Math.Min(suggestions.Count, windowStart + maxVisible);
+
+            for (var i = windowStart; i < windowEnd; i++)
+            {
+                var item = suggestions[i];
+                var isSelected = (i == selectedIndex);
+
+                var prefix = isSelected ? "[bold #8fb26a]❯ [/]" : "  ";
+                var displayMarkup = isSelected
+                    ? $"[bold #f0e6d2]{Markup.Escape(item.DisplayText)}[/]"
+                    : Theme.Format(item.DisplayText, item.Role);
+
+                var pad = Math.Max(1, 24 - item.DisplayText.Length);
+                var spacing = new string(' ', pad);
+
+                var summaryMarkup = string.IsNullOrEmpty(item.Summary)
+                    ? string.Empty
+                    : (isSelected ? $"[#d7d2c4]{Markup.Escape(item.Summary)}[/]" : $"[dim]{Markup.Escape(item.Summary)}[/]");
+
+                linesToDraw.Add($"{prefix}{displayMarkup}{spacing}{summaryMarkup}");
+            }
+
+            for (var rowOffset = 0; rowOffset < linesToDraw.Count; rowOffset++)
+            {
+                var targetRow = startTop + 1 + rowOffset;
+                if (targetRow < Console.BufferHeight)
+                {
+                    try
+                    {
+                        Console.SetCursorPosition(0, targetRow);
+                        AnsiConsole.Markup(linesToDraw[rowOffset]);
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            lastRenderedLines = linesToDraw.Count;
+        }
+
+        private static void ClearSuggestions(int startTop, int lineCount)
+        {
+            if (lineCount <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                var width = Console.WindowWidth > 0 ? Console.WindowWidth : (Console.BufferWidth > 0 ? Console.BufferWidth : 80);
+                var emptyLine = new string(' ', Math.Max(0, width - 1));
+                for (var i = 1; i <= lineCount; i++)
+                {
+                    var row = startTop + i;
+                    if (row < Console.BufferHeight)
+                    {
+                        Console.SetCursorPosition(0, row);
+                        Console.Write(emptyLine);
+                    }
+                }
             }
             catch
             {

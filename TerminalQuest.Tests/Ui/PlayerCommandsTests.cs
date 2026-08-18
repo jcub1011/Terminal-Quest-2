@@ -548,5 +548,82 @@ namespace TerminalQuest.Tests.Ui
             Assert.Single(suggestions);
             Assert.Equal("/character Rowan", suggestions[0].InsertText);
         }
+
+        [Fact]
+        public void Command_insert_text_includes_trailing_space_only_when_arguments_are_expected()
+        {
+            var (helpSuggestions, _) = PlayerCommands.GetSuggestions("/help", null);
+            var helpItem = Assert.Single(helpSuggestions);
+            Assert.Equal("/help", helpItem.InsertText);
+
+            var (charSuggestions, _) = PlayerCommands.GetSuggestions("/character", null);
+            var charItem = charSuggestions.First(s => s.DisplayText.StartsWith("/character "));
+            Assert.Equal("/character ", charItem.InsertText);
+        }
+
+        [Fact]
+        public void Custom_command_can_be_registered_with_extensible_completer()
+        {
+            using var save = Seeded();
+
+            var customCompleter = new TestColorCompleter();
+            var customCommand = new DelegatePlayerCommand(
+                new("test-color", "<color>", "custom color test command"),
+                (arg, store) => new PlayerCommandResult
+                {
+                    Lines = [StyledLine.FromText($"Color set to {arg}", TextRole.Normal)]
+                },
+                customCompleter);
+
+            PlayerCommands.Register(customCommand);
+
+            // Find
+            Assert.NotNull(PlayerCommands.Find("test-color"));
+
+            // Matching
+            var matches = PlayerCommands.Matching("/test-col");
+            Assert.Contains(matches, m => m.Name == "test-color");
+
+            // Suggestions with completer
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/test-color re", save.Store);
+            Assert.True(isChoosing);
+            Assert.Contains(suggestions, s => s.DisplayText == "red" && s.InsertText == "/test-color red");
+
+            // Execution
+            var result = PlayerCommands.Execute("/test-color red", save.Store);
+            Assert.Contains("Color set to red", TextOf(result), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void NullArgumentCompleter_returns_empty_list()
+        {
+            var completer = ArgumentCompleters.Null;
+            var suggestions = completer.GetSuggestions("help", "", null);
+            Assert.Empty(suggestions);
+        }
+
+        [Fact]
+        public void Argument_completers_return_empty_when_store_is_null()
+        {
+            Assert.Empty(ArgumentCompleters.Character.GetSuggestions("character", "", null));
+            Assert.Empty(ArgumentCompleters.Location.GetSuggestions("location", "", null));
+        }
+
+        private sealed class TestColorCompleter : IArgumentCompleter
+        {
+            private static readonly string[] Colors = ["red", "green", "blue", "yellow"];
+
+            public IReadOnlyList<SuggestionItem> GetSuggestions(string commandName, string argumentPrefix, SaveStore? store)
+            {
+                return Colors
+                    .Where(c => c.StartsWith(argumentPrefix, StringComparison.OrdinalIgnoreCase))
+                    .Select(c => new SuggestionItem(
+                        InsertText: $"/{commandName} {c}",
+                        DisplayText: c,
+                        Summary: $"{c} theme color",
+                        Role: TextRole.Item))
+                    .ToArray();
+            }
+        }
     }
 }

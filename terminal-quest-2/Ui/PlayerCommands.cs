@@ -7,27 +7,104 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal static class PlayerCommands
     {
-        public static readonly IReadOnlyList<PlayerCommandInfo> All =
-        [
-            new("story", "", "everything that has happened"),
-            new("history", "[page|query]", "read the full dialogue and narration history"),
-            new("transcript", "[page|query]", "read the full dialogue and narration history", IsAlias: true),
-            new("rolls", "", "every die the world has thrown"),
-            new("inventory", "", "what you are carrying"),
-            new("inv", "", "what you are carrying", IsAlias: true),
-            new("character", "[name]", "who you have met, and what happened with them"),
-            new("characters", "[name]", "who you have met, and what happened with them", IsAlias: true),
-            new("who", "[name]", "who you have met, and what happened with them", IsAlias: true),
-            new("location", "[name]", "where you have been, and what happened there"),
-            new("locations", "[name]", "where you have been, and what happened there", IsAlias: true),
-            new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
-            new("saves", "", "every save on this machine"),
-            new("delete", "<name>", "destroy another save, for good"),
-            new("system-prompt", "", "rewrite the narrator's instructions (ends the session)"),
-            new("help", "", "this list"),
-            new("quit", "", "leave this save and go back to the menu"),
-            new("exit", "", "leave this save and go back to the menu", IsAlias: true),
-        ];
+        private static readonly List<IPlayerCommand> Commands = [];
+        private static readonly Dictionary<string, IPlayerCommand> CommandsByName = new(StringComparer.OrdinalIgnoreCase);
+
+        static PlayerCommands()
+        {
+            Register(new DelegatePlayerCommand(
+                new("story", "", "everything that has happened"),
+                (arg, store) => { var lines = new List<StyledLine>(); Story(lines, store); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("history", "[page|query]", "read the full dialogue and narration history"),
+                (arg, store) => { var lines = new List<StyledLine>(); History(lines, store, arg); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("transcript", "[page|query]", "read the full dialogue and narration history", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); History(lines, store, arg); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("rolls", "", "every die the world has thrown"),
+                (arg, store) => { var lines = new List<StyledLine>(); Rolls(lines, store); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("inventory", "", "what you are carrying"),
+                (arg, store) => { var lines = new List<StyledLine>(); Inventory(lines, store); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("inv", "", "what you are carrying", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); Inventory(lines, store); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("character", "[name]", "who you have met, and what happened with them"),
+                (arg, store) => { var lines = new List<StyledLine>(); Characters(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Character));
+
+            Register(new DelegatePlayerCommand(
+                new("characters", "[name]", "who you have met, and what happened with them", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); Characters(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Character));
+
+            Register(new DelegatePlayerCommand(
+                new("who", "[name]", "who you have met, and what happened with them", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); Characters(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Character));
+
+            Register(new DelegatePlayerCommand(
+                new("location", "[name]", "where you have been, and what happened there"),
+                (arg, store) => { var lines = new List<StyledLine>(); Locations(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Location));
+
+            Register(new DelegatePlayerCommand(
+                new("locations", "[name]", "where you have been, and what happened there", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); Locations(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Location));
+
+            Register(new DelegatePlayerCommand(
+                new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
+                (arg, store) => { var lines = new List<StyledLine>(); Locations(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.Location));
+
+            Register(new DelegatePlayerCommand(
+                new("saves", "", "every save on this machine"),
+                (arg, store) => { var lines = new List<StyledLine>(); Saves(lines, store); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("delete", "<name>", "destroy another save, for good"),
+                (arg, store) => { var lines = new List<StyledLine>(); Delete(lines, store, arg); return new() { Lines = lines }; },
+                ArgumentCompleters.SaveName));
+
+            Register(new DelegatePlayerCommand(
+                new("system-prompt", "", "rewrite the narrator's instructions (ends the session)"),
+                (arg, store) => { var lines = new List<StyledLine>(); return SystemPrompt(lines); }));
+
+            Register(new DelegatePlayerCommand(
+                new("help", "", "this list"),
+                (arg, store) => { var lines = new List<StyledLine>(); Help(lines); return new() { Lines = lines }; }));
+
+            Register(new DelegatePlayerCommand(
+                new("quit", "", "leave this save and go back to the menu"),
+                (arg, store) => new() { Lines = [], Quit = true }));
+
+            Register(new DelegatePlayerCommand(
+                new("exit", "", "leave this save and go back to the menu", IsAlias: true),
+                (arg, store) => new() { Lines = [], Quit = true }));
+        }
+
+        public static IReadOnlyList<PlayerCommandInfo> All => Commands.Select(c => c.Info).ToArray();
+
+        public static void Register(IPlayerCommand command)
+        {
+            ArgumentNullException.ThrowIfNull(command);
+            Commands.Add(command);
+            CommandsByName[command.Info.Name] = command;
+        }
+
+        public static IPlayerCommand? Find(string name)
+        {
+            return CommandsByName.TryGetValue(name, out var command) ? command : null;
+        }
 
         public static bool IsCommand(string input) => input.StartsWith('/');
 
@@ -40,8 +117,9 @@ namespace TerminalQuest.Ui
 
             var typed = input[1..];
 
-            return All
-                .Where(command => command.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+            return Commands
+                .Where(command => command.Info.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+                .Select(command => command.Info)
                 .ToArray();
         }
 
@@ -61,7 +139,7 @@ namespace TerminalQuest.Ui
                 {
                     var items = matches
                         .Select(c => new SuggestionItem(
-                            InsertText: $"/{c.Name} ",
+                            InsertText: c.Arguments.Length > 0 ? $"/{c.Name} " : $"/{c.Name}",
                             DisplayText: c.Usage,
                             Summary: c.Summary,
                             Role: TextRole.Command))
@@ -75,7 +153,7 @@ namespace TerminalQuest.Ui
                 {
                     return ([
                         new SuggestionItem(
-                            InsertText: $"/{named.Value.Name} ",
+                            InsertText: named.Value.Arguments.Length > 0 ? $"/{named.Value.Name} " : $"/{named.Value.Name}",
                             DisplayText: named.Value.Usage,
                             Summary: named.Value.Summary,
                             Role: TextRole.Command)
@@ -89,13 +167,13 @@ namespace TerminalQuest.Ui
             var commandName = parts.Length > 0 ? parts[0].TrimStart('/').ToLowerInvariant() : string.Empty;
             var argPrefix = parts.Length > 1 ? parts[1] : string.Empty;
 
-            var command = All.FirstOrDefault(c => c.Name.Equals(commandName, StringComparison.OrdinalIgnoreCase));
-            if (string.IsNullOrEmpty(command.Name))
+            var command = Find(commandName);
+            if (command is null)
             {
                 return ([], false);
             }
 
-            var argMatches = GetArgumentSuggestions(commandName, argPrefix, store);
+            var argMatches = command.Completer.GetSuggestions(commandName, argPrefix, store);
             if (argMatches.Count > 0)
             {
                 return (argMatches, true);
@@ -104,85 +182,10 @@ namespace TerminalQuest.Ui
             return ([
                 new SuggestionItem(
                     InsertText: string.Empty,
-                    DisplayText: command.Usage,
-                    Summary: command.Summary,
+                    DisplayText: command.Info.Usage,
+                    Summary: command.Info.Summary,
                     Role: TextRole.Command)
             ], false);
-        }
-
-        private static IReadOnlyList<SuggestionItem> GetArgumentSuggestions(
-            string commandName,
-            string argPrefix,
-            SaveStore? store)
-        {
-            switch (commandName)
-            {
-                case "character":
-                case "characters":
-                case "who":
-                    if (store is null) return [];
-                    try
-                    {
-                        var chars = store.ReadCharacters().Characters;
-                        return chars
-                            .Where(c => c.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
-                            .Select(c => new SuggestionItem(
-                                InsertText: $"/{commandName} {c.Name}",
-                                DisplayText: c.Name,
-                                Summary: c.Kind == CharacterKind.Player
-                                    ? "(you)"
-                                    : (c.Description.Length > 0 ? c.Description : $"Health {c.Health}/{c.MaxHealth}"),
-                                Role: TextRole.Normal))
-                            .ToArray();
-                    }
-                    catch (SaveException)
-                    {
-                        return [];
-                    }
-
-                case "location":
-                case "locations":
-                case "where":
-                    if (store is null) return [];
-                    try
-                    {
-                        var locs = store.ReadLocations().Locations;
-                        return locs
-                            .Where(l => l.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
-                            .Select(l => new SuggestionItem(
-                                InsertText: $"/{commandName} {l.Name}",
-                                DisplayText: l.Name,
-                                Summary: l.Description,
-                                Role: TextRole.Place))
-                            .ToArray();
-                    }
-                    catch (SaveException)
-                    {
-                        return [];
-                    }
-
-                case "delete":
-                    try
-                    {
-                        var saves = SavePaths.List();
-                        return saves
-                            .Where(s => !SaveStore.Matches(s.Name, store?.Name)
-                                && s.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
-                            .Select(s => new SuggestionItem(
-                                InsertText: $"/{commandName} {s.Name}",
-                                DisplayText: s.Name,
-                                Summary: $"turn {s.Turn}  {s.SizeText}",
-                                Role: TextRole.Normal))
-                            .ToArray();
-                    }
-                    catch
-                    {
-                        return [];
-                    }
-
-                default:
-                    return [];
-            }
         }
 
         public static PlayerCommandInfo? Describing(string input)
@@ -195,15 +198,7 @@ namespace TerminalQuest.Ui
             var parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var name = parts.Length > 0 ? parts[0].TrimStart('/') : string.Empty;
 
-            foreach (var command in All)
-            {
-                if (command.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
-                {
-                    return command;
-                }
-            }
-
-            return null;
+            return Find(name)?.Info;
         }
 
         public static PlayerCommandResult Execute(string input, SaveStore store)
@@ -212,61 +207,26 @@ namespace TerminalQuest.Ui
             var name = parts.Length > 0 ? parts[0].TrimStart('/').ToLowerInvariant() : string.Empty;
             var argument = parts.Length > 1 ? parts[1] : string.Empty;
 
-            var lines = new List<StyledLine>();
+            var command = Find(name);
+            if (command is null)
+            {
+                return new PlayerCommandResult
+                {
+                    Lines = [StyledLine.FromText($"There is no command '/{name}'. Try /help.", TextRole.Danger)]
+                };
+            }
 
             try
             {
-                switch (name)
-                {
-                    case "help":
-                        Help(lines);
-                        break;
-                    case "story":
-                        Story(lines, store);
-                        break;
-                    case "history":
-                    case "transcript":
-                        History(lines, store, argument);
-                        break;
-                    case "rolls":
-                        Rolls(lines, store);
-                        break;
-                    case "inventory":
-                    case "inv":
-                        Inventory(lines, store);
-                        break;
-                    case "character":
-                    case "characters":
-                    case "who":
-                        Characters(lines, store, argument);
-                        break;
-                    case "location":
-                    case "locations":
-                    case "where":
-                        Locations(lines, store, argument);
-                        break;
-                    case "saves":
-                        Saves(lines, store);
-                        break;
-                    case "delete":
-                        Delete(lines, store, argument);
-                        break;
-                    case "system-prompt":
-                        return SystemPrompt(lines);
-                    case "quit":
-                    case "exit":
-                        return new PlayerCommandResult { Lines = lines, Quit = true };
-                    default:
-                        lines.Add(StyledLine.FromText($"There is no command '/{name}'. Try /help.", TextRole.Danger));
-                        break;
-                }
+                return command.Execute(argument, store);
             }
             catch (SaveException ex)
             {
-                lines.Add(StyledLine.FromText(ex.Message, TextRole.Danger));
+                return new PlayerCommandResult
+                {
+                    Lines = [StyledLine.FromText(ex.Message, TextRole.Danger)]
+                };
             }
-
-            return new PlayerCommandResult { Lines = lines };
         }
 
         private static void Help(List<StyledLine> lines)

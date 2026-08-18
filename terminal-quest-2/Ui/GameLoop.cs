@@ -148,7 +148,7 @@ namespace TerminalQuest.Ui
 
                 try
                 {
-                    var cliPrompt = new CliPrompt(editor);
+                    var cliPrompt = new CliPrompt(editor, store);
                     var lastTurnLines = new List<StyledLine>();
 
                     // Start sessions
