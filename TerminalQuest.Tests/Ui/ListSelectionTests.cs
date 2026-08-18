@@ -8,6 +8,7 @@ using Terminal.Gui.Views;
 
 using TerminalQuest.Agents;
 using TerminalQuest.Settings;
+using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
 
 using Xunit;
@@ -17,6 +18,8 @@ namespace TerminalQuest.Tests.Ui
     /// <summary>
     /// Tests for list and suggestion selection handling.
     /// </summary>
+    [Collection(EnvironmentCollection.Name)]
+    [Trait(Categories.Name, Categories.Environment)]
     public sealed class ListSelectionTests
     {
         private static readonly SuggestionItem[] Commands =
@@ -150,6 +153,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_selection_vs_picking_behavior()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
@@ -171,6 +175,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_tab_navigation_claude()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
@@ -199,6 +204,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_claude_model_selection_without_enter()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
@@ -218,6 +224,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_tab_navigation_openai_and_presets()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
@@ -244,8 +251,34 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void SettingsWindow_preset_dropdown_selection_by_index_persists_on_save()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToTab(window.OpenAiTabView);
+            var dropDown = FindDescendants<DropDownList>(window).Single();
+            var urlField = FindDescendants<TextField>(window).First(tf => tf != dropDown && tf.Text == settings.LmStudioBaseUrl);
+
+            // Select Google preset
+            dropDown.Text = "Google (https://generativelanguage.googleapis.com/v1beta/openai)";
+
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", urlField.Text);
+
+            // Save via Ctrl+S
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal("Google", window.Chosen.OpenAiPreset);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.Chosen.LmStudioBaseUrl);
+            Assert.Equal("gemini-flash-lite-latest", window.Chosen.LmStudioModel);
+        }
+
+        [Fact]
         public void SettingsWindow_probed_models_sorting_and_reactivity()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
@@ -267,6 +300,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_tabs_structure_and_provider_picking()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
@@ -285,6 +319,7 @@ namespace TerminalQuest.Tests.Ui
         [Fact]
         public void SettingsWindow_tab_switching_via_value_and_esc_cancel()
         {
+            using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);

@@ -582,5 +582,13 @@ namespace TerminalQuest.Tests.Settings
             Assert.False(File.Exists($"{temp.Path_}.tmp"));
             Assert.Equal("test-model", SettingsStore.Read(temp.Path_).LmStudioModel);
         }
+
+        [Fact]
+        public void Settings_path_is_isolated_under_test_root()
+        {
+            using var root = new TerminalQuest.Tests.Infrastructure.SavesRoot();
+            Assert.Equal(Path.Combine(root.Root, "Settings", "settings.json"), SettingsStore.Path);
+            Assert.DoesNotContain(AppDirectory.Root, SettingsStore.Path, StringComparison.OrdinalIgnoreCase);
+        }
     }
 }

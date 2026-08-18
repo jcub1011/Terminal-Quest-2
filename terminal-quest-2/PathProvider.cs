@@ -27,21 +27,14 @@ namespace TerminalQuest
         /// <summary>Subfolder where save games are stored.</summary>
         public static string Saves => Path.Combine(Root, "Saves");
 
-        /// <summary>Subfolder where settings are stored. Fixed under <see cref="AppDirectory.Root"/>.</summary>
-        public static string Settings => Path.Combine(AppDirectory.Root, "Settings");
+        /// <summary>Subfolder where settings are stored.</summary>
+        public static string Settings => Path.Combine(Root, "Settings");
 
         /// <summary>
         /// Migrates legacy saves and settings to the new directory layout if needed.
         /// Safe to call multiple times (idempotent).
         /// </summary>
-        public static void EnsureMigrated()
-        {
-            Migrate(AppDirectory.Root);
-            if (!string.Equals(Root, AppDirectory.Root, StringComparison.OrdinalIgnoreCase))
-            {
-                Migrate(Root);
-            }
-        }
+        public static void EnsureMigrated() => Migrate(Root);
 
         /// <summary>
         /// Migrates legacy saves and settings within a specific root directory.

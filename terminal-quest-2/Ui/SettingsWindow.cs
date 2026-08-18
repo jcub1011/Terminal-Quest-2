@@ -85,10 +85,14 @@ namespace TerminalQuest.Ui
         private readonly Button _cancelButton;
         private readonly Button _defaultsButton;
 
-        public SettingsWindow(IApplication app, AppSettings settings)
+        private readonly string _settingsPath;
+
+        public SettingsWindow(IApplication app, AppSettings settings, string? settingsPath = null)
         {
             ArgumentNullException.ThrowIfNull(app);
             ArgumentNullException.ThrowIfNull(settings);
+
+            _settingsPath = settingsPath ?? SettingsStore.Path;
 
             _app = app;
             _original = settings;
@@ -401,35 +405,14 @@ namespace TerminalQuest.Ui
             }
             _openAiPresetDropDown.Text = initialPreset.Display;
 
+            _openAiPresetDropDown.ValueChanged += (_, _) =>
+            {
+                ApplyPresetSelection(_openAiPresetDropDown.Text);
+            };
+
             _openAiPresetDropDown.TextChanged += (_, _) =>
             {
-                if (_isUpdatingPresetFromUrl) return;
-
-                var currentText = _openAiPresetDropDown.Text?.Trim() ?? string.Empty;
-                var matched = PresetChoices.FirstOrDefault(p => string.Equals(p.Display, currentText, StringComparison.OrdinalIgnoreCase));
-                if (!string.IsNullOrEmpty(matched.Name))
-                {
-                    _draft.OpenAiPreset = matched.Name;
-                    _draft.LmStudioBaseUrl = matched.Url;
-                    _isUpdatingPresetFromUrl = true;
-                    try
-                    {
-                        _lmStudioBaseUrl.Text = matched.Url;
-                    }
-                    finally
-                    {
-                        _isUpdatingPresetFromUrl = false;
-                    }
-
-                    if (!string.IsNullOrEmpty(matched.DefaultModel) && (string.IsNullOrEmpty(_draft.LmStudioModel) || PresetChoices.Any(p => !string.IsNullOrEmpty(p.DefaultModel) && p.DefaultModel == _draft.LmStudioModel)))
-                    {
-                        _draft.LmStudioModel = matched.DefaultModel;
-                        _lmStudioModel.Text = matched.DefaultModel;
-                    }
-
-                    UpdateEngineSummary();
-                    _statusLabel.Text = $"Selected preset: {matched.Name}";
-                }
+                ApplyPresetSelection(_openAiPresetDropDown.Text);
             };
 
             _lmStudioBaseUrl.TextChanged += (_, _) =>
@@ -895,12 +878,63 @@ namespace TerminalQuest.Ui
             SetNeedsDraw();
         }
 
+        private void ApplyPresetSelection(string? presetNameOrDisplay)
+        {
+            if (_isUpdatingPresetFromUrl) return;
+
+            var current = presetNameOrDisplay?.Trim() ?? string.Empty;
+            var matched = PresetChoices.FirstOrDefault(p =>
+                string.Equals(p.Display, current, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(p.Name, current, StringComparison.OrdinalIgnoreCase));
+
+            if (string.IsNullOrEmpty(matched.Name))
+            {
+                return;
+            }
+
+            _draft.OpenAiPreset = matched.Name;
+            _draft.LmStudioBaseUrl = matched.Url;
+            _isUpdatingPresetFromUrl = true;
+            try
+            {
+                _lmStudioBaseUrl.Text = matched.Url;
+                _openAiPresetDropDown.Text = matched.Display;
+            }
+            finally
+            {
+                _isUpdatingPresetFromUrl = false;
+            }
+
+            if (!string.IsNullOrEmpty(matched.DefaultModel) &&
+                (string.IsNullOrEmpty(_draft.LmStudioModel) || PresetChoices.Any(p => !string.IsNullOrEmpty(p.DefaultModel) && p.DefaultModel == _draft.LmStudioModel)))
+            {
+                _draft.LmStudioModel = matched.DefaultModel;
+                _lmStudioModel.Text = matched.DefaultModel;
+            }
+
+            UpdateEngineSummary();
+            _statusLabel.Text = $"Selected preset: {matched.Name}";
+        }
+
         private void SaveAndClose()
         {
             // Collect and validate values
             var selectedProvider = _providerList.SelectedItem ?? 0;
             _draft.Provider = selectedProvider == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
-            _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
+
+            var claudeCustom = _claudeCustomModel.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(claudeCustom))
+            {
+                _draft.ClaudeModel = claudeCustom;
+            }
+            else if (_claudeModelList.SelectedItem is { } selectedClaudeIdx && selectedClaudeIdx >= 0 && selectedClaudeIdx < ClaudeModels.All.Length)
+            {
+                _draft.ClaudeModel = ClaudeModels.All[selectedClaudeIdx].Id;
+            }
+            else
+            {
+                _draft.ClaudeModel = string.Empty;
+            }
 
             var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
             if (!string.IsNullOrEmpty(baseUrl) && !AppSettings.IsAddress(baseUrl))
@@ -912,7 +946,14 @@ namespace TerminalQuest.Ui
             _draft.LmStudioApiKey = _lmStudioApiKey.Text?.Trim() ?? string.Empty;
             _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
 
-            if (string.IsNullOrWhiteSpace(_draft.OpenAiPreset))
+            var matchedPreset = PresetChoices.FirstOrDefault(p =>
+                string.Equals(p.Display, _openAiPresetDropDown.Text?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(p.Name, _openAiPresetDropDown.Text?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(matchedPreset.Name))
+            {
+                _draft.OpenAiPreset = matchedPreset.Name;
+            }
+            else if (string.IsNullOrWhiteSpace(_draft.OpenAiPreset))
             {
                 _draft.OpenAiPreset = OpenAiPresets.DetectPreset(_draft.LmStudioBaseUrl).Name;
             }
@@ -933,7 +974,7 @@ namespace TerminalQuest.Ui
             // Commit and save to disk
             try
             {
-                SettingsStore.Write(_draft);
+                SettingsStore.Write(_draft, _settingsPath);
             }
             catch (Exception ex)
             {

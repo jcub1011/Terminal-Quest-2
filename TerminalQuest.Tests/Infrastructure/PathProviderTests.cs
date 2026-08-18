@@ -8,12 +8,12 @@ namespace TerminalQuest.Tests.Infrastructure
     public sealed class PathProviderTests
     {
         [Fact]
-        public void Saves_are_composed_from_root_and_settings_from_app_directory()
+        public void Saves_and_settings_are_composed_from_root()
         {
             using var root = new SavesRoot();
 
             Assert.Equal(Path.Combine(root.Root, "Saves"), PathProvider.Saves);
-            Assert.Equal(Path.Combine(AppDirectory.Root, "Settings"), PathProvider.Settings);
+            Assert.Equal(Path.Combine(root.Root, "Settings"), PathProvider.Settings);
         }
 
         [Fact]
