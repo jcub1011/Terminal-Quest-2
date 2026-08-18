@@ -102,10 +102,15 @@ namespace TerminalQuest.Ui
                         break;
 
                     case WizardStep.Name:
-                        AnsiConsole.Clear();
-                        RenderWizardHeader();
-                        RenderArchetypeDetails(archetypeChoice!);
-                        AnsiConsole.WriteLine();
+                        void RepaintNameStep()
+                        {
+                            AnsiConsole.Clear();
+                            RenderWizardHeader();
+                            RenderArchetypeDetails(archetypeChoice!);
+                            AnsiConsole.WriteLine();
+                        }
+
+                        RepaintNameStep();
 
                         name = CliPrompt.AskString(
                             "[bold #e0b050]Character Name:[/] ",
@@ -118,7 +123,8 @@ namespace TerminalQuest.Ui
                                     ? ValidationResult.Success()
                                     : ValidationResult.Error("Name must be between 1 and 40 characters.");
                             },
-                            cancelHint: "go back");
+                            cancelHint: "go back",
+                            onRepaint: RepaintNameStep);
 
                         if (name is null)
                         {
@@ -130,19 +136,25 @@ namespace TerminalQuest.Ui
                         break;
 
                     case WizardStep.Description:
-                        AnsiConsole.Clear();
-                        RenderWizardHeader();
-                        RenderArchetypeDetails(archetypeChoice!);
-                        AnsiConsole.WriteLine();
-                        AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
-                        AnsiConsole.WriteLine();
-                        AnsiConsole.MarkupLine("[dim]Press Enter to accept default, or edit who your character is (type /edit to open external editor):[/]");
+                        void RepaintDescStep()
+                        {
+                            AnsiConsole.Clear();
+                            RenderWizardHeader();
+                            RenderArchetypeDetails(archetypeChoice!);
+                            AnsiConsole.WriteLine();
+                            AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
+                            AnsiConsole.WriteLine();
+                            AnsiConsole.MarkupLine("[dim]Press Enter to accept default, or edit who your character is (type /edit to open external editor):[/]");
+                        }
+
+                        RepaintDescStep();
 
                         rawDescInput = CliPrompt.AskString(
                             "[bold #e0b050]Who you are:[/] ",
                             defaultValue: rawDescInput ?? archetypeChoice!.Aptitude,
                             allowEmpty: true,
-                            cancelHint: "go back");
+                            cancelHint: "go back",
+                            onRepaint: RepaintDescStep);
 
                         if (rawDescInput is null)
                         {
@@ -164,19 +176,25 @@ namespace TerminalQuest.Ui
                         break;
 
                     case WizardStep.Location:
-                        AnsiConsole.Clear();
-                        RenderWizardHeader();
-                        RenderArchetypeDetails(archetypeChoice!);
-                        AnsiConsole.WriteLine();
-                        AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
-                        AnsiConsole.MarkupLine($"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}");
-                        AnsiConsole.WriteLine();
+                        void RepaintLocStep()
+                        {
+                            AnsiConsole.Clear();
+                            RenderWizardHeader();
+                            RenderArchetypeDetails(archetypeChoice!);
+                            AnsiConsole.WriteLine();
+                            AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
+                            AnsiConsole.MarkupLine($"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}");
+                            AnsiConsole.WriteLine();
+                        }
+
+                        RepaintLocStep();
 
                         rawPlaceInput = CliPrompt.AskString(
                             "[bold #e0b050]Where you begin (leave empty for narrator choice):[/] ",
                             defaultValue: rawPlaceInput,
                             allowEmpty: true,
-                            cancelHint: "go back");
+                            cancelHint: "go back",
+                            onRepaint: RepaintLocStep);
 
                         if (rawPlaceInput is null)
                         {
@@ -189,25 +207,34 @@ namespace TerminalQuest.Ui
                         break;
 
                     case WizardStep.Confirmation:
-                        AnsiConsole.Clear();
-                        RenderWizardHeader();
-
-                        var summaryPanel = new Panel(
-                            $"[bold #8fb26a]Name:[/] [bold]{Markup.Escape(name!)}[/]\n" +
-                            $"[bold #8fb26a]Archetype:[/] {Markup.Escape(archetypeChoice!.Name)} (HP {archetypeChoice!.MaxHealth})\n" +
-                            $"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}\n" +
-                            $"[bold #8fb26a]Where you begin:[/] {(startLocation is not null ? Markup.Escape(startLocation) : "[dim]Narrator choice[/]")}")
+                        void RepaintConfirmStep()
                         {
-                            Header = new PanelHeader(" [bold cyan]Character Summary[/] "),
-                            Border = BoxBorder.Rounded,
-                            BorderStyle = new Style(new Color(0x8f, 0xb2, 0x6a)),
-                            Padding = new Padding(1, 0, 1, 0)
-                        };
+                            AnsiConsole.Clear();
+                            RenderWizardHeader();
 
-                        AnsiConsole.Write(summaryPanel);
-                        AnsiConsole.WriteLine();
+                            var summaryPanel = new Panel(
+                                $"[bold #8fb26a]Name:[/] [bold]{Markup.Escape(name!)}[/]\n" +
+                                $"[bold #8fb26a]Archetype:[/] {Markup.Escape(archetypeChoice!.Name)} (HP {archetypeChoice!.MaxHealth})\n" +
+                                $"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}\n" +
+                                $"[bold #8fb26a]Where you begin:[/] {(startLocation is not null ? Markup.Escape(startLocation) : "[dim]Narrator choice[/]")}")
+                            {
+                                Header = new PanelHeader(" [bold cyan]Character Summary[/] "),
+                                Border = BoxBorder.Rounded,
+                                BorderStyle = new Style(new Color(0x8f, 0xb2, 0x6a)),
+                                Padding = new Padding(1, 0, 1, 0)
+                            };
 
-                        var confirmed = CliPrompt.Confirm("[bold green]Begin adventure with this character?[/]", defaultValue: true, cancelHint: "go back");
+                            AnsiConsole.Write(summaryPanel);
+                            AnsiConsole.WriteLine();
+                        }
+
+                        RepaintConfirmStep();
+
+                        var confirmed = CliPrompt.Confirm(
+                            "[bold green]Begin adventure with this character?[/]",
+                            defaultValue: true,
+                            cancelHint: "go back",
+                            onRepaint: RepaintConfirmStep);
 
                         if (confirmed != true)
                         {

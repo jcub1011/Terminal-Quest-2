@@ -32,132 +32,169 @@ namespace TerminalQuest.Ui
                 return items[Math.Clamp(defaultIndex, 0, items.Count - 1)];
             }
 
-            AnsiConsole.Clear();
-            renderHeader?.Invoke();
-
             var pageSize = Math.Max(3, customPageSize ?? 10);
             var selectedIndex = Math.Clamp(defaultIndex, 0, items.Count - 1);
             var searchQuery = string.Empty;
             T? result = default;
+            var finished = false;
 
-            AnsiConsole.Live(BuildMenuRenderable(
-                title,
-                items,
-                selectedIndex,
-                pageSize,
-                searchQuery,
-                enableSearch,
-                allowCancel,
-                displayFormatter,
-                cancelHint))
-                .AutoClear(false)
-                .Overflow(VerticalOverflow.Ellipsis)
-                .Start(ctx =>
+            while (!finished)
+            {
+                AnsiConsole.Clear();
+                try
                 {
-                    while (true)
+                    renderHeader?.Invoke();
+                }
+                catch
+                {
+                }
+
+                using var cts = new CancellationTokenSource();
+                var resized = false;
+
+                var filtered = FilterItems(items, searchQuery, displayFormatter, matchKeySelector);
+                if (filtered.Count == 0)
+                {
+                    selectedIndex = 0;
+                }
+                else if (selectedIndex >= filtered.Count)
+                {
+                    selectedIndex = filtered.Count - 1;
+                }
+
+                AnsiConsole.Live(BuildMenuRenderable(
+                    title,
+                    filtered,
+                    selectedIndex,
+                    pageSize,
+                    searchQuery,
+                    enableSearch,
+                    allowCancel,
+                    displayFormatter,
+                    cancelHint))
+                    .AutoClear(false)
+                    .Overflow(VerticalOverflow.Ellipsis)
+                    .Start(ctx =>
                     {
-                        var filtered = FilterItems(items, searchQuery, displayFormatter, matchKeySelector);
-                        if (filtered.Count == 0)
+                        while (!finished && !resized && !cts.IsCancellationRequested)
                         {
-                            selectedIndex = 0;
-                        }
-                        else if (selectedIndex >= filtered.Count)
-                        {
-                            selectedIndex = filtered.Count - 1;
-                        }
-
-                        ctx.UpdateTarget(BuildMenuRenderable(
-                            title,
-                            filtered,
-                            selectedIndex,
-                            pageSize,
-                            searchQuery,
-                            enableSearch,
-                            allowCancel,
-                            displayFormatter,
-                            cancelHint));
-                        ctx.Refresh();
-
-                        var key = Console.ReadKey(intercept: true);
-
-                        if (key.Key == ConsoleKey.UpArrow)
-                        {
-                            if (filtered.Count > 0)
+                            var currentFiltered = FilterItems(items, searchQuery, displayFormatter, matchKeySelector);
+                            if (currentFiltered.Count == 0)
                             {
-                                selectedIndex = (selectedIndex - 1 + filtered.Count) % filtered.Count;
-                            }
-                        }
-                        else if (key.Key == ConsoleKey.DownArrow)
-                        {
-                            if (filtered.Count > 0)
-                            {
-                                selectedIndex = (selectedIndex + 1) % filtered.Count;
-                            }
-                        }
-                        else if (key.Key == ConsoleKey.PageUp)
-                        {
-                            if (filtered.Count > 0)
-                            {
-                                selectedIndex = Math.Max(0, selectedIndex - pageSize);
-                            }
-                        }
-                        else if (key.Key == ConsoleKey.PageDown)
-                        {
-                            if (filtered.Count > 0)
-                            {
-                                selectedIndex = Math.Min(filtered.Count - 1, selectedIndex + pageSize);
-                            }
-                        }
-                        else if (key.Key == ConsoleKey.Home)
-                        {
-                            selectedIndex = 0;
-                        }
-                        else if (key.Key == ConsoleKey.End)
-                        {
-                            if (filtered.Count > 0)
-                            {
-                                selectedIndex = filtered.Count - 1;
-                            }
-                        }
-                        else if (key.Key == ConsoleKey.Enter)
-                        {
-                            if (filtered.Count > 0 && selectedIndex >= 0 && selectedIndex < filtered.Count)
-                            {
-                                result = filtered[selectedIndex];
-                            }
-                            break;
-                        }
-                        else if (key.Key == ConsoleKey.Escape)
-                        {
-                            if (enableSearch && !string.IsNullOrEmpty(searchQuery))
-                            {
-                                searchQuery = string.Empty;
                                 selectedIndex = 0;
                             }
-                            else if (allowCancel)
+                            else if (selectedIndex >= currentFiltered.Count)
                             {
-                                result = default;
+                                selectedIndex = currentFiltered.Count - 1;
+                            }
+
+                            ctx.UpdateTarget(BuildMenuRenderable(
+                                title,
+                                currentFiltered,
+                                selectedIndex,
+                                pageSize,
+                                searchQuery,
+                                enableSearch,
+                                allowCancel,
+                                displayFormatter,
+                                cancelHint));
+                            ctx.Refresh();
+
+                            var key = TerminalMonitor.ReadKeyOrResize(
+                                () =>
+                                {
+                                    resized = true;
+                                    cts.Cancel();
+                                },
+                                pollIntervalMs: 30,
+                                cancellationToken: cts.Token);
+
+                            if (resized || cts.IsCancellationRequested)
+                            {
                                 break;
                             }
-                        }
-                        else if (enableSearch)
-                        {
-                            if (key.Key == ConsoleKey.Backspace)
+
+                            if (key.Key == ConsoleKey.UpArrow)
                             {
-                                if (searchQuery.Length > 0)
+                                if (currentFiltered.Count > 0)
                                 {
-                                    searchQuery = searchQuery[..^1];
+                                    selectedIndex = (selectedIndex - 1 + currentFiltered.Count) % currentFiltered.Count;
+                                }
+                            }
+                            else if (key.Key == ConsoleKey.DownArrow)
+                            {
+                                if (currentFiltered.Count > 0)
+                                {
+                                    selectedIndex = (selectedIndex + 1) % currentFiltered.Count;
+                                }
+                            }
+                            else if (key.Key == ConsoleKey.PageUp)
+                            {
+                                if (currentFiltered.Count > 0)
+                                {
+                                    selectedIndex = Math.Max(0, selectedIndex - pageSize);
+                                }
+                            }
+                            else if (key.Key == ConsoleKey.PageDown)
+                            {
+                                if (currentFiltered.Count > 0)
+                                {
+                                    selectedIndex = Math.Min(currentFiltered.Count - 1, selectedIndex + pageSize);
+                                }
+                            }
+                            else if (key.Key == ConsoleKey.Home)
+                            {
+                                selectedIndex = 0;
+                            }
+                            else if (key.Key == ConsoleKey.End)
+                            {
+                                if (currentFiltered.Count > 0)
+                                {
+                                    selectedIndex = currentFiltered.Count - 1;
+                                }
+                            }
+                            else if (key.Key == ConsoleKey.Enter)
+                            {
+                                if (currentFiltered.Count > 0 && selectedIndex >= 0 && selectedIndex < currentFiltered.Count)
+                                {
+                                    result = currentFiltered[selectedIndex];
+                                }
+                                finished = true;
+                                break;
+                            }
+                            else if (key.Key == ConsoleKey.Escape)
+                            {
+                                if (enableSearch && !string.IsNullOrEmpty(searchQuery))
+                                {
+                                    searchQuery = string.Empty;
+                                    selectedIndex = 0;
+                                }
+                                else if (allowCancel)
+                                {
+                                    result = default;
+                                    finished = true;
+                                    break;
+                                }
+                            }
+                            else if (enableSearch)
+                            {
+                                if (key.Key == ConsoleKey.Backspace)
+                                {
+                                    if (searchQuery.Length > 0)
+                                    {
+                                        searchQuery = searchQuery[..^1];
+                                        selectedIndex = 0;
+                                    }
+                                }
+                                else if (!char.IsControl(key.KeyChar))
+                                {
+                                    searchQuery += key.KeyChar;
                                     selectedIndex = 0;
                                 }
                             }
-                            else if (!char.IsControl(key.KeyChar))
-                            {
-                                searchQuery += key.KeyChar;
-                                selectedIndex = 0;
-                            }
                         }
-                    }
-                });
+                    });
+            }
 
             return result;
         }

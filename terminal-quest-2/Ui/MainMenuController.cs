@@ -128,8 +128,13 @@ namespace TerminalQuest.Ui
 
         private static Task<SaveStore?> CreateNewSaveAsync(List<SaveEntry> saves, ExternalEditor editor)
         {
-            AnsiConsole.Clear();
-            RenderNewGameHeader();
+            void RepaintNewGame()
+            {
+                AnsiConsole.Clear();
+                RenderNewGameHeader();
+            }
+
+            RepaintNewGame();
 
             var name = CliPrompt.AskString(
                 "[bold #e0b050]Enter name for new save:[/] ",
@@ -150,7 +155,8 @@ namespace TerminalQuest.Ui
                         return ValidationResult.Error($"A save named '{trimmed}' already exists.");
                     }
                     return ValidationResult.Success();
-                });
+                },
+                onRepaint: RepaintNewGame);
 
             if (string.IsNullOrEmpty(name))
             {

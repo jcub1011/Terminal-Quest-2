@@ -187,6 +187,43 @@ namespace TerminalQuest.Ui
                         lastTurnLines = await ExecuteNarratorTurnAsync(narrator, openingInstruction, store, watcher, state.Turn);
                     }
 
+                    void RepaintGameScreen()
+                    {
+                        AnsiConsole.Clear();
+                        SpectreRenderer.RenderBanner(state.SaveName, state.Turn);
+                        AnsiConsole.MarkupLine("[dim]Type your action or command. /help lists player commands. (ESC to exit to menu)[/]");
+                        AnsiConsole.WriteLine();
+
+                        try
+                        {
+                            var transcriptEntries = store.Transcript.Read().Entries;
+                            var recalled = TranscriptRecall.Tail(transcriptEntries, settings.TranscriptRecallCharacters);
+                            if (recalled.Count > 0)
+                            {
+                                var replayLines = TranscriptReplay.Lines(recalled, store.Rolls.Read().Entries, store.ReadCharacters());
+                                foreach (var line in replayLines)
+                                {
+                                    SpectreRenderer.RenderLine(line);
+                                }
+                                AnsiConsole.WriteLine();
+                            }
+                        }
+                        catch
+                        {
+                            if (lastTurnLines.Count > 0)
+                            {
+                                foreach (var line in lastTurnLines)
+                                {
+                                    SpectreRenderer.RenderLine(line);
+                                }
+                                AnsiConsole.WriteLine();
+                            }
+                        }
+
+                        var currentOptions = NarrationOptionDetector.Detect(lastTurnLines);
+                        SpectreRenderer.RenderOptions(currentOptions);
+                    }
+
                     // Main gameplay REPL loop
                     while (true)
                     {
@@ -194,7 +231,7 @@ namespace TerminalQuest.Ui
                         var activeOptions = NarrationOptionDetector.Detect(lastTurnLines);
                         SpectreRenderer.RenderOptions(activeOptions);
 
-                        var input = await cliPrompt.ReadLineAsync(activeOptions);
+                        var input = await cliPrompt.ReadLineAsync(activeOptions, onRepaint: RepaintGameScreen);
                         if (input is null)
                         {
                             AnsiConsole.MarkupLine("[dim]Returning to main menu...[/]");

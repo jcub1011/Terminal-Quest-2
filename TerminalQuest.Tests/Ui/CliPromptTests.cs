@@ -54,7 +54,7 @@ namespace TerminalQuest.Tests.Ui
                 using var stringReader = new StringReader("\n");
                 Console.SetIn(stringReader);
 
-                var result = CliPrompt.AskString("Name: ", defaultValue: "Hero");
+                var result = CliPrompt.AskString("Name: ", defaultValue: "Hero", onRepaint: () => { });
 
                 Assert.Equal("Hero", result);
             }
@@ -62,6 +62,42 @@ namespace TerminalQuest.Tests.Ui
             {
                 Console.SetIn(originalIn);
             }
+        }
+
+        [Fact]
+        public void AskInt_returns_parsed_integer_when_redirected()
+        {
+            var originalIn = Console.In;
+            try
+            {
+                using var stringReader = new StringReader("42\n");
+                Console.SetIn(stringReader);
+
+                var result = CliPrompt.AskInt("Count: ", defaultValue: 10);
+
+                Assert.Equal(42, result);
+            }
+            finally
+            {
+                Console.SetIn(originalIn);
+            }
+        }
+
+        [Fact]
+        public void Confirm_returns_default_when_redirected()
+        {
+            var result = CliPrompt.Confirm("Proceed?", defaultValue: true);
+            Assert.True(result);
+
+            var resultFalse = CliPrompt.Confirm("Proceed?", defaultValue: false);
+            Assert.False(resultFalse);
+        }
+
+        [Fact]
+        public void WaitKeyOrCancel_returns_true_when_redirected()
+        {
+            var result = CliPrompt.WaitKeyOrCancel("Press any key...");
+            Assert.True(result);
         }
     }
 }

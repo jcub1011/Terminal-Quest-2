@@ -452,20 +452,26 @@ namespace TerminalQuest.Ui
 
         private static void ConfigureMemory(AppSettings settings)
         {
-            AnsiConsole.Clear();
-            AnsiConsole.Write(new Rule("[bold cyan]Context Memory Limit[/]")
+            void RepaintMemory()
             {
-                Border = BoxBorder.Rounded,
-                Style = new Style(new Color(0x8f, 0xb2, 0x6a))
-            });
-            AnsiConsole.WriteLine();
+                AnsiConsole.Clear();
+                AnsiConsole.Write(new Rule("[bold cyan]Context Memory Limit[/]")
+                {
+                    Border = BoxBorder.Rounded,
+                    Style = new Style(new Color(0x8f, 0xb2, 0x6a))
+                });
+                AnsiConsole.WriteLine();
+            }
+
+            RepaintMemory();
 
             var chars = CliPrompt.AskInt(
                 "[bold #e0b050]Maximum characters of prior transcript to send to narrator:[/] ",
                 defaultValue: settings.TranscriptRecallCharacters,
                 validator: c => c is >= 1000 and <= 500000
                     ? ValidationResult.Success()
-                    : ValidationResult.Error("Value must be between 1,000 and 500,000."));
+                    : ValidationResult.Error("Value must be between 1,000 and 500,000."),
+                onRepaint: RepaintMemory);
 
             if (chars.HasValue)
             {
@@ -475,18 +481,24 @@ namespace TerminalQuest.Ui
 
         private static void ConfigureEditor(AppSettings settings)
         {
-            AnsiConsole.Clear();
-            AnsiConsole.Write(new Rule("[bold cyan]External Editor Command[/]")
+            void RepaintEditor()
             {
-                Border = BoxBorder.Rounded,
-                Style = new Style(new Color(0x8f, 0xb2, 0x6a))
-            });
-            AnsiConsole.WriteLine();
+                AnsiConsole.Clear();
+                AnsiConsole.Write(new Rule("[bold cyan]External Editor Command[/]")
+                {
+                    Border = BoxBorder.Rounded,
+                    Style = new Style(new Color(0x8f, 0xb2, 0x6a))
+                });
+                AnsiConsole.WriteLine();
+            }
+
+            RepaintEditor();
 
             var cmd = CliPrompt.AskString(
                 "[bold #e0b050]External Editor Command (e.g. 'code -w', 'notepad', 'micro'):[/] ",
                 defaultValue: settings.EditorCommand,
-                allowEmpty: false);
+                allowEmpty: false,
+                onRepaint: RepaintEditor);
 
             if (cmd is not null)
             {
@@ -496,13 +508,18 @@ namespace TerminalQuest.Ui
 
         private static async Task TestEditorAsync(AppSettings settings, ExternalEditor editor)
         {
-            AnsiConsole.Clear();
-            AnsiConsole.Write(new Rule("[bold cyan]Test External Editor[/]")
+            void RepaintTestEditor()
             {
-                Border = BoxBorder.Rounded,
-                Style = new Style(new Color(0x8f, 0xb2, 0x6a))
-            });
-            AnsiConsole.WriteLine();
+                AnsiConsole.Clear();
+                AnsiConsole.Write(new Rule("[bold cyan]Test External Editor[/]")
+                {
+                    Border = BoxBorder.Rounded,
+                    Style = new Style(new Color(0x8f, 0xb2, 0x6a))
+                });
+                AnsiConsole.WriteLine();
+            }
+
+            RepaintTestEditor();
 
             AnsiConsole.MarkupLine("[dim]Launching external editor test. Type some text, save and exit...[/]");
             var result = await editor.EditStringAsync("Hello from Terminal Quest! Edit this text to test your editor.", "Test Editor");
@@ -514,7 +531,7 @@ namespace TerminalQuest.Ui
             {
                 AnsiConsole.MarkupLine("[yellow]Editor returned nothing or was cancelled.[/]");
             }
-            CliPrompt.WaitKeyOrCancel("Press Enter or ESC to continue...");
+            CliPrompt.WaitKeyOrCancel("Press Enter or ESC to continue...", onRepaint: RepaintTestEditor);
         }
     }
 }

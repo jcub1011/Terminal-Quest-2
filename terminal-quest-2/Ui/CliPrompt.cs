@@ -21,7 +21,8 @@ namespace TerminalQuest.Ui
         public async Task<string?> ReadLineAsync(
             IReadOnlyList<NarrationOption>? activeOptions = null,
             string promptSymbol = "❯",
-            SaveStore? store = null)
+            SaveStore? store = null,
+            Action? onRepaint = null)
         {
             if (Console.IsInputRedirected)
             {
@@ -31,22 +32,26 @@ namespace TerminalQuest.Ui
 
             var effectiveStore = store ?? _store;
 
-            try
+            void EnsureSpace()
             {
-                const int spaceNeeded = 8;
-                if (Console.CursorTop + spaceNeeded >= Console.BufferHeight)
+                try
                 {
-                    for (var i = 0; i < spaceNeeded; i++)
+                    const int spaceNeeded = 8;
+                    if (Console.CursorTop + spaceNeeded >= Console.BufferHeight)
                     {
-                        Console.WriteLine();
+                        for (var i = 0; i < spaceNeeded; i++)
+                        {
+                            Console.WriteLine();
+                        }
+                        Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - spaceNeeded));
                     }
-                    Console.SetCursorPosition(0, Math.Max(0, Console.CursorTop - spaceNeeded));
+                }
+                catch
+                {
                 }
             }
-            catch
-            {
-            }
 
+            EnsureSpace();
             AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
 
             var buffer = new StringBuilder();
@@ -93,9 +98,51 @@ namespace TerminalQuest.Ui
                 SetCursorPositionSafe(startLeft + cursorIndex, startTop);
             }
 
+            void HandleResizeRepaint()
+            {
+                if (onRepaint != null)
+                {
+                    try
+                    {
+                        onRepaint();
+                    }
+                    catch
+                    {
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        AnsiConsole.Clear();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                EnsureSpace();
+                AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
+                try
+                {
+                    startLeft = Console.CursorLeft;
+                    startTop = Console.CursorTop;
+                }
+                catch
+                {
+                    startLeft = 0;
+                    startTop = 0;
+                }
+
+                lastLength = 0;
+                lastRenderedSuggestions = 0;
+                RefreshSuggestions();
+                RenderAll();
+            }
+
             while (true)
             {
-                var key = Console.ReadKey(intercept: true);
+                var key = await TerminalMonitor.ReadKeyOrResizeAsync(HandleResizeRepaint);
 
                 if (key.Key == ConsoleKey.Escape)
                 {
@@ -281,7 +328,8 @@ namespace TerminalQuest.Ui
             string? defaultValue = null,
             bool allowEmpty = false,
             Func<string, ValidationResult>? validator = null,
-            string cancelHint = "cancel")
+            string cancelHint = "cancel",
+            Action? onRepaint = null)
         {
             if (Console.IsInputRedirected)
             {
@@ -295,32 +343,52 @@ namespace TerminalQuest.Ui
 
             while (true)
             {
-                AnsiConsole.MarkupLine($"[dim]• Press Enter to submit, ESC to {cancelHint}[/]");
-                AnsiConsole.Markup(promptMarkup);
-                if (!string.IsNullOrEmpty(defaultValue))
-                {
-                    AnsiConsole.Markup($"[dim]({Markup.Escape(defaultValue)})[/] ");
-                }
-
                 var buffer = new StringBuilder();
                 var cursorIndex = 0;
                 var startLeft = 0;
                 var startTop = 0;
-                try
-                {
-                    startLeft = Console.CursorLeft;
-                    startTop = Console.CursorTop;
-                }
-                catch
-                {
-                }
-
                 var lastLength = 0;
                 var cancelled = false;
 
+                void RenderPromptHeaders()
+                {
+                    if (onRepaint != null)
+                    {
+                        try
+                        {
+                            onRepaint();
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    AnsiConsole.MarkupLine($"[dim]• Press Enter to submit, ESC to {cancelHint}[/]");
+                    AnsiConsole.Markup(promptMarkup);
+                    if (!string.IsNullOrEmpty(defaultValue))
+                    {
+                        AnsiConsole.Markup($"[dim]({Markup.Escape(defaultValue)})[/] ");
+                    }
+
+                    try
+                    {
+                        startLeft = Console.CursorLeft;
+                        startTop = Console.CursorTop;
+                    }
+                    catch
+                    {
+                        startLeft = 0;
+                        startTop = 0;
+                    }
+                    lastLength = 0;
+                    RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                }
+
+                RenderPromptHeaders();
+
                 while (true)
                 {
-                    var key = Console.ReadKey(intercept: true);
+                    var key = TerminalMonitor.ReadKeyOrResize(RenderPromptHeaders);
 
                     if (key.Key == ConsoleKey.Escape)
                     {
@@ -419,7 +487,8 @@ namespace TerminalQuest.Ui
             string promptMarkup,
             int? defaultValue = null,
             Func<int, ValidationResult>? validator = null,
-            string cancelHint = "cancel")
+            string cancelHint = "cancel",
+            Action? onRepaint = null)
         {
             while (true)
             {
@@ -427,7 +496,8 @@ namespace TerminalQuest.Ui
                     promptMarkup,
                     defaultValue: defaultValue?.ToString(),
                     allowEmpty: false,
-                    cancelHint: cancelHint);
+                    cancelHint: cancelHint,
+                    onRepaint: onRepaint);
 
                 if (input is null)
                 {
@@ -452,22 +522,42 @@ namespace TerminalQuest.Ui
             }
         }
 
-        public static bool? Confirm(string promptMarkup, bool defaultValue = true, string cancelHint = "cancel")
+        public static bool? Confirm(
+            string promptMarkup,
+            bool defaultValue = true,
+            string cancelHint = "cancel",
+            Action? onRepaint = null)
         {
             if (Console.IsInputRedirected)
             {
                 return defaultValue;
             }
 
-            var hint = defaultValue
-                ? $"[dim]([bold green]Y[/]/n, ESC to {cancelHint})[/] "
-                : $"[dim](y/[bold red]N[/], ESC to {cancelHint})[/] ";
+            void RenderConfirm()
+            {
+                if (onRepaint != null)
+                {
+                    try
+                    {
+                        onRepaint();
+                    }
+                    catch
+                    {
+                    }
+                }
 
-            AnsiConsole.Markup($"{promptMarkup} {hint}");
+                var hint = defaultValue
+                    ? $"[dim]([bold green]Y[/]/n, ESC to {cancelHint})[/] "
+                    : $"[dim](y/[bold red]N[/], ESC to {cancelHint})[/] ";
+
+                AnsiConsole.Markup($"{promptMarkup} {hint}");
+            }
+
+            RenderConfirm();
 
             while (true)
             {
-                var key = Console.ReadKey(intercept: true);
+                var key = TerminalMonitor.ReadKeyOrResize(RenderConfirm);
                 if (key.Key == ConsoleKey.Y)
                 {
                     AnsiConsole.MarkupLine("[green]yes[/]");
@@ -499,23 +589,41 @@ namespace TerminalQuest.Ui
             }
         }
 
-        public static bool WaitKeyOrCancel(string? message = null)
+        public static bool WaitKeyOrCancel(
+            string? message = null,
+            Action? onRepaint = null)
         {
             if (Console.IsInputRedirected)
             {
                 return true;
             }
 
-            if (!string.IsNullOrEmpty(message))
+            void RenderWait()
             {
-                AnsiConsole.MarkupLine(message);
-            }
-            else
-            {
-                AnsiConsole.MarkupLine("[dim]Press Enter to continue, or Esc to cancel...[/]");
+                if (onRepaint != null)
+                {
+                    try
+                    {
+                        onRepaint();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(message))
+                {
+                    AnsiConsole.MarkupLine(message);
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[dim]Press Enter to continue, or Esc to cancel...[/]");
+                }
             }
 
-            var key = Console.ReadKey(intercept: true);
+            RenderWait();
+
+            var key = TerminalMonitor.ReadKeyOrResize(RenderWait);
             return key.Key != ConsoleKey.Escape;
         }
 
@@ -523,11 +631,13 @@ namespace TerminalQuest.Ui
         {
             try
             {
-                var width = Console.BufferWidth > 0 ? Console.BufferWidth : 80;
+                var size = TerminalMonitor.GetSize();
+                var width = size.Width > 0 ? size.Width : 80;
                 var totalOffset = top * width + left;
                 var targetTop = totalOffset / width;
                 var targetLeft = totalOffset % width;
-                if (targetTop < Console.BufferHeight && targetLeft < width)
+                var bufferHeight = Console.BufferHeight > 0 ? Console.BufferHeight : size.Height;
+                if (targetTop < bufferHeight && targetLeft < width)
                 {
                     Console.SetCursorPosition(targetLeft, targetTop);
                 }
@@ -625,12 +735,14 @@ namespace TerminalQuest.Ui
 
             try
             {
-                var width = Console.WindowWidth > 0 ? Console.WindowWidth : (Console.BufferWidth > 0 ? Console.BufferWidth : 80);
+                var size = TerminalMonitor.GetSize();
+                var width = size.Width > 0 ? size.Width : 80;
                 var emptyLine = new string(' ', Math.Max(0, width - 1));
                 for (var i = 1; i <= lineCount; i++)
                 {
                     var row = startTop + i;
-                    if (row < Console.BufferHeight)
+                    var bufferHeight = Console.BufferHeight > 0 ? Console.BufferHeight : size.Height;
+                    if (row < bufferHeight)
                     {
                         Console.SetCursorPosition(0, row);
                         Console.Write(emptyLine);
