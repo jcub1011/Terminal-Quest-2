@@ -322,5 +322,41 @@ namespace TerminalQuest.Tests.Agents
             Assert.Equal("gemini-2.0-flash", models[0]);
             Assert.Equal("gemini-1.5-pro", models[1]);
         }
+
+        // ---- Endpoint Resolution -------------------------------------------------------------
+
+        [Theory]
+        [InlineData("http://localhost:1234", "chat/completions", "http://localhost:1234/v1/chat/completions")]
+        [InlineData("http://localhost:1234/", "chat/completions", "http://localhost:1234/v1/chat/completions")]
+        [InlineData("http://localhost:1234/v1", "chat/completions", "http://localhost:1234/v1/chat/completions")]
+        [InlineData("http://localhost:1234/v1/", "chat/completions", "http://localhost:1234/v1/chat/completions")]
+        [InlineData("http://localhost:1234/v1/chat/completions", "chat/completions", "http://localhost:1234/v1/chat/completions")]
+        [InlineData("http://localhost:1234", "models", "http://localhost:1234/v1/models")]
+        [InlineData("http://localhost:1234/v1", "models", "http://localhost:1234/v1/models")]
+        [InlineData("http://localhost:1234/v1/models", "models", "http://localhost:1234/v1/models")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "chat/completions", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai/", "chat/completions", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")]
+        [InlineData("https://generativelanguage.googleapis.com/v1beta/openai", "models", "https://generativelanguage.googleapis.com/v1beta/openai/models")]
+        [InlineData("https://api.openai.com/v1", "chat/completions", "https://api.openai.com/v1/chat/completions")]
+        [InlineData("https://api.openai.com/v1", "models", "https://api.openai.com/v1/models")]
+        [InlineData("http://127.0.0.1:57073", "chat/completions", "http://127.0.0.1:57073/v1/chat/completions")]
+        public void ResolveEndpoint_correctly_builds_openai_urls(string baseUrl, string path, string expected)
+        {
+            var resolved = LmStudioModels.ResolveEndpoint(baseUrl, path);
+            Assert.Equal(expected, resolved);
+        }
+
+        [Theory]
+        [InlineData("http://localhost:1234", "http://localhost:1234/api/v0/models")]
+        [InlineData("http://localhost:1234/", "http://localhost:1234/api/v0/models")]
+        [InlineData("http://localhost:1234/v1", "http://localhost:1234/api/v0/models")]
+        [InlineData("http://localhost:1234/v1/", "http://localhost:1234/api/v0/models")]
+        [InlineData("http://localhost:1234/v1/chat/completions", "http://localhost:1234/api/v0/models")]
+        [InlineData("http://localhost:1234/v1/models", "http://localhost:1234/api/v0/models")]
+        public void ResolveNativeModelsEndpoint_correctly_finds_lm_studio_native_path(string baseUrl, string expected)
+        {
+            var resolved = LmStudioModels.ResolveNativeModelsEndpoint(baseUrl);
+            Assert.Equal(expected, resolved);
+        }
     }
 }

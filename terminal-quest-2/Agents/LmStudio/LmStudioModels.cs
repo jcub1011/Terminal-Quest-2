@@ -9,6 +9,67 @@ namespace TerminalQuest.Agents.LmStudio
     /// </summary>
     internal static class LmStudioModels
     {
+        /// <summary>
+        /// Resolves the full URL for an endpoint path (e.g. "chat/completions" or "models") against a base URL.
+        /// Handles bare host URLs (e.g. "http://localhost:1234" -> "/v1/..."), existing "/v1" or "/openai" subpaths,
+        /// and base URLs that already end with the requested path.
+        /// </summary>
+        public static string ResolveEndpoint(string baseUrl, string path)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+            var trimmedBase = baseUrl.Trim().TrimEnd('/');
+            var trimmedPath = path.Trim().TrimStart('/');
+
+            // If the base URL already ends with this path, use it directly (e.g. baseUrl = ".../chat/completions" for path = "chat/completions")
+            if (trimmedBase.EndsWith(trimmedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return trimmedBase;
+            }
+
+            // If the base URL already specifies an OpenAI API subpath like /v1 or /openai
+            if (trimmedBase.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ||
+                trimmedBase.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"{trimmedBase}/{trimmedPath}";
+            }
+
+            // If the base URL is a bare host without path (e.g. http://localhost:1234 or http://127.0.0.1:57073),
+            // target the standard OpenAI compatibility endpoint /v1/{path}
+            if (Uri.TryCreate(trimmedBase, UriKind.Absolute, out var uri) &&
+                (string.IsNullOrEmpty(uri.AbsolutePath) || uri.AbsolutePath == "/"))
+            {
+                return $"{trimmedBase}/v1/{trimmedPath}";
+            }
+
+            return $"{trimmedBase}/{trimmedPath}";
+        }
+
+        /// <summary>
+        /// Resolves the LM Studio native endpoint URL "/api/v0/models" from a given base URL.
+        /// </summary>
+        public static string ResolveNativeModelsEndpoint(string baseUrl)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+
+            var trimmed = baseUrl.Trim().TrimEnd('/');
+            if (trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmed = trimmed[..^"/chat/completions".Length].TrimEnd('/');
+            }
+            else if (trimmed.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
+            {
+                trimmed = trimmed[..^"/models".Length].TrimEnd('/');
+            }
+
+            var root = trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+                ? trimmed[..^3]
+                : (trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase) ? trimmed[..^7] : trimmed);
+
+            return $"{root.TrimEnd('/')}/api/v0/models";
+        }
+
         /// <summary>The model ids the server lists, in the order it lists them.</summary>
         /// <exception cref="AgentException">The server could not be reached or refused the request.</exception>
         public static async Task<IReadOnlyList<string>> ListAsync(
@@ -18,24 +79,7 @@ namespace TerminalQuest.Agents.LmStudio
             CancellationToken cancellationToken = default,
             HttpMessageHandler? handler = null)
         {
-            var trimmedUrl = baseUrl.TrimEnd('/');
-            string address;
-
-            if (trimmedUrl.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
-            {
-                address = trimmedUrl;
-            }
-            else if (trimmedUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ||
-                     trimmedUrl.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
-            {
-                address = $"{trimmedUrl}/models";
-            }
-            else
-            {
-                // If baseUrl is a bare host without path (e.g. http://localhost:1234 or http://127.0.0.1:57073),
-                // target the OpenAI compatibility endpoint /v1/models
-                address = $"{trimmedUrl}/v1/models";
-            }
+            var address = ResolveEndpoint(baseUrl, "models");
 
             using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
             {
@@ -87,11 +131,7 @@ namespace TerminalQuest.Agents.LmStudio
             CancellationToken cancellationToken = default,
             HttpMessageHandler? handler = null)
         {
-            var trimmed = baseUrl.TrimEnd('/');
-            var root = trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
-                ? trimmed[..^3]
-                : (trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase) ? trimmed[..^7] : trimmed);
-            var address = $"{root.TrimEnd('/')}/api/v0/models";
+            var address = ResolveNativeModelsEndpoint(baseUrl);
 
             using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
             {

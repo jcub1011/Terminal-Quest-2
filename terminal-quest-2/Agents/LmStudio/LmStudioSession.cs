@@ -467,13 +467,24 @@ namespace TerminalQuest.Agents.LmStudio
             var inputTokens = 0;
             var outputTokens = 0;
             string? thoughtSignature = null;
+            var eventCount = 0;
+            var rawNonEventLines = new StringBuilder();
 
             while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
                 // Blank lines separate events and a leading colon is a keep-alive comment; neither
                 // carries a payload.
-                if (line.Length == 0 || line[0] == ':' || !line.StartsWith("data:", StringComparison.Ordinal))
+                if (line.Length == 0 || line[0] == ':')
                 {
+                    continue;
+                }
+
+                if (!line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    if (rawNonEventLines.Length < MaxQuotedErrorChars)
+                    {
+                        rawNonEventLines.AppendLine(line);
+                    }
                     continue;
                 }
 
@@ -486,6 +497,7 @@ namespace TerminalQuest.Agents.LmStudio
 
                 if (payload.Span.SequenceEqual("[DONE]"))
                 {
+                    eventCount++;
                     break;
                 }
 
@@ -496,6 +508,8 @@ namespace TerminalQuest.Agents.LmStudio
                 {
                     continue;
                 }
+
+                eventCount++;
 
                 // Some servers report a mid-stream failure as an event rather than a status code,
                 if (root.ValueKind == JsonValueKind.Object
@@ -576,9 +590,28 @@ namespace TerminalQuest.Agents.LmStudio
                 }
             }
 
+            var builtCalls = calls.Select(static (call, index) => call.Build(index)).Where(static call => call.Name.Length > 0).ToList();
+
+            if (eventCount == 0)
+            {
+                if (rawNonEventLines.Length > 0)
+                {
+                    throw new AgentException(
+                        $"{_options.BaseUrl} returned an unexpected response.",
+                        Quote(rawNonEventLines.ToString().Trim()));
+                }
+
+                throw new AgentException($"{_options.BaseUrl} returned an empty response.");
+            }
+
+            if (text.Length == 0 && builtCalls.Count == 0)
+            {
+                throw new AgentException($"{_options.BaseUrl} returned an empty reply with no text or tool calls.");
+            }
+
             return new Reply(
                 text.ToString(),
-                [.. calls.Select(static (call, index) => call.Build(index)).Where(static call => call.Name.Length > 0)],
+                builtCalls,
                 inputTokens,
                 outputTokens,
                 thoughtSignature);
@@ -801,7 +834,7 @@ namespace TerminalQuest.Agents.LmStudio
             writer.WriteEndObject();
         }
 
-        private string Endpoint(string path) => $"{_options.BaseUrl.TrimEnd('/')}/{path}";
+        private string Endpoint(string path) => LmStudioModels.ResolveEndpoint(_options.BaseUrl, path);
 
         private static string? Quote(string? body)
         {

@@ -422,7 +422,16 @@ namespace TerminalQuest.Ui
             AnsiConsole.WriteLine();
             try
             {
-                var result = await narrator.SendAsync(input, CancellationToken.None);
+                AgentTurnResult? result = null;
+
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .SpinnerStyle(new Style(new Color(0x8f, 0xb2, 0x6a)))
+                    .StartAsync("Narrator is thinking...", async ctx =>
+                    {
+                        result = await narrator.SendAsync(input, CancellationToken.None);
+                    });
+
                 lock (renderLock)
                 {
                     if (currentLine.Length > 0)
@@ -434,9 +443,15 @@ namespace TerminalQuest.Ui
                     }
                 }
 
+                var turnResult = result.GetValueOrDefault();
                 var spoken = recorder.TakeAndClear();
-                var prose = string.IsNullOrWhiteSpace(spoken) ? result.Text : spoken;
-                if (!string.IsNullOrWhiteSpace(prose) && !result.IsError)
+                var prose = string.IsNullOrWhiteSpace(spoken) ? turnResult.Text ?? string.Empty : spoken;
+
+                if (turnResult.IsError)
+                {
+                    AnsiConsole.MarkupLine($"[bold red]Narrator error:[/] {Markup.Escape(turnResult.Text ?? "Unknown error.")}");
+                }
+                else if (!string.IsNullOrWhiteSpace(prose))
                 {
                     try
                     {
@@ -451,6 +466,10 @@ namespace TerminalQuest.Ui
                     {
                         // Best-effort
                     }
+                }
+                else if (lines.Count == 0)
+                {
+                    AnsiConsole.MarkupLine("[dim red]The narrator produced no response.[/]");
                 }
 
                 AnsiConsole.WriteLine();
