@@ -15,7 +15,7 @@ namespace TerminalQuest.Ui
         Quit
     }
 
-    internal readonly record struct MainMenuChoice(MainMenuAction Action, string Label, string? Extra = null);
+    internal sealed record class MainMenuChoice(MainMenuAction Action, string Label, string? Extra = null);
 
     /// <summary>
     /// Interactive CLI controller for the main menu: continuing, loading, managing saves, and settings.
@@ -54,7 +54,14 @@ namespace TerminalQuest.Ui
                     c => string.IsNullOrEmpty(c.Extra) ? c.Label : $"{c.Label} [dim]({c.Extra})[/]",
                     c => c.Action.ToString(),
                     defaultIndex: 0,
-                    renderHeader: () => RenderHeader(settings));
+                    renderHeader: () => RenderHeader(settings),
+                    allowCancel: true,
+                    cancelHint: "quit");
+
+                if (choice is null || choice.Action == MainMenuAction.Quit)
+                {
+                    return null;
+                }
 
                 switch (choice.Action)
                 {

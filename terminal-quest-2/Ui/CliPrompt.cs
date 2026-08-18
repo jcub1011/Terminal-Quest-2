@@ -15,15 +15,130 @@ namespace TerminalQuest.Ui
             _editor = editor ?? throw new ArgumentNullException(nameof(editor));
         }
 
-        public async Task<string> ReadLineAsync(
+        public async Task<string?> ReadLineAsync(
             IReadOnlyList<NarrationOption>? activeOptions = null,
             string promptSymbol = "❯")
         {
-            var prompt = new TextPrompt<string>($"[bold #8fb26a]{promptSymbol}[/] ")
-                .AllowEmpty()
-                .PromptStyle(new Style(new Color(0xd7, 0xd2, 0xc4)));
+            if (Console.IsInputRedirected)
+            {
+                var line = Console.ReadLine();
+                return line?.Trim();
+            }
 
-            var input = AnsiConsole.Prompt(prompt).Trim();
+            AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
+
+            var buffer = new StringBuilder();
+            var cursorIndex = 0;
+            var startLeft = 0;
+            var startTop = 0;
+            try
+            {
+                startLeft = Console.CursorLeft;
+                startTop = Console.CursorTop;
+            }
+            catch
+            {
+            }
+
+            var lastLength = 0;
+            var cancelled = false;
+
+            while (true)
+            {
+                var key = Console.ReadKey(intercept: true);
+
+                if (key.Key == ConsoleKey.Escape)
+                {
+                    cancelled = true;
+                    break;
+                }
+                else if (key.Key == ConsoleKey.Enter)
+                {
+                    break;
+                }
+                else if (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key == ConsoleKey.G)
+                {
+                    Console.WriteLine();
+                    var edited = await _editor.EditStringAsync(buffer.ToString(), "Player Command");
+                    if (!string.IsNullOrWhiteSpace(edited))
+                    {
+                        var trimmed = edited.Trim();
+                        AnsiConsole.MarkupLine($"[bold #d7d2c4]{Markup.Escape(trimmed)}[/]");
+                        return trimmed;
+                    }
+
+                    // If editor cancelled or returned empty, re-render prompt with existing buffer
+                    AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
+                    try
+                    {
+                        startLeft = Console.CursorLeft;
+                        startTop = Console.CursorTop;
+                    }
+                    catch
+                    {
+                    }
+                    lastLength = 0;
+                    RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                    continue;
+                }
+                else if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (cursorIndex > 0)
+                    {
+                        buffer.Remove(cursorIndex - 1, 1);
+                        cursorIndex--;
+                        RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                    }
+                }
+                else if (key.Key == ConsoleKey.Delete)
+                {
+                    if (cursorIndex < buffer.Length)
+                    {
+                        buffer.Remove(cursorIndex, 1);
+                        RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                    }
+                }
+                else if (key.Key == ConsoleKey.LeftArrow)
+                {
+                    if (cursorIndex > 0)
+                    {
+                        cursorIndex--;
+                        SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+                    }
+                }
+                else if (key.Key == ConsoleKey.RightArrow)
+                {
+                    if (cursorIndex < buffer.Length)
+                    {
+                        cursorIndex++;
+                        SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+                    }
+                }
+                else if (key.Key == ConsoleKey.Home)
+                {
+                    cursorIndex = 0;
+                    SetCursorPositionSafe(startLeft, startTop);
+                }
+                else if (key.Key == ConsoleKey.End)
+                {
+                    cursorIndex = buffer.Length;
+                    SetCursorPositionSafe(startLeft + cursorIndex, startTop);
+                }
+                else if (!char.IsControl(key.KeyChar))
+                {
+                    buffer.Insert(cursorIndex, key.KeyChar);
+                    cursorIndex++;
+                    RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
+                }
+            }
+
+            if (cancelled)
+            {
+                return null;
+            }
+
+            Console.WriteLine();
+            var input = buffer.ToString().Trim();
 
             // Support opening external editor via /edit
             if (string.Equals(input, "/edit", StringComparison.OrdinalIgnoreCase))
@@ -50,7 +165,11 @@ namespace TerminalQuest.Ui
         {
             if (Console.IsInputRedirected)
             {
-                var line = Console.ReadLine() ?? defaultValue;
+                var line = Console.ReadLine()?.Trim();
+                if (string.IsNullOrEmpty(line) && defaultValue != null)
+                {
+                    return defaultValue;
+                }
                 return line;
             }
 

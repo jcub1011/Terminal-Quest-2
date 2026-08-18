@@ -61,8 +61,7 @@ namespace TerminalQuest.Ui
                 if (created.Value.Error is not null)
                 {
                     AnsiConsole.MarkupLine($"[bold red]Failed to create character: {Markup.Escape(created.Value.Error)}[/]");
-                    Console.WriteLine("Press Enter to return to main menu...");
-                    Console.ReadLine();
+                    CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
                     return;
                 }
 
@@ -87,160 +86,215 @@ namespace TerminalQuest.Ui
             catch (Exception ex)
             {
                 AnsiConsole.MarkupLine($"[bold red]Error loading save: {Markup.Escape(ex.Message)}[/]");
-                Console.WriteLine("Press Enter to return to main menu...");
-                Console.ReadLine();
+                CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
                 return;
             }
 
             AnsiConsole.Clear();
             SpectreRenderer.RenderBanner(state.SaveName, state.Turn);
-            AnsiConsole.MarkupLine("[dim]Type your action or command. /help lists player commands. Press Enter to submit.[/]");
+            AnsiConsole.MarkupLine("[dim]Type your action or command. /help lists player commands. (ESC to exit to menu)[/]");
             AnsiConsole.WriteLine();
 
             // Replay recalled scene if continuing existing save
             if (!startedFresh)
             {
-                var transcriptEntries = store.Transcript.Read().Entries;
-                var recalled = TranscriptRecall.Tail(transcriptEntries, settings.TranscriptRecallCharacters);
-                if (recalled.Count > 0)
+                try
                 {
-                    var replayLines = TranscriptReplay.Lines(recalled, store.Rolls.Read().Entries, store.ReadCharacters());
-                    foreach (var line in replayLines)
+                    var transcriptEntries = store.Transcript.Read().Entries;
+                    var recalled = TranscriptRecall.Tail(transcriptEntries, settings.TranscriptRecallCharacters);
+                    if (recalled.Count > 0)
                     {
-                        SpectreRenderer.RenderLine(line);
+                        var replayLines = TranscriptReplay.Lines(recalled, store.Rolls.Read().Entries, store.ReadCharacters());
+                        foreach (var line in replayLines)
+                        {
+                            SpectreRenderer.RenderLine(line);
+                        }
+                        AnsiConsole.WriteLine();
                     }
-                    AnsiConsole.WriteLine();
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[dim red]Warning: Could not replay transcript: {Markup.Escape(ex.Message)}[/]");
                 }
             }
 
-            await using var narrator = AgentSessionFactory.CreateNarrator(settings, store, systemPrompt);
-            await using var director = AgentSessionFactory.CreateDirector(settings, store, directorPrompt);
-            var lastDirectorTurn = 0;
-            string? lastPlayerLocationId = null;
-
-            QuestJournal.OnFailure = message =>
-                Findings.Record(store, state.Turn, Finding.RecordUnwritable, message);
-
-            var cliPrompt = new CliPrompt(editor);
-            var lastTurnLines = new List<StyledLine>();
-
-            // Start sessions
-            await narrator.StartAsync();
+            IAgentSession narrator;
+            IAgentSession director;
             try
             {
-                await director.StartAsync();
+                narrator = AgentSessionFactory.CreateNarrator(settings, store, systemPrompt);
+                director = AgentSessionFactory.CreateDirector(settings, store, directorPrompt);
             }
-            catch
+            catch (Exception ex)
             {
-                // Director failure is non-fatal
-            }
-
-            // Opening turn if starting fresh or turn is 0
-            if (state.Turn == 0 || startedFresh)
-            {
-                var openingInstruction = startedFresh
-                    ? (hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace)
-                    : ContinuePrompt;
-
-                lastTurnLines = await ExecuteNarratorTurnAsync(narrator, openingInstruction, store, watcher);
+                AnsiConsole.MarkupLine($"[bold red]Failed to initialize narrator agent:[/] {Markup.Escape(ex.Message)}");
+                if (ex is AgentException agentEx && !string.IsNullOrEmpty(agentEx.Detail))
+                {
+                    AnsiConsole.MarkupLine($"[dim red]{Markup.Escape(agentEx.Detail)}[/]");
+                }
+                AnsiConsole.WriteLine();
+                CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
+                return;
             }
 
-            // Main gameplay REPL loop
-            while (true)
+            await using (narrator)
+            await using (director)
             {
-                state.RefreshFrom(store);
-                var activeOptions = NarrationOptionDetector.Detect(lastTurnLines);
-                SpectreRenderer.RenderOptions(activeOptions);
+                var lastDirectorTurn = 0;
+                string? lastPlayerLocationId = null;
 
-                var input = await cliPrompt.ReadLineAsync(activeOptions);
-                if (string.IsNullOrWhiteSpace(input))
+                QuestJournal.OnFailure = message =>
+                    Findings.Record(store, state.Turn, Finding.RecordUnwritable, message);
+
+                try
                 {
-                    continue;
-                }
+                    var cliPrompt = new CliPrompt(editor);
+                    var lastTurnLines = new List<StyledLine>();
 
-                // Handle Player Slash Commands
-                if (PlayerCommands.IsCommand(input))
-                {
-                    var cmdName = input.TrimStart('/').Split(' ', 2)[0].ToLowerInvariant();
-                    if (cmdName is "quit" or "exit")
-                    {
-                        TryTouch(store, state.Turn);
-                        break;
-                    }
-
-                    if (cmdName is "system-prompt")
-                    {
-                        var promptFile = NarratorPromptFile.Ensure(store);
-                        var path = Path.Combine(store.Directory, "system-prompt.txt");
-                        var changed = await editor.EditFileAsync(path);
-                        if (changed)
-                        {
-                            AnsiConsole.MarkupLine("[green]System prompt updated. Returning to menu to reload narrator...[/]");
-                            TryTouch(store, state.Turn);
-                            Thread.Sleep(1200);
-                            break;
-                        }
-                        continue;
-                    }
-
-                    if (cmdName is "status")
-                    {
-                        SpectreRenderer.RenderStatus(state);
-                        continue;
-                    }
-
-                    var result = PlayerCommands.Execute(input, store);
-                    SpectreRenderer.RenderCommandResult(result);
-                    continue;
-                }
-
-                // Check if user selected an active numbered option (e.g. "1", "2")
-                var actionText = input;
-                if (int.TryParse(input.Trim(), out var optionNum) && activeOptions.Count > 0)
-                {
-                    var match = activeOptions.FirstOrDefault(o => o.Number == optionNum);
-                    if (match is not null)
-                    {
-                        actionText = match.Text;
-                        AnsiConsole.MarkupLine($"[bold #8fb26a]❯ Selected Option {optionNum}:[/] [bold #d7d2c4]{Markup.Escape(actionText)}[/]");
-                    }
-                }
-
-                state.Turn++;
-                if (!TryTouch(store, state.Turn))
-                {
-                    break;
-                }
-
-                // Run Director if needed
-                var playerLocation = SaveStore.WhereIs(store.ReadLocations(), SaveStore.Player(store.ReadCharacters())?.Id);
-                var isFirstTurn = state.Turn == 1;
-                var hasChangedLocation = playerLocation?.Id != lastPlayerLocationId;
-                var isPeriodicTurn = (state.Turn - lastDirectorTurn) >= 5;
-
-                if (isFirstTurn || hasChangedLocation || isPeriodicTurn)
-                {
+                    // Start sessions
                     try
                     {
-                        var directorPromptText = isFirstTurn
-                            ? $"The game has just begun. The player is at {playerLocation?.Name ?? "unknown location"}."
-                            : $"Turn {state.Turn}. The player is at {playerLocation?.Name ?? "unknown location"}. Review recent story developments and adjust directives if needed.";
+                        await narrator.StartAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        AnsiConsole.MarkupLine($"[bold red]Failed to connect to narrator:[/] {Markup.Escape(ex.Message)}");
+                        if (ex is AgentException agentEx && !string.IsNullOrEmpty(agentEx.Detail))
+                        {
+                            AnsiConsole.MarkupLine($"[dim red]{Markup.Escape(agentEx.Detail)}[/]");
+                        }
+                        AnsiConsole.WriteLine();
+                        CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
+                        return;
+                    }
 
-                        await director.SendAsync(directorPromptText, CancellationToken.None);
-                        lastDirectorTurn = state.Turn;
-                        lastPlayerLocationId = playerLocation?.Id;
+                    try
+                    {
+                        await director.StartAsync();
                     }
                     catch
                     {
-                        // Director errors are non-fatal
+                        // Director failure is non-fatal
+                    }
+
+                    // Opening turn if starting fresh or turn is 0
+                    if (state.Turn == 0 || startedFresh)
+                    {
+                        var openingInstruction = startedFresh
+                            ? (hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace)
+                            : ContinuePrompt;
+
+                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, openingInstruction, store, watcher);
+                    }
+
+                    // Main gameplay REPL loop
+                    while (true)
+                    {
+                        state.RefreshFrom(store);
+                        var activeOptions = NarrationOptionDetector.Detect(lastTurnLines);
+                        SpectreRenderer.RenderOptions(activeOptions);
+
+                        var input = await cliPrompt.ReadLineAsync(activeOptions);
+                        if (input is null)
+                        {
+                            AnsiConsole.MarkupLine("[dim]Returning to main menu...[/]");
+                            TryTouch(store, state.Turn);
+                            break;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(input))
+                        {
+                            continue;
+                        }
+
+                        // Handle Player Slash Commands
+                        if (PlayerCommands.IsCommand(input))
+                        {
+                            var cmdName = input.TrimStart('/').Split(' ', 2)[0].ToLowerInvariant();
+                            if (cmdName is "quit" or "exit")
+                            {
+                                TryTouch(store, state.Turn);
+                                break;
+                            }
+
+                            if (cmdName is "system-prompt")
+                            {
+                                var promptFile = NarratorPromptFile.Ensure(store);
+                                var path = Path.Combine(store.Directory, "system-prompt.txt");
+                                var changed = await editor.EditFileAsync(path);
+                                if (changed)
+                                {
+                                    AnsiConsole.MarkupLine("[green]System prompt updated. Returning to menu to reload narrator...[/]");
+                                    TryTouch(store, state.Turn);
+                                    Thread.Sleep(1200);
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            if (cmdName is "status")
+                            {
+                                SpectreRenderer.RenderStatus(state);
+                                continue;
+                            }
+
+                            var result = PlayerCommands.Execute(input, store);
+                            SpectreRenderer.RenderCommandResult(result);
+                            continue;
+                        }
+
+                        // Check if user selected an active numbered option (e.g. "1", "2")
+                        var actionText = input;
+                        if (int.TryParse(input.Trim(), out var optionNum) && activeOptions.Count > 0)
+                        {
+                            var match = activeOptions.FirstOrDefault(o => o.Number == optionNum);
+                            if (match is not null)
+                            {
+                                actionText = match.Text;
+                                AnsiConsole.MarkupLine($"[bold #8fb26a]❯ Selected Option {optionNum}:[/] [bold #d7d2c4]{Markup.Escape(actionText)}[/]");
+                            }
+                        }
+
+                        state.Turn++;
+                        if (!TryTouch(store, state.Turn))
+                        {
+                            break;
+                        }
+
+                        // Run Director if needed
+                        var playerLocation = SaveStore.WhereIs(store.ReadLocations(), SaveStore.Player(store.ReadCharacters())?.Id);
+                        var isFirstTurn = state.Turn == 1;
+                        var hasChangedLocation = playerLocation?.Id != lastPlayerLocationId;
+                        var isPeriodicTurn = (state.Turn - lastDirectorTurn) >= 5;
+
+                        if (isFirstTurn || hasChangedLocation || isPeriodicTurn)
+                        {
+                            try
+                            {
+                                var directorPromptText = isFirstTurn
+                                    ? $"The game has just begun. The player is at {playerLocation?.Name ?? "unknown location"}."
+                                    : $"Turn {state.Turn}. The player is at {playerLocation?.Name ?? "unknown location"}. Review recent story developments and adjust directives if needed.";
+
+                                await director.SendAsync(directorPromptText, CancellationToken.None);
+                                lastDirectorTurn = state.Turn;
+                                lastPlayerLocationId = playerLocation?.Id;
+                            }
+                            catch
+                            {
+                                // Director errors are non-fatal
+                            }
+                        }
+
+                        // Run Narrator Turn
+                        lastTurnLines = await ExecuteNarratorTurnAsync(narrator, actionText, store, watcher);
                     }
                 }
-
-                // Run Narrator Turn
-                lastTurnLines = await ExecuteNarratorTurnAsync(narrator, actionText, store, watcher);
+                finally
+                {
+                    QuestJournal.OnFailure = null;
+                }
             }
 
-            QuestJournal.OnFailure = null;
             TryTouch(store, state.Turn);
         }
 
@@ -331,7 +385,11 @@ namespace TerminalQuest.Ui
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"[bold red]Turn failed: {Markup.Escape(ex.Message)}[/]");
+                AnsiConsole.MarkupLine($"[bold red]Turn failed:[/] {Markup.Escape(ex.Message)}");
+                if (ex is AgentException agentEx && !string.IsNullOrEmpty(agentEx.Detail))
+                {
+                    AnsiConsole.MarkupLine($"[dim red]{Markup.Escape(agentEx.Detail)}[/]");
+                }
             }
             finally
             {

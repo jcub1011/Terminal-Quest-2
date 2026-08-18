@@ -105,6 +105,17 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Help_describes_universal_keys_including_escape()
+        {
+            using var save = Seeded();
+
+            var text = TextOf(PlayerCommands.Execute("/help", save.Store));
+
+            Assert.Contains("Esc", text, StringComparison.Ordinal);
+            Assert.Contains("back to the menu", text, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public void Command_names_are_unique()
         {
             var names = PlayerCommands.All.Select(command => command.Name).ToList();

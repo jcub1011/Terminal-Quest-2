@@ -65,5 +65,16 @@ namespace TerminalQuest.Tests.Ui
             var choice = CliMenu.Prompt("Menu", items, s => s, defaultIndex: 1, allowCancel: true);
             Assert.Equal("Choice 2", choice);
         }
+
+        [Fact]
+        public void MainMenuChoice_is_reference_type_with_null_default()
+        {
+            MainMenuChoice? choice = default;
+            Assert.Null(choice);
+
+            var created = new MainMenuChoice(MainMenuAction.Quit, "Quit");
+            Assert.Equal(MainMenuAction.Quit, created.Action);
+            Assert.Equal("Quit", created.Label);
+        }
     }
 }

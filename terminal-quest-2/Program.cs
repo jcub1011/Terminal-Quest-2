@@ -1,3 +1,5 @@
+using Spectre.Console;
+using TerminalQuest.Agents;
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
 using TerminalQuest.Settings;
@@ -48,13 +50,37 @@ namespace TerminalQuest
 
             while (true)
             {
-                var store = await MainMenuController.RunAsync(settings, editor);
+                SaveStore? store;
+                try
+                {
+                    store = await MainMenuController.RunAsync(settings, editor);
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[bold red]Menu error:[/] {Markup.Escape(ex.Message)}");
+                    CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
+                    continue;
+                }
+
                 if (store is null)
                 {
                     return 0;
                 }
 
-                await GameLoop.RunAsync(settings, store, editor);
+                try
+                {
+                    await GameLoop.RunAsync(settings, store, editor);
+                }
+                catch (Exception ex)
+                {
+                    AnsiConsole.MarkupLine($"[bold red]An unexpected game error occurred:[/] {Markup.Escape(ex.Message)}");
+                    if (ex is AgentException agentEx && !string.IsNullOrEmpty(agentEx.Detail))
+                    {
+                        AnsiConsole.MarkupLine($"[dim red]{Markup.Escape(agentEx.Detail)}[/]");
+                    }
+                    AnsiConsole.WriteLine();
+                    CliPrompt.WaitKeyOrCancel("Press any key to return to main menu...");
+                }
             }
         }
     }
