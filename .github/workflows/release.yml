@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        type: string
+      release_title:
+        description: 'Release title (optional, defaults to version tag)'
+        required: false
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+      generate_release_notes:
+        description: 'Automatically generate release notes'
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine Version Tag and Title
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.version_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+              $tag = "${{ github.ref_name }}"
+          }
+          $title = "${{ inputs.release_title }}"
+          if ([string]::IsNullOrWhiteSpace($title)) {
+              $title = $tag
+          }
+          Write-Host "Target tag: $tag"
+          Write-Host "Target title: $title"
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_TITLE=$title" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run Tests
+        run: dotnet test --configuration Release
+
+      - name: Publish Native AOT Binary
+        shell: pwsh
+        run: .\Publish.ps1
+
+      - name: Package Release ZIP
+        shell: pwsh
+        run: |
+          $zipName = "TerminalQuest-$($env:RELEASE_TAG)-win-x64.zip"
+          Compress-Archive -Path ".\release\*" -DestinationPath $zipName -Force
+          Write-Host "Created release archive: $zipName"
+          "RELEASE_ZIP=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TITLE }}
+          draft: ${{ inputs.draft || false }}
+          prerelease: ${{ inputs.prerelease || false }}
+          generate_release_notes: ${{ inputs.generate_release_notes != false }}
+          files: ${{ env.RELEASE_ZIP }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
