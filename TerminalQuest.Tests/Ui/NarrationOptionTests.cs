@@ -242,5 +242,34 @@ namespace TerminalQuest.Tests.Ui
 
             Assert.Empty(options);
         }
+
+        [Fact]
+        public void Option_row_indices_allow_excluding_choice_lines_from_narrative_prose()
+        {
+            List<StyledLine> rows =
+            [
+                Line("The crossroads itself is paved with uneven flagstones."),
+                Line(""),
+                Line("What do you do?"),
+                Line("1. Follow the sound and peer into the alleyway opening."),
+                Line("2. Examine the crumbling stone wall to your left."),
+                Line("3. Move toward the center of the crossroads."),
+            ];
+
+            var options = NarrationOptionDetector.Detect(rows);
+            Assert.Equal(3, options.Count);
+
+            var optionIndices = options.SelectMany(o => o.RowIndices).ToHashSet();
+            Assert.Equal(3, optionIndices.Count);
+            Assert.Contains(3, optionIndices);
+            Assert.Contains(4, optionIndices);
+            Assert.Contains(5, optionIndices);
+
+            var proseLines = rows.Where((_, idx) => !optionIndices.Contains(idx)).ToList();
+            Assert.Equal(3, proseLines.Count);
+            Assert.Equal("The crossroads itself is paved with uneven flagstones.", string.Concat(proseLines[0].Spans.Select(s => s.Text)));
+            Assert.Equal("", string.Concat(proseLines[1].Spans.Select(s => s.Text)));
+            Assert.Equal("What do you do?", string.Concat(proseLines[2].Spans.Select(s => s.Text)));
+        }
     }
 }

@@ -204,5 +204,16 @@ namespace TerminalQuest.Tests.Ui
             Assert.Contains("last session", TextOf(lines[0]), StringComparison.Ordinal);
             Assert.Equal(TextRole.System, Assert.Single(lines[^1].Spans).Role);
         }
+
+        [Fact]
+        public void Multiline_narrator_entry_is_split_into_individual_lines()
+        {
+            var lines = Replay([Narrator(1, "First paragraph.\n\nSecond paragraph.")]);
+
+            var plain = TextOf(lines);
+            Assert.Contains(plain, text => text == "First paragraph.");
+            Assert.Contains(plain, text => text == "Second paragraph.");
+            Assert.DoesNotContain(plain, text => text.Contains('\n'));
+        }
     }
 }

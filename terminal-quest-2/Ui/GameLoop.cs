@@ -221,7 +221,14 @@ namespace TerminalQuest.Ui
                         }
 
                         var currentOptions = NarrationOptionDetector.Detect(lastTurnLines);
-                        SpectreRenderer.RenderOptions(currentOptions);
+                        if (currentOptions.Count > 0)
+                        {
+                            SpectreRenderer.RenderOptions(currentOptions);
+                        }
+                        else
+                        {
+                            AnsiConsole.WriteLine();
+                        }
                     }
 
                     // Main gameplay REPL loop
@@ -229,7 +236,14 @@ namespace TerminalQuest.Ui
                     {
                         state.RefreshFrom(store);
                         var activeOptions = NarrationOptionDetector.Detect(lastTurnLines);
-                        SpectreRenderer.RenderOptions(activeOptions);
+                        if (activeOptions.Count > 0)
+                        {
+                            SpectreRenderer.RenderOptions(activeOptions);
+                        }
+                        else
+                        {
+                            AnsiConsole.WriteLine();
+                        }
 
                         var input = await cliPrompt.ReadLineAsync(activeOptions, onRepaint: RepaintGameScreen);
                         if (input is null)
@@ -357,69 +371,7 @@ namespace TerminalQuest.Ui
             int turn)
         {
             var lines = new List<StyledLine>();
-            var currentLine = new StyledLine();
-            var parser = new MarkupParser();
-            var recorder = new NarrationRecorder();
-            var renderLock = new object();
 
-            using var cts = new CancellationTokenSource();
-            var pollTask = Task.Run(async () =>
-            {
-                while (!cts.Token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        var rolls = watcher.Take();
-                        if (rolls.Count > 0)
-                        {
-                            var characters = store.ReadCharacters();
-                            lock (renderLock)
-                            {
-                                foreach (var r in rolls)
-                                {
-                                    var roller = SaveStore.FindCharacterById(characters, r.CharacterId)?.Name ?? r.CharacterId;
-                                    var rollLine = RollWatcher.Line(r, roller);
-                                    SpectreRenderer.RenderRoll(rollLine.ToPlainText());
-                                }
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Polling is best-effort
-                    }
-
-                    await Task.Delay(300, cts.Token);
-                }
-            }, cts.Token);
-
-            Action<string> deltaHandler = delta =>
-            {
-                lock (renderLock)
-                {
-                    recorder.Append(delta);
-                    for (var i = 0; i < delta.Length; i++)
-                    {
-                        var c = delta[i];
-                        if (c == '\n')
-                        {
-                            parser.Append(c.ToString(), currentLine);
-                            lines.Add(currentLine);
-                            SpectreRenderer.RenderLine(currentLine);
-                            currentLine = new StyledLine();
-                            parser.Reset();
-                        }
-                        else
-                        {
-                            parser.Append(c.ToString(), currentLine);
-                        }
-                    }
-                }
-            };
-
-            narrator.OnTextDelta += deltaHandler;
-
-            AnsiConsole.WriteLine();
             try
             {
                 AgentTurnResult? result = null;
@@ -432,24 +384,24 @@ namespace TerminalQuest.Ui
                         result = await narrator.SendAsync(input, CancellationToken.None);
                     });
 
-                lock (renderLock)
+                var rolls = watcher.Take();
+                if (rolls.Count > 0)
                 {
-                    if (currentLine.Length > 0)
+                    var characters = store.ReadCharacters();
+                    foreach (var r in rolls)
                     {
-                        lines.Add(currentLine);
-                        SpectreRenderer.RenderLine(currentLine);
-                        currentLine = new StyledLine();
-                        parser.Reset();
+                        var roller = SaveStore.FindCharacterById(characters, r.CharacterId)?.Name ?? r.CharacterId;
+                        var rollLine = RollWatcher.Line(r, roller);
+                        SpectreRenderer.RenderRoll(rollLine.ToPlainText());
                     }
                 }
 
                 var turnResult = result.GetValueOrDefault();
-                var spoken = recorder.TakeAndClear();
-                var prose = string.IsNullOrWhiteSpace(spoken) ? turnResult.Text ?? string.Empty : spoken;
+                var prose = turnResult.Text ?? string.Empty;
 
                 if (turnResult.IsError)
                 {
-                    AnsiConsole.MarkupLine($"[bold red]Narrator error:[/] {Markup.Escape(turnResult.Text ?? "Unknown error.")}");
+                    AnsiConsole.MarkupLine($"[bold red]Narrator error:[/] {Markup.Escape(prose.Length > 0 ? prose : "Unknown error.")}");
                 }
                 else if (!string.IsNullOrWhiteSpace(prose))
                 {
@@ -466,13 +418,59 @@ namespace TerminalQuest.Ui
                     {
                         // Best-effort
                     }
+
+                    var rawLines = prose.Replace("\r\n", "\n").Split('\n');
+                    var previousWasEmpty = false;
+
+                    foreach (var rawLine in rawLines)
+                    {
+                        var isEmpty = string.IsNullOrWhiteSpace(rawLine);
+                        if (isEmpty)
+                        {
+                            if (!previousWasEmpty && lines.Count > 0)
+                            {
+                                lines.Add(new StyledLine());
+                                previousWasEmpty = true;
+                            }
+                        }
+                        else
+                        {
+                            lines.Add(MarkupParser.Parse(rawLine));
+                            previousWasEmpty = false;
+                        }
+                    }
+
+                    while (lines.Count > 0 && lines[^1].Length == 0)
+                    {
+                        lines.RemoveAt(lines.Count - 1);
+                    }
+
+                    var options = NarrationOptionDetector.Detect(lines);
+                    var optionIndices = options.SelectMany(o => o.RowIndices).ToHashSet();
+
+                    var proseLinesToRender = new List<StyledLine>();
+                    for (var i = 0; i < lines.Count; i++)
+                    {
+                        if (!optionIndices.Contains(i))
+                        {
+                            proseLinesToRender.Add(lines[i]);
+                        }
+                    }
+
+                    while (proseLinesToRender.Count > 0 && proseLinesToRender[^1].Length == 0)
+                    {
+                        proseLinesToRender.RemoveAt(proseLinesToRender.Count - 1);
+                    }
+
+                    foreach (var line in proseLinesToRender)
+                    {
+                        SpectreRenderer.RenderLine(line);
+                    }
                 }
-                else if (lines.Count == 0)
+                else
                 {
                     AnsiConsole.MarkupLine("[dim red]The narrator produced no response.[/]");
                 }
-
-                AnsiConsole.WriteLine();
             }
             catch (Exception ex)
             {
@@ -481,12 +479,6 @@ namespace TerminalQuest.Ui
                 {
                     AnsiConsole.MarkupLine($"[dim red]{Markup.Escape(agentEx.Detail)}[/]");
                 }
-            }
-            finally
-            {
-                narrator.OnTextDelta -= deltaHandler;
-                cts.Cancel();
-                try { await pollTask; } catch { }
             }
 
             return lines;

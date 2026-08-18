@@ -87,7 +87,11 @@ namespace TerminalQuest.Ui
 
                 // Parsed rather than stored as spans: the markup is what was written, and re-reading
                 // it here is what colours the recalled prose exactly as it was coloured live.
-                lines.Add(MarkupParser.Parse(entry.Text));
+                var entryLines = entry.Text.Replace("\r\n", "\n").Split('\n');
+                foreach (var el in entryLines)
+                {
+                    lines.Add(MarkupParser.Parse(el));
+                }
             }
 
             lines.Add(new StyledLine());
