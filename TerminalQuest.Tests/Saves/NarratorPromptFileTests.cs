@@ -222,14 +222,10 @@ namespace TerminalQuest.Tests.Saves
         }
 
         [Fact]
-        public void The_default_still_teaches_the_numbered_choices()
+        public void The_default_still_teaches_present_options()
         {
-            // The second pairing between this text and code it cannot see. NarrationView.Wrap keeps
-            // newlines and drops leading spaces, so the list only renders as a list while the brief
-            // asks for one short line per choice - and nothing in the game parses the player's "2",
-            // so this section is the only thing that makes a bare number mean anything at all.
-            Assert.Contains("What do you do?", NarratorPromptFile.Default, StringComparison.Ordinal);
-            Assert.Contains("\n1. ", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("present_options", NarratorPromptFile.Default, StringComparison.Ordinal);
+            Assert.Contains("PRESENT OPTIONS", NarratorPromptFile.Default, StringComparison.Ordinal);
         }
 
         [Fact]

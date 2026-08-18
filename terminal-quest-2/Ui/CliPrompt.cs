@@ -31,12 +31,13 @@ namespace TerminalQuest.Ui
             }
 
             var effectiveStore = store ?? _store;
+            var optionList = activeOptions ?? [];
 
             void EnsureSpace()
             {
                 try
                 {
-                    const int spaceNeeded = 8;
+                    var spaceNeeded = optionList.Count > 0 ? optionList.Count + 9 : 8;
                     if (Console.CursorTop + spaceNeeded >= Console.BufferHeight)
                     {
                         for (var i = 0; i < spaceNeeded; i++)
@@ -52,21 +53,40 @@ namespace TerminalQuest.Ui
             }
 
             EnsureSpace();
-            AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
-
-            var buffer = new StringBuilder();
-            var cursorIndex = 0;
-            var startLeft = 0;
-            var startTop = 0;
+            var optionsTop = 0;
             try
             {
-                startLeft = Console.CursorLeft;
-                startTop = Console.CursorTop;
+                optionsTop = Console.CursorTop;
             }
             catch
             {
             }
 
+            if (optionList.Count > 0)
+            {
+                for (var i = 0; i <= optionList.Count; i++)
+                {
+                    Console.WriteLine();
+                }
+            }
+
+            var startTop = optionsTop + (optionList.Count > 0 ? optionList.Count + 1 : 0);
+            var startLeft = 0;
+            try
+            {
+                Console.SetCursorPosition(0, startTop);
+                AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
+                startLeft = Console.CursorLeft;
+                startTop = Console.CursorTop;
+            }
+            catch
+            {
+                startLeft = 0;
+                startTop = 0;
+            }
+
+            var buffer = new StringBuilder();
+            var cursorIndex = 0;
             var lastLength = 0;
             var lastRenderedSuggestions = 0;
             var cancelled = false;
@@ -75,6 +95,7 @@ namespace TerminalQuest.Ui
             IReadOnlyList<SuggestionItem> currentSuggestions = [];
             var isChoosing = false;
             var selectedIndex = -1;
+            var selectedOptionIndex = -1;
 
             void RefreshSuggestions()
             {
@@ -93,6 +114,10 @@ namespace TerminalQuest.Ui
 
             void RenderAll()
             {
+                if (optionList.Count > 0)
+                {
+                    RenderOptionsList(optionsTop, optionList, selectedOptionIndex);
+                }
                 RedrawInput(startLeft, startTop, buffer.ToString(), cursorIndex, ref lastLength);
                 RenderSuggestions(startTop, currentSuggestions, selectedIndex, isChoosing, ref lastRenderedSuggestions, MaxVisibleSuggestions);
                 SetCursorPositionSafe(startLeft + cursorIndex, startTop);
@@ -122,9 +147,28 @@ namespace TerminalQuest.Ui
                 }
 
                 EnsureSpace();
-                AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
                 try
                 {
+                    optionsTop = Console.CursorTop;
+                }
+                catch
+                {
+                    optionsTop = 0;
+                }
+
+                if (optionList.Count > 0)
+                {
+                    for (var i = 0; i <= optionList.Count; i++)
+                    {
+                        Console.WriteLine();
+                    }
+                }
+
+                startTop = optionsTop + (optionList.Count > 0 ? optionList.Count + 1 : 0);
+                try
+                {
+                    Console.SetCursorPosition(0, startTop);
+                    AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
                     startLeft = Console.CursorLeft;
                     startTop = Console.CursorTop;
                 }
@@ -140,12 +184,26 @@ namespace TerminalQuest.Ui
                 RenderAll();
             }
 
+            // Initial render
+            RenderAll();
+
             while (true)
             {
                 var key = await TerminalMonitor.ReadKeyOrResizeAsync(HandleResizeRepaint);
 
                 if (key.Key == ConsoleKey.Escape)
                 {
+                    if (buffer.Length > 0)
+                    {
+                        buffer.Clear();
+                        cursorIndex = 0;
+                        selectedOptionIndex = -1;
+                        selectedIndex = -1;
+                        RefreshSuggestions();
+                        RenderAll();
+                        continue;
+                    }
+
                     ClearSuggestions(startTop, lastRenderedSuggestions);
                     cancelled = true;
                     break;
@@ -160,6 +218,7 @@ namespace TerminalQuest.Ui
                             buffer.Clear().Append(chosen.InsertText);
                             cursorIndex = buffer.Length;
                             selectedIndex = -1;
+                            selectedOptionIndex = -1;
                             RefreshSuggestions();
                             RenderAll();
                             continue;
@@ -176,12 +235,46 @@ namespace TerminalQuest.Ui
                         selectedIndex = (selectedIndex + 1) % currentSuggestions.Count;
                         RenderAll();
                     }
+                    else if (optionList.Count > 0)
+                    {
+                        if (selectedOptionIndex == -1)
+                        {
+                            selectedOptionIndex = 0;
+                        }
+                        else
+                        {
+                            selectedOptionIndex = (selectedOptionIndex + 1) % optionList.Count;
+                        }
+
+                        buffer.Clear().Append(optionList[selectedOptionIndex].Text);
+                        cursorIndex = buffer.Length;
+                        selectedIndex = -1;
+                        RefreshSuggestions();
+                        RenderAll();
+                    }
                 }
                 else if (key.Key == ConsoleKey.UpArrow)
                 {
                     if (isChoosing && currentSuggestions.Count > 0)
                     {
                         selectedIndex = selectedIndex <= 0 ? currentSuggestions.Count - 1 : selectedIndex - 1;
+                        RenderAll();
+                    }
+                    else if (optionList.Count > 0)
+                    {
+                        if (selectedOptionIndex == -1)
+                        {
+                            selectedOptionIndex = optionList.Count - 1;
+                        }
+                        else
+                        {
+                            selectedOptionIndex = selectedOptionIndex <= 0 ? optionList.Count - 1 : selectedOptionIndex - 1;
+                        }
+
+                        buffer.Clear().Append(optionList[selectedOptionIndex].Text);
+                        cursorIndex = buffer.Length;
+                        selectedIndex = -1;
+                        RefreshSuggestions();
                         RenderAll();
                     }
                 }
@@ -196,6 +289,7 @@ namespace TerminalQuest.Ui
                             buffer.Clear().Append(chosen.InsertText);
                             cursorIndex = buffer.Length;
                             selectedIndex = -1;
+                            selectedOptionIndex = -1;
                             RefreshSuggestions();
                             RenderAll();
                         }
@@ -217,6 +311,7 @@ namespace TerminalQuest.Ui
                             buffer.Clear().Append(chosen.InsertText);
                             cursorIndex = buffer.Length;
                             selectedIndex = -1;
+                            selectedOptionIndex = -1;
                             RefreshSuggestions();
                             RenderAll();
                         }
@@ -235,19 +330,7 @@ namespace TerminalQuest.Ui
                     }
 
                     // If editor cancelled or returned empty, re-render prompt with existing buffer
-                    AnsiConsole.Markup($"[bold #8fb26a]{promptSymbol}[/] ");
-                    try
-                    {
-                        startLeft = Console.CursorLeft;
-                        startTop = Console.CursorTop;
-                    }
-                    catch
-                    {
-                    }
-                    lastLength = 0;
-                    lastRenderedSuggestions = 0;
-                    RefreshSuggestions();
-                    RenderAll();
+                    HandleResizeRepaint();
                     continue;
                 }
                 else if (key.Key == ConsoleKey.Backspace)
@@ -257,6 +340,7 @@ namespace TerminalQuest.Ui
                         buffer.Remove(cursorIndex - 1, 1);
                         cursorIndex--;
                         selectedIndex = -1;
+                        selectedOptionIndex = -1;
                         RefreshSuggestions();
                         RenderAll();
                     }
@@ -267,6 +351,7 @@ namespace TerminalQuest.Ui
                     {
                         buffer.Remove(cursorIndex, 1);
                         selectedIndex = -1;
+                        selectedOptionIndex = -1;
                         RefreshSuggestions();
                         RenderAll();
                     }
@@ -291,6 +376,24 @@ namespace TerminalQuest.Ui
                 }
                 else if (!char.IsControl(key.KeyChar))
                 {
+                    if (optionList.Count > 0
+                        && (buffer.Length == 0 || selectedOptionIndex >= 0)
+                        && char.IsAsciiDigit(key.KeyChar))
+                    {
+                        var digit = key.KeyChar - '0';
+                        if (digit >= 1 && digit <= optionList.Count)
+                        {
+                            selectedOptionIndex = digit - 1;
+                            buffer.Clear().Append(optionList[selectedOptionIndex].Text);
+                            cursorIndex = buffer.Length;
+                            selectedIndex = -1;
+                            RefreshSuggestions();
+                            RenderAll();
+                            continue;
+                        }
+                    }
+
+                    selectedOptionIndex = -1;
                     buffer.Insert(cursorIndex, key.KeyChar);
                     cursorIndex++;
                     selectedIndex = -1;
@@ -751,6 +854,48 @@ namespace TerminalQuest.Ui
             }
             catch
             {
+            }
+        }
+
+        private static void RenderOptionsList(
+            int optionsTop,
+            IReadOnlyList<NarrationOption> options,
+            int selectedIndex)
+        {
+            if (options.Count == 0)
+            {
+                return;
+            }
+
+            var size = TerminalMonitor.GetSize();
+            var width = size.Width > 0 ? size.Width : 80;
+
+            for (var i = 0; i < options.Count; i++)
+            {
+                var opt = options[i];
+                var isSelected = (i == selectedIndex);
+                var targetRow = optionsTop + i;
+
+                if (targetRow < Console.BufferHeight)
+                {
+                    try
+                    {
+                        Console.SetCursorPosition(0, targetRow);
+                        var prefix = isSelected ? "[bold #8fb26a]❯ [/]" : "  ";
+                        var numMarkup = $"[bold #8fb26a]{opt.Number}.[/]";
+                        var textMarkup = isSelected
+                            ? $"[bold #f0e6d2]{Markup.Escape(opt.Text)}[/]"
+                            : $"[#d7d2c4]{Markup.Escape(opt.Text)}[/]";
+
+                        var emptyLine = new string(' ', Math.Max(0, width - 1));
+                        Console.Write(emptyLine);
+                        Console.SetCursorPosition(0, targetRow);
+                        AnsiConsole.Markup($"{prefix}{numMarkup} {textMarkup}");
+                    }
+                    catch
+                    {
+                    }
+                }
             }
         }
     }

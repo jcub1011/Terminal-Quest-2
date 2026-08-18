@@ -463,5 +463,46 @@ namespace TerminalQuest.Tests.Mcp
             Assert.False(outcome.IsError);
             Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
         }
+
+        // ---- Options ------------------------------------------------------------------------------------
+
+        [Fact]
+        public void Present_options_persists_choices_to_save_store()
+        {
+            using var save = Seeded();
+            save.Store.Touch(3);
+
+            var outcome = Call(save.Store, "present_options", """{"options":["Force the gate","Search the courtyard","Call out"]}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Contains("3 options", outcome.Text, StringComparison.Ordinal);
+
+            var file = save.Store.ReadOptions();
+            Assert.Equal(3, file.Turn);
+            Assert.Equal(3, file.Options.Count);
+            Assert.Equal("Force the gate", file.Options[0]);
+            Assert.Equal("Search the courtyard", file.Options[1]);
+            Assert.Equal("Call out", file.Options[2]);
+        }
+
+        [Fact]
+        public void Present_options_with_empty_array_is_refused()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(save.Store, "present_options", """{"options":[]}""");
+
+            Assert.True(outcome.IsError);
+        }
+
+        [Fact]
+        public void Present_options_without_options_argument_is_refused()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(save.Store, "present_options", "{}");
+
+            Assert.True(outcome.IsError);
+        }
     }
 }

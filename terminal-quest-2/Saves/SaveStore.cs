@@ -24,6 +24,7 @@ namespace TerminalQuest.Saves
         private const string SystemPromptFileName = "system-prompt.txt";
         private const string DirectorPromptFileName = "director-prompt.txt";
         private const string DirectiveFileName = "directive.json";
+        private const string OptionsFileName = "options.json";
 
         internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
@@ -62,6 +63,10 @@ namespace TerminalQuest.Saves
         public DirectiveFile ReadDirective() => Read(DirectiveFileName, SaveJsonContext.Readable.DirectiveFile);
 
         public void WriteDirective(DirectiveFile directive) => Write(DirectiveFileName, directive, SaveJsonContext.Readable.DirectiveFile);
+
+        public OptionsFile ReadOptions() => Read(OptionsFileName, SaveJsonContext.Readable.OptionsFile);
+
+        public void WriteOptions(OptionsFile options) => Write(OptionsFileName, options, SaveJsonContext.Readable.OptionsFile);
 
         public int CurrentTurn() => ReadMetadata().Turn;
 

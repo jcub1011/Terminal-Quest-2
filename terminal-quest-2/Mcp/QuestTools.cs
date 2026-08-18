@@ -294,6 +294,11 @@ namespace TerminalQuest.Mcp
                  "properties":{"count":{"type":"integer","description":"How many words. Defaults to 3, at most 10."}}}
                 """,
                 Role: ToolRole.Narrator),
+
+            new("present_options",
+                "Present 2-4 structured choices to the player at the end of the scene for them to select from.",
+                """{"type":"object","properties":{"options":{"type":"array","items":{"type":"string"},"description":"List of 2-4 distinct action choices for the player."}},"required":["options"]}""",
+                Role: ToolRole.Narrator),
         ];
 
         public static string AllowedTools() => AllowedTools(ToolRole.Narrator);
@@ -343,6 +348,7 @@ namespace TerminalQuest.Mcp
             "record_claims" => RecordClaims(store, arguments),
             "random_noun" => RandomWords(arguments, WordBank.Nouns),
             "random_adjective" => RandomWords(arguments, WordBank.Adjectives),
+            "present_options" => PresentOptions(store, arguments),
             _ => ToolOutcome.Fail($"There is no tool called '{name}'."),
         };
 
@@ -1547,6 +1553,24 @@ namespace TerminalQuest.Mcp
             }
 
             return hasDigit && !hasLetter;
+        }
+
+        private static ToolOutcome PresentOptions(SaveStore store, JsonElement arguments)
+        {
+            var options = Strings(arguments, "options");
+            if (options.Count == 0)
+            {
+                return ToolOutcome.Fail("present_options requires an 'options' array with 2 to 4 choices.");
+            }
+
+            var turn = store.CurrentTurn();
+            store.WriteOptions(new OptionsFile
+            {
+                Turn = turn,
+                Options = options,
+            });
+
+            return ToolOutcome.Ok($"Presented {options.Count} options to the player for turn {turn}.");
         }
 
         private static string HealthNote(Character character)

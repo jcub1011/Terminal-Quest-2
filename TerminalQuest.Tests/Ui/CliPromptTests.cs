@@ -26,6 +26,56 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public async Task ReadLineAsync_with_active_options_returns_custom_or_numbered_input()
+        {
+            var originalIn = Console.In;
+            try
+            {
+                using var stringReader = new StringReader("Open the gate\n");
+                Console.SetIn(stringReader);
+
+                var prompt = new CliPrompt(new ExternalEditor(() => "notepad"));
+                var options = new List<NarrationOption>
+                {
+                    new(1, "Open the gate", []),
+                    new(2, "Climb the wall", []),
+                };
+                var input = await prompt.ReadLineAsync(options);
+
+                Assert.Equal("Open the gate", input);
+            }
+            finally
+            {
+                Console.SetIn(originalIn);
+            }
+        }
+
+        [Fact]
+        public async Task ReadLineAsync_with_active_options_allows_custom_edited_text()
+        {
+            var originalIn = Console.In;
+            try
+            {
+                using var stringReader = new StringReader("Open the gate carefully\n");
+                Console.SetIn(stringReader);
+
+                var prompt = new CliPrompt(new ExternalEditor(() => "notepad"));
+                var options = new List<NarrationOption>
+                {
+                    new(1, "Open the gate", []),
+                    new(2, "Climb the wall", []),
+                };
+                var input = await prompt.ReadLineAsync(options);
+
+                Assert.Equal("Open the gate carefully", input);
+            }
+            finally
+            {
+                Console.SetIn(originalIn);
+            }
+        }
+
+        [Fact]
         public async Task ReadLineAsync_returns_empty_when_empty_line_input()
         {
             var originalIn = Console.In;

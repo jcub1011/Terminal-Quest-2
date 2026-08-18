@@ -220,30 +220,14 @@ namespace TerminalQuest.Ui
                             }
                         }
 
-                        var currentOptions = NarrationOptionDetector.Detect(lastTurnLines);
-                        if (currentOptions.Count > 0)
-                        {
-                            SpectreRenderer.RenderOptions(currentOptions);
-                        }
-                        else
-                        {
-                            AnsiConsole.WriteLine();
-                        }
+                        AnsiConsole.WriteLine();
                     }
 
                     // Main gameplay REPL loop
                     while (true)
                     {
                         state.RefreshFrom(store);
-                        var activeOptions = NarrationOptionDetector.Detect(lastTurnLines);
-                        if (activeOptions.Count > 0)
-                        {
-                            SpectreRenderer.RenderOptions(activeOptions);
-                        }
-                        else
-                        {
-                            AnsiConsole.WriteLine();
-                        }
+                        var activeOptions = GetActiveOptions(store, state.Turn, lastTurnLines);
 
                         var input = await cliPrompt.ReadLineAsync(activeOptions, onRepaint: RepaintGameScreen);
                         if (input is null)
@@ -495,6 +479,29 @@ namespace TerminalQuest.Ui
             {
                 return false;
             }
+        }
+
+        private static IReadOnlyList<NarrationOption> GetActiveOptions(
+            SaveStore store,
+            int currentTurn,
+            IReadOnlyList<StyledLine> lastTurnLines)
+        {
+            try
+            {
+                var optionsFile = store.ReadOptions();
+                if (optionsFile.Turn == currentTurn && optionsFile.Options.Count > 0)
+                {
+                    return optionsFile.Options
+                        .Select((text, index) => new NarrationOption(index + 1, text, []))
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Fallback to detector on read error
+            }
+
+            return NarrationOptionDetector.Detect(lastTurnLines);
         }
     }
 }
