@@ -49,6 +49,11 @@ namespace TerminalQuest.Ui
         public event Action<NarrationOption>? OptionClicked;
 
         /// <summary>
+        /// Raised when the player double clicks on an option row to submit it immediately.
+        /// </summary>
+        public event Action<NarrationOption>? OptionDoubleClicked;
+
+        /// <summary>
         /// Updates the options displayed by this view.
         /// </summary>
         public void SetOptions(IReadOnlyList<string> options)
@@ -209,14 +214,24 @@ namespace TerminalQuest.Ui
         {
             ArgumentNullException.ThrowIfNull(mouse);
 
-            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) && mouse.Position is { } pos)
+            if (mouse.Position is { } pos)
             {
                 var clickedRow = _renderedRows.FirstOrDefault(r => r.RowIndex == pos.Y);
                 if (clickedRow.Option is not null)
                 {
-                    HighlightedOption = clickedRow.Option.Number;
-                    OptionClicked?.Invoke(clickedRow.Option);
-                    return true;
+                    if (mouse.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked))
+                    {
+                        HighlightedOption = clickedRow.Option.Number;
+                        OptionDoubleClicked?.Invoke(clickedRow.Option);
+                        return true;
+                    }
+
+                    if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+                    {
+                        HighlightedOption = clickedRow.Option.Number;
+                        OptionClicked?.Invoke(clickedRow.Option);
+                        return true;
+                    }
                 }
             }
 

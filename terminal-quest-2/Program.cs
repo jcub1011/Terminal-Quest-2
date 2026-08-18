@@ -16,15 +16,17 @@ namespace TerminalQuest
         /// </summary>
         private const string OpeningPrompt =
             "This is the first scene. The player character and where they begin are already on "
-          + "record. Call get_state, then record_claims for what you are about to say, then describe "
-          + "the place as they stand in it. Do not create the player and do not ask who they are.";
+          + "record. Call get_state, then record_claims for what you are about to say, and call present_options "
+          + "with 2-4 action choices for what the player can do next. Describe the place as they stand in it. "
+          + "Do not ask 'What do you do?' in prose, do not print options in prose, do not create the player, and do not ask who they are.";
 
         /// <summary>Opening turn for a save whose player left the starting place to the narrator.</summary>
         private const string OpeningPromptNoPlace =
             "This is the first scene. The player character is already on record but has nowhere to "
           + "be. Call get_state, then invent where they begin: upsert_location, move_character them "
-          + "into it, record_claims for what you are about to say, and describe it. Do not create the "
-          + "player and do not ask who they are.";
+          + "into it, record_claims for what you are about to say, and call present_options with 2-4 "
+          + "action choices for what the player can do next. Describe it in prose. "
+          + "Do not ask 'What do you do?' in prose, do not print options in prose, do not create the player, and do not ask who they are.";
 
         /// <summary>
         /// How often the transcript looks for rolls the narrator has just made.
@@ -50,10 +52,11 @@ namespace TerminalQuest
         private const string ContinuePrompt =
             "This save is being resumed and your memory of it is gone. Call get_transcript first: it "
           + "returns the end of the last session word for word, and says whether the player is owed an "
-          + "answer. Then get_state, then record_claims for what you are about to say. Pick the thread "
-          + "up in the voice the transcript is written in. Describe where the player is now rather than "
-          + "recapping what they already lived through - and if their last line went unanswered, answer "
-          + "it rather than opening a fresh scene over the top of it.";
+          + "answer. Then get_state, then record_claims for what you are about to say, and call present_options "
+          + "with 2-4 action choices. Pick the thread up in the voice the transcript is written in. Describe "
+          + "where the player is now rather than recapping what they already lived through - and if their last "
+          + "line went unanswered, answer it rather than opening a fresh scene over the top of it. "
+          + "Do not ask 'What do you do?' in prose, and do not print options in prose.";
 
         private static async Task<int> Main(string[] args)
         {
@@ -770,11 +773,8 @@ namespace TerminalQuest
                     // will date memories and events to it. Left sharing a number with the last session's
                     // final turn, those writes are misdated - and anything that asks what happened "this
                     // turn" is answered with the end of the previous sitting as well as this one.
-                    app.Invoke(() =>
-                    {
-                        state.Turn++;
-                        TryTouch(store, state.Turn);
-                    });
+                    state.Turn++;
+                    TryTouch(store, state.Turn);
 
                     await RunTurnAsync(hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace);
                     return;
@@ -797,11 +797,8 @@ namespace TerminalQuest
                 if (!hasTranscript)
                 {
                     // An existing save with no recorded transcript at all needs an opening scene.
-                    app.Invoke(() =>
-                    {
-                        state.Turn++;
-                        TryTouch(store, state.Turn);
-                    });
+                    state.Turn++;
+                    TryTouch(store, state.Turn);
 
                     await RunTurnAsync(hasStartLocation ? OpeningPrompt : OpeningPromptNoPlace);
                 }
@@ -809,11 +806,8 @@ namespace TerminalQuest
                 {
                     // The last session ended while the narrator was speaking (e.g. interrupted mid-turn).
                     // The player is owed an answer to their last command.
-                    app.Invoke(() =>
-                    {
-                        state.Turn++;
-                        TryTouch(store, state.Turn);
-                    });
+                    state.Turn++;
+                    TryTouch(store, state.Turn);
 
                     await RunTurnAsync(ContinuePrompt);
                 }
@@ -931,7 +925,7 @@ namespace TerminalQuest
                         try
                         {
                             var optionsFile = store.ReadOptions();
-                            if (optionsFile.Turn == spokenTurn && optionsFile.Options.Count > 0)
+                            if (optionsFile.Options.Count > 0 && (optionsFile.Turn == spokenTurn || (spokenTurn == 1 && optionsFile.Turn == 0)))
                             {
                                 window.SetOptions(optionsFile.Options);
                             }

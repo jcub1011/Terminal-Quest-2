@@ -212,6 +212,32 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Double_clicking_an_option_submits_it_immediately()
+        {
+            var state = new GameState();
+            using var window = new GameWindow(state);
+
+            window.SetOptions(["Explore the ruins", "Return to the village", "Rest at the campfire"]);
+
+            string? entered = null;
+            window.CommandEntered += cmd => entered = cmd;
+
+            var inputField = window.SubViews.OfType<TextField>().First();
+
+            // Simulate double-clicking row 1 (Option 2)
+            window.Options.NewMouseEvent(new Mouse
+            {
+                Flags = MouseFlags.LeftButtonDoubleClicked,
+                Position = new Point(5, 1),
+            });
+
+            Assert.Equal("Return to the village", entered);
+            Assert.Null(window.Options.HighlightedOption);
+            Assert.Empty(window.Options.Options);
+            Assert.Equal(string.Empty, inputField.Text);
+        }
+
+        [Fact]
         public void Submitting_world_command_clears_options_and_highlight()
         {
             var state = new GameState();

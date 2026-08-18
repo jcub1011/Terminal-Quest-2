@@ -130,6 +130,14 @@ namespace TerminalQuest.Ui
                 SyncOptionHighlight();
             };
 
+            Options.OptionDoubleClicked += opt =>
+            {
+                _input.Text = opt.Text;
+                _input.InsertionPoint = _input.Text.Length;
+                SyncOptionHighlight();
+                SubmitInput();
+            };
+
             Narration.EntityClicked += OnEntityClicked;
             Status.EntityClicked += OnEntityClicked;
 
@@ -409,7 +417,14 @@ namespace TerminalQuest.Ui
             // Mark handled either way, so Enter never propagates up and triggers a default
             // "accept" on the window itself.
             e.Handled = true;
+            SubmitInput();
+        }
 
+        /// <summary>
+        /// Submits the current command line text to the game session.
+        /// </summary>
+        public void SubmitInput()
+        {
             // Nothing is submitted while an editor is open. ReadOnly stops the field taking text but
             // not taking Enter, and OnKeyDown never sees the key because the field handles it first -
             // so this is the only place the rule can be applied. Without it, Enter on the line that
@@ -609,6 +624,8 @@ namespace TerminalQuest.Ui
             UpdateOptionsLayout();
         }
 
+        public const int OptionGapHeight = 1;
+
         public void UpdateOptionsLayout()
         {
             var width = Viewport.Width > 0 ? Math.Max(1, Viewport.Width - StatusWidth) : (Narration.Viewport.Width > 0 ? Narration.Viewport.Width : 80);
@@ -616,8 +633,8 @@ namespace TerminalQuest.Ui
 
             if (requiredHeight > 0 && Options.Options.Count > 0)
             {
-                Narration.Height = Dim.Fill() - CommandAreaHeight - requiredHeight;
-                Options.Y = Pos.Bottom(Narration);
+                Narration.Height = Dim.Fill() - CommandAreaHeight - requiredHeight - OptionGapHeight;
+                Options.Y = Pos.Bottom(Narration) + OptionGapHeight;
                 Options.Height = requiredHeight;
                 Options.Visible = true;
             }
