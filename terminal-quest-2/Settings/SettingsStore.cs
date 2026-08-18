@@ -90,10 +90,12 @@ namespace TerminalQuest.Settings
                     Directory.CreateDirectory(folder);
                 }
 
+                var temporary = $"{path}.tmp";
                 File.WriteAllText(
-                    path,
+                    temporary,
                     JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings),
                     Utf8NoBom);
+                File.Move(temporary, path, overwrite: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {

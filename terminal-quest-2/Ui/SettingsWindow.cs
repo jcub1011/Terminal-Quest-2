@@ -180,6 +180,9 @@ namespace TerminalQuest.Ui
 
             _providerList.ValueChanged += (_, _) =>
             {
+                var selected = _providerList.SelectedItem ?? 0;
+                _draft.Provider = selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
+                UpdateEngineSummary();
                 _providerList.SetNeedsDraw();
             };
 
@@ -295,7 +298,17 @@ namespace TerminalQuest.Ui
                 }
             };
 
-            _claudeModelList.ValueChanged += (_, _) => _claudeModelList.SetNeedsDraw();
+            _claudeModelList.ValueChanged += (_, _) =>
+            {
+                var selected = _claudeModelList.SelectedItem ?? -1;
+                if (selected >= 0 && selected < ClaudeModels.All.Length)
+                {
+                    _draft.ClaudeModel = ClaudeModels.All[selected].Id;
+                    _claudeCustomModel.Text = _draft.ClaudeModel;
+                    UpdateEngineSummary();
+                }
+                _claudeModelList.SetNeedsDraw();
+            };
 
             var claudeNote = new Label
             {
@@ -885,6 +898,8 @@ namespace TerminalQuest.Ui
         private void SaveAndClose()
         {
             // Collect and validate values
+            var selectedProvider = _providerList.SelectedItem ?? 0;
+            _draft.Provider = selectedProvider == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
             _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
 
             var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;

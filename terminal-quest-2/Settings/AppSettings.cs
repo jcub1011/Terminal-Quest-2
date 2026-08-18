@@ -166,7 +166,7 @@ namespace TerminalQuest.Settings
             LmStudioBaseUrl = NormalizeBaseUrl(LmStudioBaseUrl);
             LmStudioModel ??= string.Empty;
             DirectorLmStudioModel ??= string.Empty;
-            LmStudioApiKey = string.IsNullOrWhiteSpace(LmStudioApiKey) ? DefaultLmStudioApiKey : LmStudioApiKey.Trim();
+            LmStudioApiKey = LmStudioApiKey?.Trim() ?? string.Empty;
             EditorCommand = string.IsNullOrWhiteSpace(EditorCommand) ? DefaultEditorCommand : EditorCommand.Trim();
             if (TranscriptRecallCharacters < Saves.TranscriptRecall.MinCharacters || TranscriptRecallCharacters > Saves.TranscriptRecall.MaxCharacters)
             {

@@ -553,5 +553,34 @@ namespace TerminalQuest.Tests.Settings
             Assert.Equal("notepad.exe", read.EditorCommand);
             Assert.Equal(4000, read.TranscriptRecallCharacters);
         }
+
+        [Fact]
+        public void A_blank_api_key_is_preserved_instead_of_defaulting_to_lm_studio()
+        {
+            using var temp = new TempSettings();
+            var settings = new AppSettings
+            {
+                Provider = AgentProvider.OpenAiApi,
+                LmStudioApiKey = string.Empty,
+            };
+
+            SettingsStore.Write(settings, temp.Path_);
+            var read = SettingsStore.Read(temp.Path_);
+
+            Assert.Equal(string.Empty, read.LmStudioApiKey);
+        }
+
+        [Fact]
+        public void Atomic_settings_write_replaces_target_and_leaves_no_tmp_behind()
+        {
+            using var temp = new TempSettings();
+            var settings = new AppSettings { LmStudioModel = "test-model" };
+
+            SettingsStore.Write(settings, temp.Path_);
+
+            Assert.True(File.Exists(temp.Path_));
+            Assert.False(File.Exists($"{temp.Path_}.tmp"));
+            Assert.Equal("test-model", SettingsStore.Read(temp.Path_).LmStudioModel);
+        }
     }
 }

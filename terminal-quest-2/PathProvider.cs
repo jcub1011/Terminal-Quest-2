@@ -27,14 +27,21 @@ namespace TerminalQuest
         /// <summary>Subfolder where save games are stored.</summary>
         public static string Saves => Path.Combine(Root, "Saves");
 
-        /// <summary>Subfolder where settings are stored.</summary>
-        public static string Settings => Path.Combine(Root, "Settings");
+        /// <summary>Subfolder where settings are stored. Fixed under <see cref="AppDirectory.Root"/>.</summary>
+        public static string Settings => Path.Combine(AppDirectory.Root, "Settings");
 
         /// <summary>
         /// Migrates legacy saves and settings to the new directory layout if needed.
         /// Safe to call multiple times (idempotent).
         /// </summary>
-        public static void EnsureMigrated() => Migrate(Root);
+        public static void EnsureMigrated()
+        {
+            Migrate(AppDirectory.Root);
+            if (!string.Equals(Root, AppDirectory.Root, StringComparison.OrdinalIgnoreCase))
+            {
+                Migrate(Root);
+            }
+        }
 
         /// <summary>
         /// Migrates legacy saves and settings within a specific root directory.
@@ -64,20 +71,9 @@ namespace TerminalQuest
                     {
                         File.Move(oldSettingsFile, newSettingsFile);
                     }
-                    else
+                    else if (!string.Equals(oldSettingsFile, newSettingsFile, StringComparison.OrdinalIgnoreCase))
                     {
                         try { File.Delete(oldSettingsFile); } catch { }
-                    }
-                }
-
-                // Also check AppDirectory.Root for settings.json if root was redirected
-                var defaultOldSettings = Path.Combine(AppDirectory.Root, "settings.json");
-                if (File.Exists(defaultOldSettings) && !string.Equals(oldSettingsFile, defaultOldSettings, StringComparison.OrdinalIgnoreCase))
-                {
-                    Directory.CreateDirectory(settingsDir);
-                    if (!File.Exists(newSettingsFile))
-                    {
-                        File.Move(defaultOldSettings, newSettingsFile);
                     }
                 }
 

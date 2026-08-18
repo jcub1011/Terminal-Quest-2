@@ -162,13 +162,7 @@ namespace TerminalQuest.Tests.Ui
             // Move selection down to OpenAI API (1)
             providerList.SelectedItem = 1;
 
-            // Notice: window.Chosen is still null and draft provider has not been saved until picked
-            Assert.Null(window.Chosen);
-
-            // Simulate Enter key / Accepting on the provider list to commit pick
-            providerList.NewKeyDownEvent(Key.Enter);
-
-            // Save settings via Ctrl+S
+            // Save settings via Ctrl+S without needing to press Enter on the list item
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
             Assert.Equal(AgentProvider.OpenAiApi, window.Chosen.Provider);
@@ -200,6 +194,25 @@ namespace TerminalQuest.Tests.Ui
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
             Assert.Equal(ClaudeModels.All[1].Id, window.Chosen.ClaudeModel);
+        }
+
+        [Fact]
+        public void SettingsWindow_claude_model_selection_without_enter()
+        {
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToTab(window.ClaudeTabView);
+            var claudeList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == ClaudeModels.All.Length);
+
+            // Change selection to Opus without pressing Enter
+            claudeList.SelectedItem = 3;
+
+            // Save via Ctrl+S
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(ClaudeModels.All[3].Id, window.Chosen.ClaudeModel);
         }
 
         [Fact]
