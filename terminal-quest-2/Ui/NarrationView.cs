@@ -60,7 +60,7 @@ namespace TerminalQuest.Ui
         private StyledLine? _current;
 
         /// <summary>Width the caches were built for; -1 forces a rebuild.</summary>
-        private int _wrapWidth = -1;
+        private int _wrapWidth = 80;
 
         private bool _stickToBottom = true;
 
@@ -143,7 +143,7 @@ namespace TerminalQuest.Ui
         /// Every row the view can scroll through, the placeholder included, so scrolling and
         /// clamping need no special case for it.
         /// </summary>
-        private int TotalRows => _committedRows.Count + _currentRows.Count + (ShowWaiting ? 1 : 0);
+        internal int TotalRows => _committedRows.Count + _currentRows.Count + (ShowWaiting ? 1 : 0);
 
         /// <summary>
         /// The offset that rests the last row at the foot of the pane - the furthest this can
@@ -325,7 +325,6 @@ namespace TerminalQuest.Ui
             return false;
         }
 
-        /// <summary>Scrolls on the wheel. <see cref="Scroll"/> clamps and tracks the stream.</summary>
         protected override bool OnMouseEvent(Mouse mouse)
         {
             ArgumentNullException.ThrowIfNull(mouse);
@@ -339,6 +338,22 @@ namespace TerminalQuest.Ui
             if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
             {
                 Scroll(WheelRows);
+                return true;
+            }
+
+            // Clicking the scrollbar seeks to the proportional offset
+            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked)
+                && mouse.Position is { } clickPos
+                && clickPos.X == Viewport.Width - 1
+                && TotalRows > Viewport.Height
+                && Viewport.Height > 1)
+            {
+                var maxOffset = TotalRows - Viewport.Height;
+                var target = (int)Math.Round((double)clickPos.Y * maxOffset / (Viewport.Height - 1));
+                target = Math.Clamp(target, 0, maxOffset);
+                Viewport = Viewport with { Y = target };
+                _stickToBottom = AtBottom(Viewport.Y, TotalRows, Viewport.Height);
+                SetNeedsDraw();
                 return true;
             }
 
@@ -391,10 +406,12 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
+            var textWidth = Math.Max(1, width - 1);
+
             // Terminal was resized: everything must be re-wrapped to the new width.
-            if (width != _wrapWidth)
+            if (textWidth != _wrapWidth)
             {
-                _wrapWidth = width;
+                _wrapWidth = textWidth;
                 RebuildAllRows();
             }
 
@@ -412,12 +429,24 @@ namespace TerminalQuest.Ui
                 }
             }
 
+            var totalRows = TotalRows;
+            var showScrollBar = totalRows > height;
+            var maxOffset = Math.Max(0, totalRows - height);
+            var thumbSize = 1;
+            var thumbY = 0;
+            if (showScrollBar)
+            {
+                thumbSize = Math.Max(1, (int)Math.Round((double)height * height / totalRows));
+                thumbY = maxOffset > 0 ? (int)Math.Round((double)Viewport.Y * (height - thumbSize) / maxOffset) : 0;
+                thumbY = Math.Clamp(thumbY, 0, height - thumbSize);
+            }
+
             for (var y = 0; y < height; y++)
             {
                 Move(0, y);
                 var index = Viewport.Y + y;
 
-                if (index < TotalRows)
+                if (index < totalRows)
                 {
                     var row = RowAt(index);
 
@@ -427,19 +456,19 @@ namespace TerminalQuest.Ui
                         var drawn = 0;
                         foreach (var span in row.Spans)
                         {
-                            if (drawn >= width)
+                            if (drawn >= textWidth)
                             {
                                 break;
                             }
 
-                            var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                            var text = span.Text.Length > textWidth - drawn ? span.Text[..(textWidth - drawn)] : span.Text;
                             AddStr(text);
                             drawn += text.Length;
                         }
 
-                        if (drawn < width)
+                        if (drawn < textWidth)
                         {
-                            AddStr(Blank(width - drawn));
+                            AddStr(Blank(textWidth - drawn));
                         }
                     }
                     else
@@ -447,28 +476,48 @@ namespace TerminalQuest.Ui
                         var drawn = 0;
                         foreach (var span in row.Spans)
                         {
-                            if (drawn >= width)
+                            if (drawn >= textWidth)
                             {
                                 break;
                             }
 
-                            var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                            var text = span.Text.Length > textWidth - drawn ? span.Text[..(textWidth - drawn)] : span.Text;
                             SetRole(span.Role);
                             AddStr(text);
                             drawn += text.Length;
                         }
 
-                        if (drawn < width)
+                        if (drawn < textWidth)
                         {
                             SetRole(TextRole.Normal);
-                            AddStr(Blank(width - drawn));
+                            AddStr(Blank(textWidth - drawn));
                         }
                     }
                 }
                 else
                 {
                     SetRole(TextRole.Normal);
-                    AddStr(Blank(width));
+                    AddStr(Blank(textWidth));
+                }
+
+                // Draw scroll bar column at x = width - 1
+                if (showScrollBar)
+                {
+                    if (y >= thumbY && y < thumbY + thumbSize)
+                    {
+                        SetRole(TextRole.Normal);
+                        AddStr("█");
+                    }
+                    else
+                    {
+                        SetRole(TextRole.System);
+                        AddStr("│");
+                    }
+                }
+                else
+                {
+                    SetRole(TextRole.Normal);
+                    AddStr(" ");
                 }
             }
 
@@ -488,12 +537,13 @@ namespace TerminalQuest.Ui
         /// </summary>
         private void DrawMoreBelowMarker(int width, int height)
         {
-            if (!HasMoreBelow || width < MoreBelow.Length)
+            var scrollBarGutter = TotalRows > height ? 1 : 0;
+            if (!HasMoreBelow || width < MoreBelow.Length + scrollBarGutter)
             {
                 return;
             }
 
-            Move(width - MoreBelow.Length, height - 1);
+            Move(width - scrollBarGutter - MoreBelow.Length, height - 1);
             SetRole(TextRole.System);
             AddStr(MoreBelow);
         }

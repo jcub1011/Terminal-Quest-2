@@ -59,20 +59,14 @@ namespace TerminalQuest.Ui
             dialog.SetScheme(Theme.CreateScheme());
             dialog.Padding.Thickness = new Thickness(0);
 
-#pragma warning disable CS0618 // TextView is obsolete in Terminal.Gui v2
-            var textView = new TextView
+            var contentView = new EntityDetailsContentView(content)
             {
                 X = 1,
                 Y = 0,
                 Width = Dim.Fill(1),
-                Height = Dim.Fill(1),
-                Text = content,
-                ReadOnly = true,
-                WordWrap = true,
-                ScrollBars = true,
+                Height = Dim.Fill(2),
             };
-#pragma warning restore CS0618
-            textView.SetScheme(Theme.CreateScheme());
+            contentView.SetScheme(Theme.CreateScheme());
 
             var closeButton = new Button
             {
@@ -95,7 +89,7 @@ namespace TerminalQuest.Ui
                 }
             };
 
-            dialog.Add(textView, closeButton);
+            dialog.Add(contentView, closeButton);
 
             dialog.Initialized += (_, _) => closeButton.SetFocus();
 
@@ -176,6 +170,8 @@ namespace TerminalQuest.Ui
                 .Where(ev => ev.CharacterIds.Contains(character.Id, StringComparer.Ordinal)
                     || ev.Title.Contains(character.Name, StringComparison.OrdinalIgnoreCase)
                     || ev.Detail.Contains(character.Name, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(ev => ev.Turn)
+                .ThenByDescending(ev => ev.Seq)
                 .ToList();
 
             sb.AppendLine();
@@ -186,8 +182,14 @@ namespace TerminalQuest.Ui
             }
             else
             {
-                foreach (var ev in events)
+                for (var i = 0; i < events.Count; i++)
                 {
+                    if (i > 0)
+                    {
+                        sb.AppendLine("────────────────────────────────────────");
+                    }
+
+                    var ev = events[i];
                     sb.AppendLine($"[Turn {ev.Turn}] {ev.Title}");
                     if (!string.IsNullOrWhiteSpace(ev.Detail))
                     {
@@ -237,6 +239,8 @@ namespace TerminalQuest.Ui
                 .Where(ev => ev.LocationIds.Contains(location.Id, StringComparer.Ordinal)
                     || ev.Title.Contains(location.Name, StringComparison.OrdinalIgnoreCase)
                     || ev.Detail.Contains(location.Name, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(ev => ev.Turn)
+                .ThenByDescending(ev => ev.Seq)
                 .ToList();
 
             sb.AppendLine();
@@ -247,8 +251,14 @@ namespace TerminalQuest.Ui
             }
             else
             {
-                foreach (var ev in events)
+                for (var i = 0; i < events.Count; i++)
                 {
+                    if (i > 0)
+                    {
+                        sb.AppendLine("────────────────────────────────────────");
+                    }
+
+                    var ev = events[i];
                     sb.AppendLine($"[Turn {ev.Turn}] {ev.Title}");
                     if (!string.IsNullOrWhiteSpace(ev.Detail))
                     {
@@ -323,6 +333,8 @@ namespace TerminalQuest.Ui
                 .Where(ev => ev.ItemIds.Contains(item.Id, StringComparer.Ordinal)
                     || ev.Title.Contains(item.Name, StringComparison.OrdinalIgnoreCase)
                     || ev.Detail.Contains(item.Name, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(ev => ev.Turn)
+                .ThenByDescending(ev => ev.Seq)
                 .ToList();
 
             sb.AppendLine();
@@ -333,8 +345,14 @@ namespace TerminalQuest.Ui
             }
             else
             {
-                foreach (var ev in events)
+                for (var i = 0; i < events.Count; i++)
                 {
+                    if (i > 0)
+                    {
+                        sb.AppendLine("────────────────────────────────────────");
+                    }
+
+                    var ev = events[i];
                     sb.AppendLine($"[Turn {ev.Turn}] {ev.Title}");
                     if (!string.IsNullOrWhiteSpace(ev.Detail))
                     {
@@ -346,4 +364,318 @@ namespace TerminalQuest.Ui
             return (title, sb.ToString().TrimEnd());
         }
     }
+
+    /// <summary>
+    /// Lightweight, fast single-pass scrollable text view for entity details.
+    /// </summary>
+    internal sealed class EntityDetailsContentView : ThemedView
+    {
+        private readonly string _rawText;
+        private List<string> _wrappedLines = [];
+        private int _wrapWidth = -1;
+        private int _offsetY;
+
+        public EntityDetailsContentView(string text)
+        {
+            _rawText = text ?? string.Empty;
+            CanFocus = true;
+        }
+
+        public override string Text
+        {
+            get => _rawText;
+            set { }
+        }
+
+        public IReadOnlyList<string> WrappedLines => _wrappedLines;
+
+        private void RebuildWrappedLines(int width)
+        {
+            _wrapWidth = width;
+            _wrappedLines = [];
+
+            if (width <= 0)
+            {
+                return;
+            }
+
+            var paragraphs = _rawText.Split('\n');
+            foreach (var para in paragraphs)
+            {
+                var clean = para.TrimEnd('\r');
+                if (clean.Length == 0)
+                {
+                    _wrappedLines.Add(string.Empty);
+                    continue;
+                }
+
+                // Word wrap
+                var words = clean.Split(' ');
+                var currentLine = new StringBuilder();
+
+                foreach (var word in words)
+                {
+                    if (word.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    if (currentLine.Length == 0)
+                    {
+                        if (word.Length <= width)
+                        {
+                            currentLine.Append(word);
+                        }
+                        else
+                        {
+                            var remaining = word;
+                            while (remaining.Length > width)
+                            {
+                                _wrappedLines.Add(remaining[..width]);
+                                remaining = remaining[width..];
+                            }
+                            currentLine.Append(remaining);
+                        }
+                    }
+                    else if (currentLine.Length + 1 + word.Length <= width)
+                    {
+                        currentLine.Append(' ').Append(word);
+                    }
+                    else
+                    {
+                        _wrappedLines.Add(currentLine.ToString());
+                        currentLine.Clear();
+
+                        if (word.Length <= width)
+                        {
+                            currentLine.Append(word);
+                        }
+                        else
+                        {
+                            var remaining = word;
+                            while (remaining.Length > width)
+                            {
+                                _wrappedLines.Add(remaining[..width]);
+                                remaining = remaining[width..];
+                            }
+                            currentLine.Append(remaining);
+                        }
+                    }
+                }
+
+                if (currentLine.Length > 0)
+                {
+                    _wrappedLines.Add(currentLine.ToString());
+                }
+            }
+        }
+
+        protected override bool OnDrawingContent(DrawContext? context)
+        {
+            var width = Viewport.Width;
+            var height = Viewport.Height;
+
+            if (width <= 0 || height <= 0)
+            {
+                return true;
+            }
+
+            var textWidth = Math.Max(1, width - 1);
+            if (textWidth != _wrapWidth)
+            {
+                RebuildWrappedLines(textWidth);
+            }
+
+            var totalRows = _wrappedLines.Count;
+            var maxOffset = Math.Max(0, totalRows - height);
+            _offsetY = Math.Clamp(_offsetY, 0, maxOffset);
+
+            var showScrollBar = totalRows > height;
+            var thumbSize = 1;
+            var thumbY = 0;
+            if (showScrollBar)
+            {
+                thumbSize = Math.Max(1, (int)Math.Round((double)height * height / totalRows));
+                thumbY = maxOffset > 0 ? (int)Math.Round((double)_offsetY * (height - thumbSize) / maxOffset) : 0;
+                thumbY = Math.Clamp(thumbY, 0, height - thumbSize);
+            }
+
+            for (var y = 0; y < height; y++)
+            {
+                Move(0, y);
+                var lineIndex = _offsetY + y;
+
+                if (lineIndex < totalRows)
+                {
+                    var line = _wrappedLines[lineIndex];
+                    var drawn = 0;
+
+                    if (line.Length > 0)
+                    {
+                        var text = line.Length > textWidth ? line[..textWidth] : line;
+                        if (text.StartsWith("---") || text.StartsWith("===") || text.StartsWith("───"))
+                        {
+                            SetRole(TextRole.System);
+                        }
+                        else if (text.StartsWith("[Turn") || text.StartsWith("Health:") || text.StartsWith("Location / Possession:") || text.StartsWith("Items here:"))
+                        {
+                            SetRole(TextRole.Command);
+                        }
+                        else
+                        {
+                            SetRole(TextRole.Normal);
+                        }
+
+                        AddStr(text);
+                        drawn = text.Length;
+                    }
+
+                    if (drawn < textWidth)
+                    {
+                        SetRole(TextRole.Normal);
+                        AddStr(Blank(textWidth - drawn));
+                    }
+                }
+                else
+                {
+                    SetRole(TextRole.Normal);
+                    AddStr(Blank(textWidth));
+                }
+
+                // Draw scroll bar column at x = width - 1
+                if (showScrollBar)
+                {
+                    if (y >= thumbY && y < thumbY + thumbSize)
+                    {
+                        SetRole(TextRole.Normal);
+                        AddStr("█");
+                    }
+                    else
+                    {
+                        SetRole(TextRole.System);
+                        AddStr("│");
+                    }
+                }
+                else
+                {
+                    SetRole(TextRole.Normal);
+                    AddStr(" ");
+                }
+            }
+
+            return true;
+        }
+
+        protected override bool OnMouseEvent(Mouse mouse)
+        {
+            ArgumentNullException.ThrowIfNull(mouse);
+
+            var totalRows = _wrappedLines.Count;
+            var height = Viewport.Height;
+            var maxOffset = Math.Max(0, totalRows - height);
+
+            if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))
+            {
+                if (_offsetY > 0)
+                {
+                    _offsetY = Math.Max(0, _offsetY - 3);
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+            {
+                if (_offsetY < maxOffset)
+                {
+                    _offsetY = Math.Min(maxOffset, _offsetY + 3);
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) && mouse.Position is { } pos)
+            {
+                if (pos.X == Viewport.Width - 1 && totalRows > height && height > 1)
+                {
+                    var target = (int)Math.Round((double)pos.Y * maxOffset / (height - 1));
+                    _offsetY = Math.Clamp(target, 0, maxOffset);
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            return base.OnMouseEvent(mouse);
+        }
+
+        protected override bool OnKeyDown(Key key)
+        {
+            var totalRows = _wrappedLines.Count;
+            var height = Viewport.Height;
+            var maxOffset = Math.Max(0, totalRows - height);
+
+            if (key == Key.CursorUp)
+            {
+                if (_offsetY > 0)
+                {
+                    _offsetY--;
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (key == Key.CursorDown)
+            {
+                if (_offsetY < maxOffset)
+                {
+                    _offsetY++;
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (key == Key.PageUp)
+            {
+                if (_offsetY > 0)
+                {
+                    _offsetY = Math.Max(0, _offsetY - Math.Max(1, height - 1));
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (key == Key.PageDown)
+            {
+                if (_offsetY < maxOffset)
+                {
+                    _offsetY = Math.Min(maxOffset, _offsetY + Math.Max(1, height - 1));
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (key == Key.Home)
+            {
+                if (_offsetY != 0)
+                {
+                    _offsetY = 0;
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            if (key == Key.End)
+            {
+                if (_offsetY != maxOffset)
+                {
+                    _offsetY = maxOffset;
+                    SetNeedsDraw();
+                    return true;
+                }
+            }
+
+            return base.OnKeyDown(key);
+        }
+    }
 }
+

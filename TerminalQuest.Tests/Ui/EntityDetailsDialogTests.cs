@@ -159,7 +159,7 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void CreateDialog_configures_textView_with_scrollbars_and_close_button()
+        public void CreateDialog_configures_contentView_and_close_button()
         {
             var dialog = EntityDetailsDialog.CreateDialog(null, "Test Title", "Sample details text.");
 
@@ -170,18 +170,43 @@ namespace TerminalQuest.Tests.Ui
             Assert.NotNull(closeButton);
             Assert.True(closeButton.IsDefault);
 
-#pragma warning disable CS0618
-            var textView = dialog.SubViews.OfType<Terminal.Gui.Views.TextView>().FirstOrDefault();
-#pragma warning restore CS0618
-            Assert.NotNull(textView);
-            Assert.True(textView.ReadOnly);
-            Assert.True(textView.WordWrap);
-            Assert.True(textView.ScrollBars);
-            Assert.Equal("Sample details text.", textView.Text);
+            var contentView = dialog.SubViews.OfType<EntityDetailsContentView>().FirstOrDefault();
+            Assert.NotNull(contentView);
+            Assert.Equal("Sample details text.", contentView.Text);
 
             dialog.Layout();
-            Assert.Equal(dialog.Viewport.Height - 1, textView.Frame.Height);
             Assert.Equal(dialog.Viewport.Height - 1, closeButton.Frame.Y);
+        }
+
+        [Fact]
+        public void Story_events_are_ordered_newest_first_and_separated_by_lines()
+        {
+            using var save = Seeded();
+
+            // Append a second event on turn 3
+            save.Store.Story.Append(new StoryEvent
+            {
+                Turn = 3,
+                Title = "Found an ancient vault",
+                Detail = "Bess helped translate the inscription.",
+                CharacterIds = ["chr_2"],
+                LocationIds = ["loc_1"],
+            });
+
+            var (_, content) = EntityDetailsDialog.FormatEntityDetails(save.Store, "chr_2");
+
+            var turn3Index = content.IndexOf("[Turn 3]", StringComparison.Ordinal);
+            var turn1Index = content.IndexOf("[Turn 1]", StringComparison.Ordinal);
+            var separatorIndex = content.IndexOf("────────────────────────────────────────", StringComparison.Ordinal);
+
+            Assert.True(turn3Index >= 0);
+            Assert.True(turn1Index >= 0);
+            Assert.True(separatorIndex >= 0);
+
+            // Turn 3 appears before Turn 1 (newest first)
+            Assert.True(turn3Index < turn1Index);
+            // Separator appears between Turn 3 and Turn 1
+            Assert.True(separatorIndex > turn3Index && separatorIndex < turn1Index);
         }
     }
 }
