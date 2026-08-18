@@ -49,7 +49,8 @@ namespace TerminalQuest.Ui
                     o => o,
                     defaultIndex: 0,
                     renderHeader: RenderSettingsHeader,
-                    allowCancel: true);
+                    allowCancel: true,
+                    cancelHint: "return to main menu");
 
                 if (choice is null || choice.StartsWith("Save"))
                 {
@@ -86,7 +87,7 @@ namespace TerminalQuest.Ui
                 }
                 else if (choice.StartsWith("Restore"))
                 {
-                    if (AnsiConsole.Prompt(new ConfirmationPrompt("Reset all settings to defaults?") { DefaultValue = false }))
+                    if (CliPrompt.Confirm("Reset all settings to defaults?", defaultValue: false) == true)
                     {
                         var defaults = new AppSettings();
                         settings.Provider = defaults.Provider;
@@ -132,7 +133,8 @@ namespace TerminalQuest.Ui
                 p => p,
                 defaultIndex: 0,
                 renderHeader: RenderProviderHeader,
-                allowCancel: true);
+                allowCancel: true,
+                cancelHint: "return to settings");
 
             if (providerChoice is null || providerChoice.StartsWith("Back"))
             {
@@ -145,8 +147,6 @@ namespace TerminalQuest.Ui
                 RenderProviderHeader();
 
                 var currentKey = (settings.LmStudioApiKey is "lm-studio" or "") ? string.Empty : settings.LmStudioApiKey;
-                var prompt = new TextPrompt<string>("[bold #e0b050]Google Gemini API Key:[/] ")
-                    .AllowEmpty();
 
                 if (!string.IsNullOrEmpty(currentKey))
                 {
@@ -154,14 +154,23 @@ namespace TerminalQuest.Ui
                     AnsiConsole.MarkupLine($"[dim]Current saved key: {Markup.Escape(masked)} (press Enter to keep, or paste new key)[/]");
                 }
 
-                var apiKey = AnsiConsole.Prompt(prompt);
+                var apiKey = CliPrompt.AskString(
+                    "[bold #e0b050]Google Gemini API Key:[/] ",
+                    defaultValue: currentKey,
+                    allowEmpty: true);
+
+                if (apiKey is null)
+                {
+                    return;
+                }
+
                 var resolvedKey = !string.IsNullOrWhiteSpace(apiKey) ? apiKey.Trim() : currentKey;
 
                 if (string.IsNullOrWhiteSpace(resolvedKey))
                 {
                     AnsiConsole.MarkupLine("[bold red]API key cannot be empty for Google Gemini.[/]");
-                    AnsiConsole.MarkupLine("[dim]Selection cancelled. Press Enter to continue...[/]");
-                    Console.ReadLine();
+                    AnsiConsole.MarkupLine("[dim]Selection cancelled.[/]");
+                    Thread.Sleep(1000);
                     return;
                 }
 
@@ -216,8 +225,6 @@ namespace TerminalQuest.Ui
                 RenderProviderHeader();
 
                 var currentKey = (settings.LmStudioApiKey is "lm-studio" or "") ? string.Empty : settings.LmStudioApiKey;
-                var prompt = new TextPrompt<string>("[bold #e0b050]OpenAI API Key:[/] ")
-                    .AllowEmpty();
 
                 if (!string.IsNullOrEmpty(currentKey))
                 {
@@ -225,14 +232,23 @@ namespace TerminalQuest.Ui
                     AnsiConsole.MarkupLine($"[dim]Current saved key: {Markup.Escape(masked)} (press Enter to keep, or paste new key)[/]");
                 }
 
-                var apiKey = AnsiConsole.Prompt(prompt);
+                var apiKey = CliPrompt.AskString(
+                    "[bold #e0b050]OpenAI API Key:[/] ",
+                    defaultValue: currentKey,
+                    allowEmpty: true);
+
+                if (apiKey is null)
+                {
+                    return;
+                }
+
                 var resolvedKey = !string.IsNullOrWhiteSpace(apiKey) ? apiKey.Trim() : currentKey;
 
                 if (string.IsNullOrWhiteSpace(resolvedKey))
                 {
                     AnsiConsole.MarkupLine("[bold red]API key cannot be empty for OpenAI.[/]");
-                    AnsiConsole.MarkupLine("[dim]Selection cancelled. Press Enter to continue...[/]");
-                    Console.ReadLine();
+                    AnsiConsole.MarkupLine("[dim]Selection cancelled.[/]");
+                    Thread.Sleep(1000);
                     return;
                 }
 
@@ -259,15 +275,26 @@ namespace TerminalQuest.Ui
                 AnsiConsole.Clear();
                 RenderProviderHeader();
 
-                var baseUrl = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[bold #e0b050]Base URL:[/] ")
-                        .DefaultValue(settings.LmStudioBaseUrl ?? "http://localhost:1234/v1"));
+                var baseUrl = CliPrompt.AskString(
+                    "[bold #e0b050]Base URL:[/] ",
+                    defaultValue: settings.LmStudioBaseUrl ?? "http://localhost:1234/v1",
+                    allowEmpty: false);
+
+                if (baseUrl is null)
+                {
+                    return;
+                }
                 var resolvedUrl = baseUrl.Trim();
 
-                var apiKey = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[bold #e0b050]API Key (optional):[/] ")
-                        .DefaultValue(settings.LmStudioApiKey ?? "lm-studio")
-                        .AllowEmpty());
+                var apiKey = CliPrompt.AskString(
+                    "[bold #e0b050]API Key (optional):[/] ",
+                    defaultValue: settings.LmStudioApiKey ?? "lm-studio",
+                    allowEmpty: true);
+
+                if (apiKey is null)
+                {
+                    return;
+                }
                 var resolvedKey = string.IsNullOrWhiteSpace(apiKey) ? "lm-studio" : apiKey.Trim();
 
                 var model = await SelectModelAsync(
@@ -324,8 +351,7 @@ namespace TerminalQuest.Ui
                 {
                     AnsiConsole.WriteLine();
                     AnsiConsole.MarkupLine($"[bold red]Connection failed:[/] {Markup.Escape(errorMessage)}");
-                    AnsiConsole.MarkupLine("[dim]Selection cancelled. Press Enter to return to settings...[/]");
-                    Console.ReadLine();
+                    CliPrompt.WaitKeyOrCancel("[dim]Selection cancelled. Press Enter to return to settings...[/]");
                     return null;
                 }
 
@@ -335,8 +361,7 @@ namespace TerminalQuest.Ui
                 if (discoveredCount == 0)
                 {
                     AnsiConsole.MarkupLine($"[bold red]No models discovered from {providerTitle}.[/]");
-                    AnsiConsole.MarkupLine("[dim]Selection cancelled. Press Enter to return to settings...[/]");
-                    Console.ReadLine();
+                    CliPrompt.WaitKeyOrCancel("[dim]Selection cancelled. Press Enter to return to settings...[/]");
                     return null;
                 }
 
@@ -407,10 +432,16 @@ namespace TerminalQuest.Ui
             {
                 AnsiConsole.Clear();
                 RenderModelHeader();
-                var manualModel = AnsiConsole.Prompt(
-                    new TextPrompt<string>("[bold #e0b050]Model ID:[/] ")
-                        .DefaultValue(currentModel ?? string.Empty)
-                        .AllowEmpty());
+                var manualModel = CliPrompt.AskString(
+                    "[bold #e0b050]Model ID:[/] ",
+                    defaultValue: currentModel ?? string.Empty,
+                    allowEmpty: true);
+
+                if (manualModel is null)
+                {
+                    return null;
+                }
+
                 return string.IsNullOrWhiteSpace(manualModel) ? string.Empty : manualModel.Trim();
             }
 
@@ -429,13 +460,17 @@ namespace TerminalQuest.Ui
             });
             AnsiConsole.WriteLine();
 
-            var chars = AnsiConsole.Prompt(
-                new TextPrompt<int>("[bold #e0b050]Maximum characters of prior transcript to send to narrator:[/] ")
-                    .DefaultValue(settings.TranscriptRecallCharacters)
-                    .Validate(c => c is >= 1000 and <= 500000
-                        ? ValidationResult.Success()
-                        : ValidationResult.Error("[red]Value must be between 1,000 and 500,000.[/]")));
-            settings.TranscriptRecallCharacters = chars;
+            var chars = CliPrompt.AskInt(
+                "[bold #e0b050]Maximum characters of prior transcript to send to narrator:[/] ",
+                defaultValue: settings.TranscriptRecallCharacters,
+                validator: c => c is >= 1000 and <= 500000
+                    ? ValidationResult.Success()
+                    : ValidationResult.Error("Value must be between 1,000 and 500,000."));
+
+            if (chars.HasValue)
+            {
+                settings.TranscriptRecallCharacters = chars.Value;
+            }
         }
 
         private static void ConfigureEditor(AppSettings settings)
@@ -448,10 +483,15 @@ namespace TerminalQuest.Ui
             });
             AnsiConsole.WriteLine();
 
-            var cmd = AnsiConsole.Prompt(
-                new TextPrompt<string>("[bold #e0b050]External Editor Command (e.g. 'code -w', 'notepad', 'micro'):[/] ")
-                    .DefaultValue(settings.EditorCommand));
-            settings.EditorCommand = cmd.Trim();
+            var cmd = CliPrompt.AskString(
+                "[bold #e0b050]External Editor Command (e.g. 'code -w', 'notepad', 'micro'):[/] ",
+                defaultValue: settings.EditorCommand,
+                allowEmpty: false);
+
+            if (cmd is not null)
+            {
+                settings.EditorCommand = cmd.Trim();
+            }
         }
 
         private static async Task TestEditorAsync(AppSettings settings, ExternalEditor editor)
@@ -474,8 +514,7 @@ namespace TerminalQuest.Ui
             {
                 AnsiConsole.MarkupLine("[yellow]Editor returned nothing or was cancelled.[/]");
             }
-            Console.WriteLine("Press Enter to continue...");
-            Console.ReadLine();
+            CliPrompt.WaitKeyOrCancel("Press Enter or ESC to continue...");
         }
     }
 }

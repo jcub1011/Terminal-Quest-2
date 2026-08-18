@@ -8,6 +8,15 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal static class CharacterCreationWizard
     {
+        private enum WizardStep
+        {
+            Archetype = 1,
+            Name = 2,
+            Description = 3,
+            Location = 4,
+            Confirmation = 5
+        }
+
         public static async Task<CharacterCreationResult?> RunAsync(
             SaveStore store,
             ExternalEditor editor)
@@ -55,104 +64,167 @@ namespace TerminalQuest.Ui
                 AnsiConsole.Write(card);
             }
 
-            // 1. Archetype Selection
-            var classes = ClassTemplates.All;
-            var archetypeChoice = CliMenu.Prompt(
-                "[bold #8fb26a]Choose your character archetype:[/]",
-                classes,
-                c => $"{c.Name} [dim]— HP {c.MaxHealth}, {Markup.Escape(c.Aptitude)}[/]",
-                c => c.Name,
-                defaultIndex: 0,
-                renderHeader: RenderWizardHeader,
-                allowCancel: true);
+            ClassTemplate? archetypeChoice = null;
+            string? name = null;
+            string? description = null;
+            string? rawDescInput = null;
+            string? startLocation = null;
+            string? rawPlaceInput = null;
 
-            if (archetypeChoice is null)
+            var step = WizardStep.Archetype;
+
+            while (true)
             {
-                return null;
-            }
-
-            // 2. Character Name
-            AnsiConsole.Clear();
-            RenderWizardHeader();
-            RenderArchetypeDetails(archetypeChoice);
-            AnsiConsole.WriteLine();
-
-            var name = AnsiConsole.Prompt(
-                new TextPrompt<string>("[bold #e0b050]Character Name:[/] ")
-                    .DefaultValue(archetypeChoice.Name)
-                    .Validate(n =>
-                    {
-                        var trimmed = n.Trim();
-                        return trimmed.Length is > 0 and <= 40
-                            ? ValidationResult.Success()
-                            : ValidationResult.Error("[red]Name must be between 1 and 40 characters.[/]");
-                    })).Trim();
-
-            // 3. Who you are / Description
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim]Press Enter to accept default, or edit who your character is (type /edit to open external editor):[/]");
-            var descInput = AnsiConsole.Prompt(
-                new TextPrompt<string>("[bold #e0b050]Who you are:[/] ")
-                    .DefaultValue(archetypeChoice.Aptitude)
-                    .AllowEmpty()).Trim();
-
-            string description;
-            if (string.Equals(descInput, "/edit", StringComparison.OrdinalIgnoreCase))
-            {
-                var edited = await editor.EditStringAsync(archetypeChoice.Aptitude, "Character Backstory");
-                description = string.IsNullOrWhiteSpace(edited) ? archetypeChoice.Aptitude : edited.Trim();
-            }
-            else
-            {
-                description = string.IsNullOrWhiteSpace(descInput) ? archetypeChoice.Aptitude : descInput;
-            }
-
-            // 4. Starting Location
-            AnsiConsole.WriteLine();
-            var placeInput = AnsiConsole.Prompt(
-                new TextPrompt<string>("[bold #e0b050]Where you begin (leave empty for narrator choice):[/] ")
-                    .AllowEmpty()).Trim();
-
-            var startLocation = string.IsNullOrWhiteSpace(placeInput) ? null : placeInput;
-
-            // 5. Summary Card & Confirmation
-            AnsiConsole.Clear();
-            RenderWizardHeader();
-
-            var summaryPanel = new Panel(
-                $"[bold #8fb26a]Name:[/] [bold]{Markup.Escape(name)}[/]\n" +
-                $"[bold #8fb26a]Archetype:[/] {Markup.Escape(archetypeChoice.Name)} (HP {archetypeChoice.MaxHealth})\n" +
-                $"[bold #8fb26a]Who you are:[/] {Markup.Escape(description)}\n" +
-                $"[bold #8fb26a]Where you begin:[/] {(startLocation is not null ? Markup.Escape(startLocation) : "[dim]Narrator choice[/]")}")
-            {
-                Header = new PanelHeader(" [bold cyan]Character Summary[/] "),
-                Border = BoxBorder.Rounded,
-                BorderStyle = new Style(new Color(0x8f, 0xb2, 0x6a)),
-                Padding = new Padding(1, 0, 1, 0)
-            };
-
-            AnsiConsole.Write(summaryPanel);
-            AnsiConsole.WriteLine();
-
-            var confirmed = AnsiConsole.Prompt(
-                new ConfirmationPrompt("[bold green]Begin adventure with this character?[/]")
+                switch (step)
                 {
-                    DefaultValue = true
-                });
+                    case WizardStep.Archetype:
+                        var classes = ClassTemplates.All;
+                        var defaultIdx = archetypeChoice is not null
+                            ? Math.Max(0, classes.ToList().FindIndex(c => c.Name == archetypeChoice.Name))
+                            : 0;
 
-            if (!confirmed)
-            {
-                return null;
-            }
+                        archetypeChoice = CliMenu.Prompt(
+                            "[bold #8fb26a]Choose your character archetype:[/]",
+                            classes,
+                            c => $"{c.Name} [dim]— HP {c.MaxHealth}, {Markup.Escape(c.Aptitude)}[/]",
+                            c => c.Name,
+                            defaultIndex: defaultIdx,
+                            renderHeader: RenderWizardHeader,
+                            allowCancel: true,
+                            cancelHint: "cancel");
 
-            try
-            {
-                NewGame.Create(store, name, description, archetypeChoice, startLocation);
-                return new CharacterCreationResult(HasStartLocation: startLocation is not null, Error: null);
-            }
-            catch (Exception ex)
-            {
-                return new CharacterCreationResult(HasStartLocation: false, Error: ex.Message);
+                        if (archetypeChoice is null)
+                        {
+                            return null;
+                        }
+
+                        step = WizardStep.Name;
+                        break;
+
+                    case WizardStep.Name:
+                        AnsiConsole.Clear();
+                        RenderWizardHeader();
+                        RenderArchetypeDetails(archetypeChoice!);
+                        AnsiConsole.WriteLine();
+
+                        name = CliPrompt.AskString(
+                            "[bold #e0b050]Character Name:[/] ",
+                            defaultValue: name ?? archetypeChoice!.Name,
+                            allowEmpty: false,
+                            validator: n =>
+                            {
+                                var trimmed = n.Trim();
+                                return trimmed.Length is > 0 and <= 40
+                                    ? ValidationResult.Success()
+                                    : ValidationResult.Error("Name must be between 1 and 40 characters.");
+                            },
+                            cancelHint: "go back");
+
+                        if (name is null)
+                        {
+                            step = WizardStep.Archetype;
+                            break;
+                        }
+
+                        step = WizardStep.Description;
+                        break;
+
+                    case WizardStep.Description:
+                        AnsiConsole.Clear();
+                        RenderWizardHeader();
+                        RenderArchetypeDetails(archetypeChoice!);
+                        AnsiConsole.WriteLine();
+                        AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
+                        AnsiConsole.WriteLine();
+                        AnsiConsole.MarkupLine("[dim]Press Enter to accept default, or edit who your character is (type /edit to open external editor):[/]");
+
+                        rawDescInput = CliPrompt.AskString(
+                            "[bold #e0b050]Who you are:[/] ",
+                            defaultValue: rawDescInput ?? archetypeChoice!.Aptitude,
+                            allowEmpty: true,
+                            cancelHint: "go back");
+
+                        if (rawDescInput is null)
+                        {
+                            step = WizardStep.Name;
+                            break;
+                        }
+
+                        if (string.Equals(rawDescInput, "/edit", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var edited = await editor.EditStringAsync(archetypeChoice!.Aptitude, "Character Backstory");
+                            description = string.IsNullOrWhiteSpace(edited) ? archetypeChoice!.Aptitude : edited.Trim();
+                        }
+                        else
+                        {
+                            description = string.IsNullOrWhiteSpace(rawDescInput) ? archetypeChoice!.Aptitude : rawDescInput;
+                        }
+
+                        step = WizardStep.Location;
+                        break;
+
+                    case WizardStep.Location:
+                        AnsiConsole.Clear();
+                        RenderWizardHeader();
+                        RenderArchetypeDetails(archetypeChoice!);
+                        AnsiConsole.WriteLine();
+                        AnsiConsole.MarkupLine($"[bold #8fb26a]Character Name:[/] [bold]{Markup.Escape(name!)}[/]");
+                        AnsiConsole.MarkupLine($"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}");
+                        AnsiConsole.WriteLine();
+
+                        rawPlaceInput = CliPrompt.AskString(
+                            "[bold #e0b050]Where you begin (leave empty for narrator choice):[/] ",
+                            defaultValue: rawPlaceInput,
+                            allowEmpty: true,
+                            cancelHint: "go back");
+
+                        if (rawPlaceInput is null)
+                        {
+                            step = WizardStep.Description;
+                            break;
+                        }
+
+                        startLocation = string.IsNullOrWhiteSpace(rawPlaceInput) ? null : rawPlaceInput;
+                        step = WizardStep.Confirmation;
+                        break;
+
+                    case WizardStep.Confirmation:
+                        AnsiConsole.Clear();
+                        RenderWizardHeader();
+
+                        var summaryPanel = new Panel(
+                            $"[bold #8fb26a]Name:[/] [bold]{Markup.Escape(name!)}[/]\n" +
+                            $"[bold #8fb26a]Archetype:[/] {Markup.Escape(archetypeChoice!.Name)} (HP {archetypeChoice!.MaxHealth})\n" +
+                            $"[bold #8fb26a]Who you are:[/] {Markup.Escape(description!)}\n" +
+                            $"[bold #8fb26a]Where you begin:[/] {(startLocation is not null ? Markup.Escape(startLocation) : "[dim]Narrator choice[/]")}")
+                        {
+                            Header = new PanelHeader(" [bold cyan]Character Summary[/] "),
+                            Border = BoxBorder.Rounded,
+                            BorderStyle = new Style(new Color(0x8f, 0xb2, 0x6a)),
+                            Padding = new Padding(1, 0, 1, 0)
+                        };
+
+                        AnsiConsole.Write(summaryPanel);
+                        AnsiConsole.WriteLine();
+
+                        var confirmed = CliPrompt.Confirm("[bold green]Begin adventure with this character?[/]", defaultValue: true, cancelHint: "go back");
+
+                        if (confirmed != true)
+                        {
+                            step = WizardStep.Location;
+                            break;
+                        }
+
+                        try
+                        {
+                            NewGame.Create(store, name!, description!, archetypeChoice!, startLocation);
+                            return new CharacterCreationResult(HasStartLocation: startLocation is not null, Error: null);
+                        }
+                        catch (Exception ex)
+                        {
+                            return new CharacterCreationResult(HasStartLocation: false, Error: ex.Message);
+                        }
+                }
             }
         }
     }

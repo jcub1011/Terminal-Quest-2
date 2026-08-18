@@ -50,5 +50,20 @@ namespace TerminalQuest.Tests.Ui
             var match = CliMenu.MatchItem(items, "xyz", s => s, null);
             Assert.Null(match);
         }
+
+        [Fact]
+        public void Prompt_throws_on_empty_items()
+        {
+            var empty = Array.Empty<string>();
+            Assert.Throws<ArgumentException>(() => CliMenu.Prompt("Title", empty, s => s));
+        }
+
+        [Fact]
+        public void Prompt_returns_default_item_when_redirected()
+        {
+            string[] items = ["Choice 1", "Choice 2", "Choice 3"];
+            var choice = CliMenu.Prompt("Menu", items, s => s, defaultIndex: 1, allowCancel: true);
+            Assert.Equal("Choice 2", choice);
+        }
     }
 }

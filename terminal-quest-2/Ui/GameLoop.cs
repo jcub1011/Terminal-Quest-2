@@ -48,6 +48,13 @@ namespace TerminalQuest.Ui
                 var created = await CharacterCreationWizard.RunAsync(store, editor);
                 if (created is null)
                 {
+                    try
+                    {
+                        SavePaths.Delete(store.Name);
+                    }
+                    catch
+                    {
+                    }
                     return;
                 }
 

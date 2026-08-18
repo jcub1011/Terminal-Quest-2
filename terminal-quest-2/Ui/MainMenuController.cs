@@ -124,27 +124,27 @@ namespace TerminalQuest.Ui
             AnsiConsole.Clear();
             RenderNewGameHeader();
 
-            var namePrompt = new TextPrompt<string>("[bold #e0b050]Enter name for new save (or leave empty to cancel):[/] ")
-                .AllowEmpty()
-                .Validate(name =>
+            var name = CliPrompt.AskString(
+                "[bold #e0b050]Enter name for new save:[/] ",
+                allowEmpty: false,
+                validator: input =>
                 {
-                    var trimmed = name.Trim();
+                    var trimmed = input.Trim();
                     if (string.IsNullOrEmpty(trimmed))
                     {
-                        return ValidationResult.Success();
+                        return ValidationResult.Error("Save name cannot be empty.");
                     }
                     if (!SavePaths.IsValidName(trimmed))
                     {
-                        return ValidationResult.Error("[red]Invalid save name. Must not contain invalid characters or reserved names.[/]");
+                        return ValidationResult.Error("Invalid save name. Must not contain invalid characters or reserved names.");
                     }
                     if (saves.Any(s => string.Equals(s.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
                     {
-                        return ValidationResult.Error($"[red]A save named '{Markup.Escape(trimmed)}' already exists.[/]");
+                        return ValidationResult.Error($"A save named '{trimmed}' already exists.");
                     }
                     return ValidationResult.Success();
                 });
 
-            var name = AnsiConsole.Prompt(namePrompt).Trim();
             if (string.IsNullOrEmpty(name))
             {
                 return Task.FromResult<SaveStore?>(null);
@@ -237,7 +237,8 @@ namespace TerminalQuest.Ui
                     a => a,
                     defaultIndex: 0,
                     renderHeader: RenderManageHeader,
-                    allowCancel: true);
+                    allowCancel: true,
+                    cancelHint: "go back");
 
                 if (action is null || action.StartsWith("Back"))
                 {
@@ -248,8 +249,9 @@ namespace TerminalQuest.Ui
 
                 if (action.StartsWith("Rename"))
                 {
-                    var newName = AnsiConsole.Prompt(
-                        new TextPrompt<string>("[bold #e0b050]New save name:[/] ").AllowEmpty()).Trim();
+                    var newName = CliPrompt.AskString(
+                        "[bold #e0b050]New save name:[/] ",
+                        allowEmpty: true);
 
                     if (!string.IsNullOrEmpty(newName) && SavePaths.IsValidName(newName))
                     {
@@ -282,7 +284,7 @@ namespace TerminalQuest.Ui
                 }
                 else if (action.StartsWith("Reset"))
                 {
-                    if (AnsiConsole.Prompt(new ConfirmationPrompt($"Reset '{picked.Name}' back to turn 0?") { DefaultValue = false }))
+                    if (CliPrompt.Confirm($"Reset '{picked.Name}' back to turn 0?", defaultValue: false) == true)
                     {
                         try
                         {
@@ -299,7 +301,7 @@ namespace TerminalQuest.Ui
                 }
                 else if (action.StartsWith("Delete"))
                 {
-                    if (AnsiConsole.Prompt(new ConfirmationPrompt($"[bold red]Permanently delete save '{picked.Name}'?[/]") { DefaultValue = false }))
+                    if (CliPrompt.Confirm($"[bold red]Permanently delete save '{picked.Name}'?[/]", defaultValue: false) == true)
                     {
                         try
                         {
