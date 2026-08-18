@@ -4,7 +4,7 @@ using TerminalQuest.Saves;
 namespace TerminalQuest.Ui
 {
     /// <summary>
-    /// Turns the narrator's semantic markup (<c>[Entity Name](entity_id)</c> and <c>["Speech"]</c>) into styled spans.
+    /// Turns the narrator's semantic markup (<c>[Entity Name](entity_id)</c> and <c>["Speech"](speaker_id)</c>) into styled spans.
     /// <para>
     /// This is deliberately incremental: <see cref="Append"/> is fed raw stream deltas, and tags/entities
     /// split across deltas must not corrupt the line. Parser state survives between calls until <see cref="Reset"/>.
@@ -28,13 +28,18 @@ namespace TerminalQuest.Ui
             AfterCloseBracket,
             EntityId,
             AfterQuoteInSpeech,
+            AfterCloseSpeechBracket,
+            SpeechSpeakerId,
         }
 
         private ParserState _state = ParserState.Normal;
         private bool _inSpeech;
+        private int _speechStartSpanIndex = -1;
+        private int _consecutiveNewlines;
 
         private readonly StringBuilder _entityName = new();
         private readonly StringBuilder _entityId = new();
+        private readonly StringBuilder _speechSpeakerId = new();
 
         /// <summary>Current baseline text role when outside an entity link.</summary>
         private TextRole CurrentRole => _inSpeech ? TextRole.Speech : TextRole.Normal;
@@ -49,8 +54,11 @@ namespace TerminalQuest.Ui
 
             _state = ParserState.Normal;
             _inSpeech = false;
+            _speechStartSpanIndex = -1;
+            _consecutiveNewlines = 0;
             _entityName.Clear();
             _entityId.Clear();
+            _speechSpeakerId.Clear();
         }
 
         public void Append(string text, StyledLine sink)
@@ -80,16 +88,34 @@ namespace TerminalQuest.Ui
                 case ParserState.Normal:
                     if (c == '[')
                     {
+                        _consecutiveNewlines = 0;
                         FlushRun(run, sink);
                         _state = ParserState.AfterOpenBracket;
                     }
                     else if (_inSpeech && c == '"')
                     {
+                        _consecutiveNewlines = 0;
                         FlushRun(run, sink);
                         _state = ParserState.AfterQuoteInSpeech;
                     }
                     else
                     {
+                        if (c == '\n')
+                        {
+                            _consecutiveNewlines++;
+                            if (_inSpeech && _consecutiveNewlines >= 2)
+                            {
+                                // A blank line / paragraph break ends unclosed speech so it does not leak into future paragraphs.
+                                FlushRun(run, sink);
+                                _inSpeech = false;
+                                _speechStartSpanIndex = -1;
+                            }
+                        }
+                        else if (c != '\r' && c != ' ' && c != '\t')
+                        {
+                            _consecutiveNewlines = 0;
+                        }
+
                         run.Append(c);
                     }
                     break;
@@ -108,6 +134,7 @@ namespace TerminalQuest.Ui
                         {
                             FlushRun(run, sink);
                             _inSpeech = true;
+                            _speechStartSpanIndex = sink.Spans.Count;
                             run.Append('"');
                         }
                         else
@@ -208,7 +235,26 @@ namespace TerminalQuest.Ui
                         run.Append('"');
                         FlushRun(run, sink);
                         _inSpeech = false;
+                        _state = ParserState.AfterCloseSpeechBracket;
+                    }
+                    else if (c == '\n' || c == '\r')
+                    {
+                        // Quote before newline closes speech (missing closing ']').
+                        run.Append('"');
+                        FlushRun(run, sink);
+                        _inSpeech = false;
+                        _speechStartSpanIndex = -1;
                         _state = ParserState.Normal;
+                        ProcessChar(c, run, sink);
+                    }
+                    else if (c == '(')
+                    {
+                        // Quote before '(' starts speaker tag (missing closing ']').
+                        run.Append('"');
+                        FlushRun(run, sink);
+                        _inSpeech = false;
+                        _speechSpeakerId.Clear();
+                        _state = ParserState.SpeechSpeakerId;
                     }
                     else
                     {
@@ -216,6 +262,46 @@ namespace TerminalQuest.Ui
                         run.Append('"');
                         _state = ParserState.Normal;
                         ProcessChar(c, run, sink);
+                    }
+                    break;
+
+                case ParserState.AfterCloseSpeechBracket:
+                    if (c == '(')
+                    {
+                        _speechSpeakerId.Clear();
+                        _state = ParserState.SpeechSpeakerId;
+                    }
+                    else
+                    {
+                        _speechStartSpanIndex = -1;
+                        _state = ParserState.Normal;
+                        ProcessChar(c, run, sink);
+                    }
+                    break;
+
+                case ParserState.SpeechSpeakerId:
+                    if (c == ')')
+                    {
+                        var speakerId = _speechSpeakerId.ToString().Trim();
+                        if (speakerId.Length > 0 && _speechStartSpanIndex >= 0)
+                        {
+                            sink.TagSpeechSpans(_speechStartSpanIndex, speakerId);
+                        }
+
+                        _speechSpeakerId.Clear();
+                        _speechStartSpanIndex = -1;
+                        _state = ParserState.Normal;
+                    }
+                    else if (c == '(' || c == '[' || c == '\n' || _speechSpeakerId.Length > MaxEntityIdLength)
+                    {
+                        run.Append('(').Append(_speechSpeakerId).Append(c);
+                        _speechSpeakerId.Clear();
+                        _speechStartSpanIndex = -1;
+                        _state = ParserState.Normal;
+                    }
+                    else
+                    {
+                        _speechSpeakerId.Append(c);
                     }
                     break;
             }
@@ -241,6 +327,11 @@ namespace TerminalQuest.Ui
                     break;
                 case ParserState.AfterQuoteInSpeech:
                     run.Append('"');
+                    break;
+                case ParserState.AfterCloseSpeechBracket:
+                    break;
+                case ParserState.SpeechSpeakerId:
+                    run.Append('(').Append(_speechSpeakerId);
                     break;
             }
 

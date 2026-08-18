@@ -57,10 +57,10 @@ If something happened this turn and you called no writing tool, you have made a 
 Format entities and dialogue using this exact syntax:
 - Entities (characters, locations, items): [Entity Name](id)
   Examples: [Rowan](chr_1), [Hollow Gate](loc_1), [rusted key](itm_1)
-- Speech / Dialogue: ["Spoken words go here."]
-  Example: ["Who goes there?"]
+- Speech / Dialogue: ["Spoken words go here."](id)
+  Example: ["Who goes there?"](chr_1)
   When dialogue refers to an entity, use the entity syntax inside speech:
-  ["Have you seen [Rowan](chr_1) at [The Tavern](loc_2)?"]
+  ["Have you seen [Rowan](chr_1) at [The Tavern](loc_2)?"](chr_2)
 Use no other formatting or tags.
 
 ### NUMBERED CHOICES

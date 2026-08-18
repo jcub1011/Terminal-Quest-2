@@ -96,6 +96,21 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Speech_with_speaker_tag_associates_id_and_does_not_render_tag()
+        {
+            var line = MarkupParser.Parse("He said, [\"Who goes there?\"](chr_1) and stopped.");
+
+            Assert.Equal("He said, \"Who goes there?\" and stopped.", TextOf(line));
+            Assert.Equal(
+                [
+                    ("He said, ", TextRole.Normal, null),
+                    ("\"Who goes there?\"", TextRole.Speech, "chr_1"),
+                    (" and stopped.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
         public void Nested_entity_inside_speech_preserves_entity_styling_and_id()
         {
             var line = MarkupParser.Parse("[\"Have you seen [Rowan](chr_1) at [The Tavern](loc_2)?\"]");
@@ -112,13 +127,102 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Nested_entity_inside_speech_with_speaker_tag_preserves_nested_and_speaker_ids()
+        {
+            var line = MarkupParser.Parse("[\"Have you seen [Rowan](chr_1) at [The Tavern](loc_2)?\"](chr_3)");
+
+            Assert.Equal("\"Have you seen Rowan at The Tavern?\"", TextOf(line));
+            Assert.Equal(
+                [
+                    ("\"Have you seen ", TextRole.Speech, "chr_3"),
+                    ("Rowan", TextRole.Character, "chr_1"),
+                    (" at ", TextRole.Speech, "chr_3"),
+                    ("The Tavern", TextRole.Place, "loc_2"),
+                    ("?\"", TextRole.Speech, "chr_3")
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
+        public void Multiple_speeches_with_different_speakers()
+        {
+            var line = MarkupParser.Parse("[\"Hello!\"](chr_1) said Rowan. [\"Farewell!\"](chr_2) replied Bess.");
+
+            Assert.Equal("\"Hello!\" said Rowan. \"Farewell!\" replied Bess.", TextOf(line));
+            Assert.Equal(
+                [
+                    ("\"Hello!\"", TextRole.Speech, "chr_1"),
+                    (" said Rowan. ", TextRole.Normal, null),
+                    ("\"Farewell!\"", TextRole.Speech, "chr_2"),
+                    (" replied Bess.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
         public void Quotes_inside_speech_are_tolerated()
         {
-            var line = MarkupParser.Parse("[\"She said, \"no\", plainly.\"]");
+            var line = MarkupParser.Parse("[\"She said, \"no\", plainly.\"](chr_2)");
 
             Assert.Equal(
                 [
-                    ("\"She said, \"no\", plainly.\"", TextRole.Speech, null)
+                    ("\"She said, \"no\", plainly.\"", TextRole.Speech, "chr_2")
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
+        public void Speech_missing_closing_bracket_before_newline_closes_speech_cleanly()
+        {
+            var line = MarkupParser.Parse("[\"Give me both and walk away.\"\n\nHis gaze was cold.");
+
+            Assert.Equal(
+                [
+                    ("\"Give me both and walk away.\"", TextRole.Speech, null),
+                    ("\n\nHis gaze was cold.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
+        public void Speech_missing_closing_bracket_before_speaker_id_associates_speaker_id()
+        {
+            var line = MarkupParser.Parse("[\"Give me both and walk away.\"(chr_1)\n\nHis gaze was cold.");
+
+            Assert.Equal(
+                [
+                    ("\"Give me both and walk away.\"", TextRole.Speech, "chr_1"),
+                    ("\n\nHis gaze was cold.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
+        public void Unclosed_speech_does_not_leak_past_paragraph_break()
+        {
+            var line = MarkupParser.Parse("[\"Give me both and walk away\n\nHis gaze was cold.");
+
+            Assert.Equal(
+                [
+                    ("\"Give me both and walk away\n", TextRole.Speech, null),
+                    ("\nHis gaze was cold.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
+        public void Transcript_snippet_with_missing_bracket_does_not_leak_speech_styling_to_subsequent_paragraphs()
+        {
+            const string source = "The gesture is one of negotiation. [\"Give me both, and this mess ends here. We can settle for nothing more than its contents.\"\n\nHis gaze flicks to [Corvait](chr_2).\n\nWhat do you do?\n1. Choice";
+            var line = MarkupParser.Parse(source);
+
+            Assert.Equal(
+                [
+                    ("The gesture is one of negotiation. ", TextRole.Normal, null),
+                    ("\"Give me both, and this mess ends here. We can settle for nothing more than its contents.\"", TextRole.Speech, null),
+                    ("\n\nHis gaze flicks to ", TextRole.Normal, null),
+                    ("Corvait", TextRole.Character, "chr_2"),
+                    (".\n\nWhat do you do?\n1. Choice", TextRole.Normal, null)
                 ],
                 SpansOf(line));
         }
@@ -219,9 +323,39 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void Speech_with_speaker_tag_split_across_deltas_still_parses()
+        {
+            var parser = new MarkupParser();
+            var line = new StyledLine();
+
+            parser.Append("[\"Hello, ", line);
+            parser.Append("world!\"]", line);
+            parser.Append("(chr_1)", line);
+
+            Assert.Equal([("\"Hello, world!\"", TextRole.Speech, "chr_1")], SpansOf(line));
+        }
+
+        [Fact]
+        public void Speech_with_speaker_tag_split_inside_tag_still_parses()
+        {
+            var parser = new MarkupParser();
+            var line = new StyledLine();
+
+            parser.Append("[\"Hello!\"](ch", line);
+            parser.Append("r_1) said he.", line);
+
+            Assert.Equal(
+                [
+                    ("\"Hello!\"", TextRole.Speech, "chr_1"),
+                    (" said he.", TextRole.Normal, null)
+                ],
+                SpansOf(line));
+        }
+
+        [Fact]
         public void Streaming_produces_the_same_text_as_parsing_the_whole_string()
         {
-            const string source = "[The Ford](loc_1) - [\"Mind the [rope](itm_1),\" [Rowan](chr_1) said.\"] [[literal]";
+            const string source = "[The Ford](loc_1) - [\"Mind the [rope](itm_1),\" [Rowan](chr_1) said.\"](chr_2) [[literal]";
 
             for (var split = 0; split <= source.Length; split++)
             {

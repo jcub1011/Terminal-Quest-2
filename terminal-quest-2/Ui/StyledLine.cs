@@ -80,5 +80,36 @@ namespace TerminalQuest.Ui
             line.Append(text, role);
             return line;
         }
+
+        /// <summary>
+        /// Attaches a speaker entity ID to all unassociated speech spans starting from <paramref name="startIndex"/>.
+        /// </summary>
+        public void TagSpeechSpans(int startIndex, string entityId)
+        {
+            if (string.IsNullOrWhiteSpace(entityId))
+            {
+                return;
+            }
+
+            for (var i = Math.Max(0, startIndex); i < _spans.Count; i++)
+            {
+                if (_spans[i].Role == TextRole.Speech && _spans[i].EntityId is null)
+                {
+                    _spans[i] = _spans[i] with { EntityId = entityId };
+                }
+            }
+
+            for (var i = Math.Max(1, startIndex); i < _spans.Count; i++)
+            {
+                var prev = _spans[i - 1];
+                var curr = _spans[i];
+                if (prev.Role == curr.Role && string.Equals(prev.EntityId, curr.EntityId, StringComparison.Ordinal))
+                {
+                    _spans[i - 1] = prev with { Text = prev.Text + curr.Text };
+                    _spans.RemoveAt(i);
+                    i--;
+                }
+            }
+        }
     }
 }
