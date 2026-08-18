@@ -18,8 +18,7 @@ namespace TerminalQuest.Ui
     /// <summary>
     /// The settings screen: who narrates, model options, and application preferences.
     /// Built with Terminal.Gui's built-in <see cref="Tabs"/> for tabbed navigation,
-    /// submenus under the Engine tab for provider-specific settings, and
-    /// <see cref="ListView"/> for list selection with explicit cursor selection vs committed picking.
+    /// offering dedicated tabs for Engine selection, Claude Code, OpenAI API, Memory, and Editor settings.
     /// </summary>
     internal sealed class SettingsWindow : Window
     {
@@ -47,23 +46,20 @@ namespace TerminalQuest.Ui
 
         // Top-level tab views
         private readonly View _engineTabView;
+        private readonly View _claudeTabView;
+        private readonly View _openAiTabView;
         private readonly View _memoryTabView;
         private readonly View _editorTabView;
 
-        // Engine tab root views
-        private readonly View _providerMainView;
-        private readonly View _claudeSubmenuView;
-        private readonly View _openAiSubmenuView;
-        private AgentProvider? _currentSubmenu;
-
-        // Provider list controls
+        // Engine tab controls
         private readonly ListView _providerList;
+        private readonly Label _engineSummaryLabel;
 
-        // Claude submenu controls
+        // Claude tab controls
         private readonly ListView _claudeModelList;
         private readonly TextField _claudeCustomModel;
 
-        // OpenAI API submenu controls
+        // OpenAI API tab controls
         private readonly TextField _lmStudioBaseUrl;
         private readonly DropDownList _openAiPresetDropDown;
         private readonly TextField _lmStudioApiKey;
@@ -84,7 +80,7 @@ namespace TerminalQuest.Ui
         private readonly Button _openConfigFolderButton;
         private readonly Label _editorStatus;
 
-        // Action buttons
+        // Bottom action buttons
         private readonly Button _saveButton;
         private readonly Button _cancelButton;
         private readonly Button _defaultsButton;
@@ -112,12 +108,10 @@ namespace TerminalQuest.Ui
                 Y = 0,
                 Width = Dim.Fill(),
                 Height = Dim.Fill() - 3,
-                CanFocus = false,
+                CanFocus = true,
+                TabStop = TabBehavior.TabGroup,
             };
             _tabs.SetScheme(Theme.CreateScheme());
-
-            // Remove all key bindings from Tabs so arrow keys never navigate tabs
-            _tabs.KeyBindings.Clear();
 
             _statusLabel = new Label
             {
@@ -125,7 +119,7 @@ namespace TerminalQuest.Ui
                 Y = Pos.Bottom(_tabs),
                 Width = Dim.Fill() - 2,
                 Height = 1,
-                Text = "Right Arrow: Submenu | Up/Down: Navigate | Enter: Select Provider | Tab: Next Tab | Ctrl+S: Save | Esc: Cancel",
+                Text = "Left/Right: Switch Tabs | Down: Enter Tab | Tab: Next Field | Ctrl+S: Save | Esc: Cancel",
             };
             _statusLabel.SetScheme(Theme.CreateScheme());
 
@@ -134,26 +128,15 @@ namespace TerminalQuest.Ui
             // ==========================================
             _engineTabView = new View
             {
-                Title = "Engine",
+                Title = "_Engine",
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
             };
             _engineTabView.SetScheme(Theme.CreateScheme());
 
-            // 1a. Provider Main View (Engine home)
-            _providerMainView = new View
-            {
-                X = 0,
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill(),
-                Visible = true,
-            };
-            _providerMainView.SetScheme(Theme.CreateScheme());
-
             var providerLabel = new Label
             {
-                Text = "Select active narrative provider (Enter to select, Right Arrow to configure):",
+                Text = "Active Narrative Provider (Up/Down to navigate, Enter to select):",
                 X = 1,
                 Y = 1,
             };
@@ -191,7 +174,8 @@ namespace TerminalQuest.Ui
                 var selected = _providerList.SelectedItem ?? 0;
                 _draft.Provider = selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
                 _providerList.SetNeedsDraw();
-                _statusLabel.Text = $"Picked provider: {(_draft.Provider == AgentProvider.ClaudeCode ? "Claude Code" : "OpenAI API")}";
+                UpdateEngineSummary();
+                _statusLabel.Text = $"Active provider set to: {(_draft.Provider == AgentProvider.ClaudeCode ? "Claude Code" : "OpenAI API")}";
             };
 
             _providerList.ValueChanged += (_, _) =>
@@ -199,84 +183,42 @@ namespace TerminalQuest.Ui
                 _providerList.SetNeedsDraw();
             };
 
-            _providerList.KeyDown += (_, key) =>
-            {
-                if (key == Key.CursorUp)
-                {
-                    var current = _providerList.SelectedItem ?? 0;
-                    if (current > 0)
-                    {
-                        _providerList.SelectedItem = current - 1;
-                    }
-                    key.Handled = true;
-                }
-                else if (key == Key.CursorDown)
-                {
-                    var current = _providerList.SelectedItem ?? 0;
-                    var max = (_providerList.Source?.Count ?? 1) - 1;
-                    if (current < max)
-                    {
-                        _providerList.SelectedItem = current + 1;
-                    }
-                    key.Handled = true;
-                }
-                else if (key == Key.CursorRight)
-                {
-                    var selected = _providerList.SelectedItem ?? 0;
-                    EnterSubmenu(selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi);
-                    key.Handled = true;
-                }
-                else if (key == Key.CursorLeft)
-                {
-                    key.Handled = true;
-                }
-                else if (key == Key.Tab)
-                {
-                    SwitchToTab(_memoryTabView!);
-                    key.Handled = true;
-                }
-                else if (key == Key.Tab.WithShift)
-                {
-                    _defaultsButton?.SetFocus();
-                    key.Handled = true;
-                }
-            };
-
-            var providerDesc = new Label
+            _engineSummaryLabel = new Label
             {
                 X = 1,
                 Y = 7,
                 Width = Dim.Fill() - 2,
-                Text = "Claude Code requires the claude CLI to be authenticated on your PATH.\nOpenAI API connects over HTTP to Google AI Studio, OpenAI, Anthropic, LM Studio, Ollama, etc.\nPress Enter to select provider. Press Right Arrow (→) to enter submenu settings.",
+                Height = 2,
             };
-            providerDesc.SetScheme(Theme.CreateScheme());
+            _engineSummaryLabel.SetScheme(Theme.CreateScheme());
 
-            _providerMainView.Add(providerLabel, _providerList, providerDesc);
-
-            // 1b. Claude Code Submenu View
-            _claudeSubmenuView = new View
+            var engineDesc = new Label
             {
-                X = 0,
-                Y = 0,
+                X = 1,
+                Y = 10,
+                Width = Dim.Fill() - 2,
+                Text = "• Claude Code runs the 'claude' CLI locally on your PATH.\n• OpenAI API connects over HTTP to Google AI Studio, OpenAI, Anthropic, LM Studio, Ollama, etc.\n• Select the 'Claude Code' or 'OpenAI API' tabs above to configure each provider.",
+            };
+            engineDesc.SetScheme(Theme.CreateScheme());
+
+            _engineTabView.Add(providerLabel, _providerList, _engineSummaryLabel, engineDesc);
+
+            // ==========================================
+            // 2. CLAUDE CODE TAB
+            // ==========================================
+            _claudeTabView = new View
+            {
+                Title = "_Claude Code",
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
-                Visible = false,
             };
-            _claudeSubmenuView.SetScheme(Theme.CreateScheme());
-
-            var claudeHeader = new Label
-            {
-                Text = "← Back (Left Arrow / Esc) | Claude Code Settings",
-                X = 1,
-                Y = 0,
-            };
-            claudeHeader.SetScheme(Theme.CreateScheme());
+            _claudeTabView.SetScheme(Theme.CreateScheme());
 
             var claudeModelLabel = new Label
             {
-                Text = "Choose a preset Claude model (Up/Down to select, Enter to pick):",
+                Text = "Preset Claude Models (Select with Up/Down, press Enter to pick):",
                 X = 1,
-                Y = 2,
+                Y = 1,
             };
             claudeModelLabel.SetScheme(Theme.CreateScheme());
 
@@ -307,7 +249,7 @@ namespace TerminalQuest.Ui
             {
                 X = 1,
                 Y = 11,
-                Width = 45,
+                Width = 50,
                 Text = _draft.ClaudeModel,
             };
             _claudeCustomModel.SetScheme(Theme.CreateScheme());
@@ -321,6 +263,7 @@ namespace TerminalQuest.Ui
                     _claudeModelList.SelectedItem = idx;
                 }
                 _claudeModelList.SetNeedsDraw();
+                UpdateEngineSummary();
             };
 
             _claudeModelList.RowRender += (_, e) =>
@@ -347,106 +290,91 @@ namespace TerminalQuest.Ui
                     _draft.ClaudeModel = ClaudeModels.All[selected].Id;
                     _claudeCustomModel.Text = _draft.ClaudeModel;
                     _claudeModelList.SetNeedsDraw();
+                    UpdateEngineSummary();
                     _statusLabel.Text = $"Picked model: {ClaudeModels.All[selected].Name}";
                 }
             };
 
             _claudeModelList.ValueChanged += (_, _) => _claudeModelList.SetNeedsDraw();
 
-            _claudeModelList.KeyDown += (_, key) =>
+            var claudeNote = new Label
             {
-                if (key == Key.CursorUp)
-                {
-                    var current = _claudeModelList.SelectedItem ?? 0;
-                    if (current > 0)
-                    {
-                        _claudeModelList.SelectedItem = current - 1;
-                    }
-                    key.Handled = true;
-                }
-                else if (key == Key.CursorDown)
-                {
-                    var current = _claudeModelList.SelectedItem ?? 0;
-                    var max = ClaudeModels.All.Length - 1;
-                    if (current < max)
-                    {
-                        _claudeModelList.SelectedItem = current + 1;
-                    }
-                    key.Handled = true;
-                }
+                X = 1,
+                Y = 13,
+                Width = Dim.Fill() - 2,
+                Text = "Note: Claude Code requires the 'claude' CLI command to be installed and authenticated on your PATH.",
             };
+            claudeNote.SetScheme(Theme.CreateScheme());
 
-            _claudeSubmenuView.Add(claudeHeader, claudeModelLabel, _claudeModelList, customModelLabel, _claudeCustomModel);
+            _claudeTabView.Add(claudeModelLabel, _claudeModelList, customModelLabel, _claudeCustomModel, claudeNote);
 
-            // 1c. OpenAI API Submenu View
-            _openAiSubmenuView = new View
+            // ==========================================
+            // 3. OPENAI API TAB
+            // ==========================================
+            _openAiTabView = new View
             {
-                X = 0,
-                Y = 0,
+                Title = "_OpenAI API",
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
-                Visible = false,
             };
-            _openAiSubmenuView.SetScheme(Theme.CreateScheme());
+            _openAiTabView.SetScheme(Theme.CreateScheme());
 
-            var openAiHeader = new Label
-            {
-                Text = "← Back (Left Arrow / Esc) | OpenAI API Settings",
-                X = 1,
-                Y = 0,
-            };
-            openAiHeader.SetScheme(Theme.CreateScheme());
-
-            var urlLabel = new Label { Text = "Server Base URL:", X = 1, Y = 2 };
+            var urlLabel = new Label { Text = "Server Base URL (http:// or https://):", X = 1, Y = 1 };
             urlLabel.SetScheme(Theme.CreateScheme());
 
             _lmStudioBaseUrl = new TextField
             {
                 X = 1,
-                Y = 3,
+                Y = 2,
                 Width = 65,
                 Text = _draft.LmStudioBaseUrl,
             };
             _lmStudioBaseUrl.SetScheme(Theme.CreateScheme());
 
-            var presetDropdownLabel = new Label { Text = "Presets (select to apply URL):", X = 1, Y = 5 };
+            var presetDropdownLabel = new Label { Text = "Presets (choose to auto-populate endpoint URL):", X = 1, Y = 4 };
             presetDropdownLabel.SetScheme(Theme.CreateScheme());
 
             var presetDisplayList = PresetChoices.Select(p => p.Display).ToList();
             _openAiPresetDropDown = new DropDownList
             {
                 X = 1,
-                Y = 6,
+                Y = 5,
                 Width = 65,
                 ReadOnly = true,
                 Source = new ListWrapper<string>(new ObservableCollection<string>(presetDisplayList)),
             };
             _openAiPresetDropDown.SetScheme(Theme.CreateScheme());
 
-            var apiKeyLabel = new Label { Text = "API Key (optional depending on vendor configuration):", X = 1, Y = 8 };
+            var apiKeyLabel = new Label { Text = "API Key (optional depending on vendor configuration):", X = 1, Y = 7 };
             apiKeyLabel.SetScheme(Theme.CreateScheme());
 
             _lmStudioApiKey = new TextField
             {
                 X = 1,
-                Y = 9,
+                Y = 8,
                 Width = 65,
                 Text = _draft.LmStudioApiKey,
                 Secret = true,
             };
             _lmStudioApiKey.SetScheme(Theme.CreateScheme());
 
-            var modelLabel = new Label { Text = "Model Name / ID (or probe with button below):", X = 1, Y = 11 };
+            var modelLabel = new Label { Text = "Model Name / ID (or probe with button below):", X = 1, Y = 10 };
             modelLabel.SetScheme(Theme.CreateScheme());
 
             _lmStudioModel = new TextField
             {
                 X = 1,
-                Y = 12,
+                Y = 11,
                 Width = 65,
                 Text = _draft.LmStudioModel,
             };
             _lmStudioModel.SetScheme(Theme.CreateScheme());
+
+            _lmStudioModel.TextChanged += (_, _) =>
+            {
+                _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
+                UpdateEngineSummary();
+            };
 
             // Determine initial preset display
             var initialPreset = PresetChoices.FirstOrDefault(p => string.Equals(p.Name, _draft.OpenAiPreset, StringComparison.OrdinalIgnoreCase));
@@ -486,6 +414,7 @@ namespace TerminalQuest.Ui
                         _lmStudioModel.Text = matched.DefaultModel;
                     }
 
+                    UpdateEngineSummary();
                     _statusLabel.Text = $"Selected preset: {matched.Name}";
                 }
             };
@@ -510,12 +439,14 @@ namespace TerminalQuest.Ui
                 {
                     _isUpdatingPresetFromUrl = false;
                 }
+
+                UpdateEngineSummary();
             };
 
             _probeButton = new Button
             {
                 X = 1,
-                Y = 14,
+                Y = 13,
                 Text = "Probe Models",
             };
             _probeButton.SetScheme(Theme.CreateScheme());
@@ -523,7 +454,7 @@ namespace TerminalQuest.Ui
             _probeStatus = new Label
             {
                 X = Pos.Right(_probeButton) + 2,
-                Y = 14,
+                Y = 13,
                 Width = Dim.Fill() - 2,
                 Text = string.Empty,
             };
@@ -532,7 +463,7 @@ namespace TerminalQuest.Ui
             _lmStudioModelsList = new ListView
             {
                 X = 1,
-                Y = 16,
+                Y = 15,
                 Width = Dim.Fill() - 2,
                 Height = Dim.Fill(1),
                 Visible = false,
@@ -565,41 +496,18 @@ namespace TerminalQuest.Ui
                     _draft.LmStudioModel = modelName;
                     _probeStatus.Text = $"Picked: {modelName}";
                     _lmStudioModelsList.SetNeedsDraw();
+                    UpdateEngineSummary();
                 }
             };
 
             _lmStudioModelsList.ValueChanged += (_, _) => _lmStudioModelsList.SetNeedsDraw();
-
-            _lmStudioModelsList.KeyDown += (_, key) =>
-            {
-                if (key == Key.CursorUp)
-                {
-                    var current = _lmStudioModelsList.SelectedItem ?? 0;
-                    if (current > 0)
-                    {
-                        _lmStudioModelsList.SelectedItem = current - 1;
-                    }
-                    key.Handled = true;
-                }
-                else if (key == Key.CursorDown)
-                {
-                    var current = _lmStudioModelsList.SelectedItem ?? 0;
-                    var count = _lmStudioModelsList.Source?.Count ?? 0;
-                    if (count > 0 && current < count - 1)
-                    {
-                        _lmStudioModelsList.SelectedItem = current + 1;
-                    }
-                    key.Handled = true;
-                }
-            };
 
             _probeButton.Accepting += async (_, _) =>
             {
                 await ProbeLmStudioModelsAsync();
             };
 
-            _openAiSubmenuView.Add(
-                openAiHeader,
+            _openAiTabView.Add(
                 urlLabel,
                 _lmStudioBaseUrl,
                 presetDropdownLabel,
@@ -612,14 +520,12 @@ namespace TerminalQuest.Ui
                 _probeStatus,
                 _lmStudioModelsList);
 
-            _engineTabView.Add(_providerMainView, _claudeSubmenuView, _openAiSubmenuView);
-
             // ==========================================
-            // 2. MEMORY TAB
+            // 4. MEMORY TAB
             // ==========================================
             _memoryTabView = new View
             {
-                Title = "Memory",
+                Title = "_Memory",
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
             };
@@ -636,19 +542,6 @@ namespace TerminalQuest.Ui
                 Text = _draft.TranscriptRecallCharacters.ToString(),
             };
             _recallChars.SetScheme(Theme.CreateScheme());
-            _recallChars.KeyDown += (_, key) =>
-            {
-                if (key == Key.Tab)
-                {
-                    SwitchToTab(_editorTabView!);
-                    key.Handled = true;
-                }
-                else if (key == Key.Tab.WithShift)
-                {
-                    SwitchToTab(_engineTabView!);
-                    key.Handled = true;
-                }
-            };
 
             var recallDesc = new Label
             {
@@ -662,11 +555,11 @@ namespace TerminalQuest.Ui
             _memoryTabView.Add(recallLabel, _recallChars, recallDesc);
 
             // ==========================================
-            // 3. EDITOR TAB
+            // 5. EDITOR TAB
             // ==========================================
             _editorTabView = new View
             {
-                Title = "Editor",
+                Title = "E_ditor",
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
             };
@@ -679,7 +572,7 @@ namespace TerminalQuest.Ui
             {
                 X = 1,
                 Y = 2,
-                Width = 45,
+                Width = 50,
                 Text = _draft.EditorCommand,
             };
             _editorCommand.SetScheme(Theme.CreateScheme());
@@ -699,14 +592,6 @@ namespace TerminalQuest.Ui
                 Text = "Open Config Folder",
             };
             _openConfigFolderButton.SetScheme(Theme.CreateScheme());
-            _openConfigFolderButton.KeyDown += (_, key) =>
-            {
-                if (key == Key.Tab)
-                {
-                    _saveButton?.SetFocus();
-                    key.Handled = true;
-                }
-            };
 
             _editorStatus = new Label
             {
@@ -742,31 +627,13 @@ namespace TerminalQuest.Ui
 
             _editorTabView.Add(editorLabel, _editorCommand, _testEditorButton, _openConfigFolderButton, _editorStatus);
 
-            // Add top-level tabs: [Engine, Memory, Editor]
-            _tabs.Add(_engineTabView, _memoryTabView, _editorTabView);
+            // Add all top-level tabs: [Engine, Claude Code, OpenAI API, Memory, Editor]
+            _tabs.Add(_engineTabView, _claudeTabView, _openAiTabView, _memoryTabView, _editorTabView);
             _tabs.Value = _engineTabView;
 
-            // When switching tabs, automatically focus the active tab's primary control
             _tabs.ValueChanged += (_, e) =>
             {
-                if (e.NewValue == _engineTabView)
-                {
-                    ExitSubmenu();
-                    _providerList.SetFocus();
-                    _statusLabel.Text = "Right Arrow: Submenu | Up/Down: Navigate | Enter: Select Provider | Tab: Next Tab | Ctrl+S: Save | Esc: Cancel";
-                }
-                else if (e.NewValue == _memoryTabView)
-                {
-                    ExitSubmenu();
-                    _recallChars.SetFocus();
-                    _statusLabel.Text = "Tab: Next Tab | Shift+Tab: Prev Tab | Ctrl+S: Save | Esc: Cancel";
-                }
-                else if (e.NewValue == _editorTabView)
-                {
-                    ExitSubmenu();
-                    _editorCommand.SetFocus();
-                    _statusLabel.Text = "Tab: Next Field | Shift+Tab: Prev Field | Ctrl+S: Save | Esc: Cancel";
-                }
+                UpdateStatusForTab(e.NewValue);
             };
 
             // Bottom action buttons
@@ -796,32 +663,23 @@ namespace TerminalQuest.Ui
             };
             _defaultsButton.SetScheme(Theme.CreateScheme());
             _defaultsButton.Accepting += (_, _) => RestoreDefaults();
-            _defaultsButton.KeyDown += (_, key) =>
-            {
-                if (key == Key.Tab)
-                {
-                    SwitchToTab(_engineTabView!);
-                    key.Handled = true;
-                }
-                else if (key == Key.Tab.WithShift)
-                {
-                    _cancelButton?.SetFocus();
-                    key.Handled = true;
-                }
-            };
 
             Add(_tabs, _statusLabel, _saveButton, _cancelButton, _defaultsButton);
 
-            Initialized += (_, _) => _providerList.SetFocus();
+            UpdateEngineSummary();
         }
 
         public AppSettings? Chosen { get; private set; }
 
         public ExternalEditor? Editor { get; init; }
 
-        public AgentProvider? CurrentSubmenu => _currentSubmenu;
+        public Tabs TabsControl => _tabs;
 
         public View EngineTabView => _engineTabView;
+
+        public View ClaudeTabView => _claudeTabView;
+
+        public View OpenAiTabView => _openAiTabView;
 
         public View MemoryTabView => _memoryTabView;
 
@@ -835,70 +693,64 @@ namespace TerminalQuest.Ui
 
         public void SwitchToTab(View tabView)
         {
-            ExitSubmenu();
             _tabs.Value = tabView;
-            if (tabView == _engineTabView)
-            {
-                _providerList.SetFocus();
-                _statusLabel.Text = "Right Arrow: Submenu | Up/Down: Navigate | Enter: Select Provider | Tab: Next Tab | Ctrl+S: Save | Esc: Cancel";
-            }
-            else if (tabView == _memoryTabView)
-            {
-                _recallChars.SetFocus();
-                _statusLabel.Text = "Tab: Next Tab | Shift+Tab: Prev Tab | Ctrl+S: Save | Esc: Cancel";
-            }
-            else if (tabView == _editorTabView)
-            {
-                _editorCommand.SetFocus();
-                _statusLabel.Text = "Tab: Next Field | Shift+Tab: Prev Field | Ctrl+S: Save | Esc: Cancel";
-            }
+            tabView.SetFocus();
+            UpdateStatusForTab(tabView);
             SetNeedsDraw();
         }
 
-        public void EnterSubmenu(AgentProvider provider)
+        private void UpdateStatusForTab(View? tab)
         {
-            _currentSubmenu = provider;
-            _providerMainView.Visible = false;
-
-            if (provider == AgentProvider.ClaudeCode)
+            if (tab == _engineTabView)
             {
-                _claudeSubmenuView.Visible = true;
-                _openAiSubmenuView.Visible = false;
-                _claudeModelList.SetFocus();
-                _statusLabel.Text = "Left Arrow / Esc: Back to Engine | Up/Down: Navigate | Enter: Pick Model | Tab: Next Field | Ctrl+S: Save";
+                _statusLabel.Text = "Left/Right: Switch Tabs | Up/Down: Select Provider | Enter: Pick Provider | Ctrl+S: Save | Esc: Cancel";
+            }
+            else if (tab == _claudeTabView)
+            {
+                _statusLabel.Text = "Left/Right: Switch Tabs | Up/Down: Select Model | Enter: Pick Model | Tab: Next Field | Ctrl+S: Save | Esc: Cancel";
+            }
+            else if (tab == _openAiTabView)
+            {
+                _statusLabel.Text = "Left/Right: Switch Tabs | Tab: Next Field | Ctrl+S: Save | Esc: Cancel";
+            }
+            else if (tab == _memoryTabView)
+            {
+                _statusLabel.Text = "Left/Right: Switch Tabs | Tab: Next Field | Ctrl+S: Save | Esc: Cancel";
+            }
+            else if (tab == _editorTabView)
+            {
+                _statusLabel.Text = "Left/Right: Switch Tabs | Tab: Next Field | Ctrl+S: Save | Esc: Cancel";
             }
             else
             {
-                _claudeSubmenuView.Visible = false;
-                _openAiSubmenuView.Visible = true;
-                _lmStudioBaseUrl.SetFocus();
-                _statusLabel.Text = "Left Arrow / Esc: Back to Engine | Tab: Next Field | Ctrl+S: Save";
+                _statusLabel.Text = "Left/Right: Switch Tabs | Down: Enter Tab | Tab: Next Field | Ctrl+S: Save | Esc: Cancel";
             }
-
-            SetNeedsDraw();
         }
 
-        public void ExitSubmenu()
+        private void UpdateEngineSummary()
         {
-            _currentSubmenu = null;
-            _claudeSubmenuView.Visible = false;
-            _openAiSubmenuView.Visible = false;
-            _providerMainView.Visible = true;
-            _providerList.SetFocus();
-            _statusLabel.Text = "Right Arrow: Submenu | Up/Down: Navigate | Enter: Select Provider | Tab: Next Tab | Ctrl+S: Save | Esc: Cancel";
-            SetNeedsDraw();
+            var claudeDesc = string.IsNullOrEmpty(_draft.ClaudeModel)
+                ? "CLI Default"
+                : ClaudeModels.Describe(_draft.ClaudeModel);
+
+            var openAiDesc = string.IsNullOrEmpty(_draft.LmStudioModel)
+                ? $"{_draft.OpenAiPreset} (Default loaded model)"
+                : $"{_draft.OpenAiPreset} ({_draft.LmStudioModel})";
+
+            if (_draft.Provider == AgentProvider.ClaudeCode)
+            {
+                _engineSummaryLabel.Text = $"Current Configuration: Claude Code [{claudeDesc}]\nOpenAI API standby: [{openAiDesc}]";
+            }
+            else
+            {
+                _engineSummaryLabel.Text = $"Current Configuration: OpenAI API [{openAiDesc}]\nClaude Code standby: [{claudeDesc}]";
+            }
         }
 
         protected override bool OnKeyDown(Key key)
         {
             if (key == Key.Esc)
             {
-                if (_currentSubmenu != null)
-                {
-                    ExitSubmenu();
-                    return true;
-                }
-
                 CancelAndClose();
                 return true;
             }
@@ -907,29 +759,6 @@ namespace TerminalQuest.Ui
             {
                 SaveAndClose();
                 return true;
-            }
-
-            if (_currentSubmenu != null)
-            {
-                if (key == Key.CursorLeft)
-                {
-                    if (MostFocused is TextField tf && (tf.InsertionPoint > 0 || tf.SelectedLength > 0))
-                    {
-                        return base.OnKeyDown(key);
-                    }
-
-                    ExitSubmenu();
-                    return true;
-                }
-            }
-            else if (_tabs.Value == null || _tabs.Value == _engineTabView)
-            {
-                if (key == Key.CursorRight)
-                {
-                    var selected = _providerList.SelectedItem ?? 0;
-                    EnterSubmenu(selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi);
-                    return true;
-                }
             }
 
             return base.OnKeyDown(key);
@@ -1046,7 +875,9 @@ namespace TerminalQuest.Ui
             _recallChars.Text = defaults.TranscriptRecallCharacters.ToString();
             _editorCommand.Text = defaults.EditorCommand;
 
+            UpdateEngineSummary();
             _statusLabel.Text = "Restored all settings to defaults. Press Ctrl+S to save.";
+            SetNeedsDraw();
         }
 
         private void SaveAndClose()

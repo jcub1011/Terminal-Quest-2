@@ -175,49 +175,43 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_submenu_navigation_claude()
+        public void SettingsWindow_tab_navigation_claude()
         {
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
-            providerList.SelectedItem = 0; // Claude Code
+            // Switch to Claude Code tab
+            window.SwitchToTab(window.ClaudeTabView);
+            Assert.Equal(window.ClaudeTabView, window.ActiveTab);
 
-            // Press Right Arrow to enter Claude submenu
-            window.NewKeyDownEvent(Key.CursorRight);
-            Assert.Equal(AgentProvider.ClaudeCode, window.CurrentSubmenu);
-
-            // Verify Claude model list is present and visible
+            // Verify Claude model list is present
             var claudeList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == ClaudeModels.All.Length);
-            Assert.True(claudeList.Visible);
+            Assert.NotNull(claudeList);
 
-            // Press Left Arrow to exit submenu back to provider list
-            window.NewKeyDownEvent(Key.CursorLeft);
-            Assert.Null(window.CurrentSubmenu);
+            // Select Haiku (index 1)
+            claudeList.SelectedItem = 1;
+            claudeList.NewKeyDownEvent(Key.Enter);
 
-            // Re-enter and test Esc exit
-            window.NewKeyDownEvent(Key.CursorRight);
-            Assert.Equal(AgentProvider.ClaudeCode, window.CurrentSubmenu);
+            var customModelField = FindDescendants<TextField>(window).First(tf => tf.Text == ClaudeModels.All[1].Id);
+            Assert.Equal(ClaudeModels.All[1].Id, customModelField.Text);
 
-            window.NewKeyDownEvent(Key.Esc);
-            Assert.Null(window.CurrentSubmenu);
-            Assert.Null(window.Chosen);
+            // Save settings via Ctrl+S
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(ClaudeModels.All[1].Id, window.Chosen.ClaudeModel);
         }
 
         [Fact]
-        public void SettingsWindow_submenu_navigation_openai_and_presets()
+        public void SettingsWindow_tab_navigation_openai_and_presets()
         {
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
 
-            var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
-            providerList.SelectedItem = 1; // OpenAI API
-
-            // Press Right Arrow to enter OpenAI API submenu
-            window.NewKeyDownEvent(Key.CursorRight);
-            Assert.Equal(AgentProvider.OpenAiApi, window.CurrentSubmenu);
+            // Switch to OpenAI API tab
+            window.SwitchToTab(window.OpenAiTabView);
+            Assert.Equal(window.OpenAiTabView, window.ActiveTab);
 
             // Find DropDownList and URL text field
             var dropDown = FindDescendants<DropDownList>(window).Single();
@@ -231,13 +225,9 @@ namespace TerminalQuest.Tests.Ui
             urlField.Text = "http://my-custom-host:8080/v1";
             Assert.Contains("Custom", dropDown.Text);
 
-            // Find API key label and verify updated note
+            // Find API key label and verify note
             var apiKeyLabel = FindDescendants<Label>(window).First(l => l.Text.Contains("API Key"));
             Assert.Equal("API Key (optional depending on vendor configuration):", apiKeyLabel.Text);
-
-            // Press Esc to exit submenu
-            window.NewKeyDownEvent(Key.Esc);
-            Assert.Null(window.CurrentSubmenu);
         }
 
         [Fact]
@@ -247,7 +237,7 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
 
-            window.EnterSubmenu(AgentProvider.OpenAiApi);
+            window.SwitchToTab(window.OpenAiTabView);
 
             // Verify probed models list has reactive Dim.Fill height
             var listViews = FindDescendants<ListView>(window).ToList();
@@ -262,18 +252,15 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_tabs_do_not_intercept_arrow_keys_and_provider_picking_colors()
+        public void SettingsWindow_tabs_structure_and_provider_picking()
         {
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
             var tabs = FindDescendants<Tabs>(window).Single();
-            var boundKeys = tabs.KeyBindings.GetBindings().Select(b => b.Key).ToHashSet();
-            Assert.DoesNotContain(Key.CursorLeft, boundKeys);
-            Assert.DoesNotContain(Key.CursorRight, boundKeys);
-            Assert.DoesNotContain(Key.CursorUp, boundKeys);
-            Assert.DoesNotContain(Key.CursorDown, boundKeys);
+            Assert.True(tabs.CanFocus);
+            Assert.Equal(5, tabs.TabCollection.Count());
 
             var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
             providerList.SelectedItem = 1;
@@ -283,44 +270,27 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_tab_key_navigates_tabs_and_arrow_keys_do_not()
+        public void SettingsWindow_tab_switching_via_value_and_esc_cancel()
         {
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
-            var tabs = FindDescendants<Tabs>(window).Single();
-            Assert.False(tabs.CanFocus);
-            var boundKeys = tabs.KeyBindings.GetBindings().Select(b => b.Key).ToHashSet();
-            Assert.DoesNotContain(Key.CursorLeft, boundKeys);
-            Assert.DoesNotContain(Key.CursorRight, boundKeys);
-            Assert.DoesNotContain(Key.CursorUp, boundKeys);
-            Assert.DoesNotContain(Key.CursorDown, boundKeys);
-
-            var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
-            providerList.SelectedItem = 0;
-
-            // Arrow keys inside providerList stay inside Engine tab
-            providerList.NewKeyDownEvent(Key.CursorUp);
-            Assert.Equal(window.EngineTabView, window.ActiveTab);
-            providerList.NewKeyDownEvent(Key.CursorDown);
-            Assert.Equal(window.EngineTabView, window.ActiveTab);
-            providerList.NewKeyDownEvent(Key.CursorLeft);
             Assert.Equal(window.EngineTabView, window.ActiveTab);
 
-            // Tab key switches from Engine tab to Memory tab
-            providerList.NewKeyDownEvent(Key.Tab);
+            window.SwitchToTab(window.MemoryTabView);
             Assert.Equal(window.MemoryTabView, window.ActiveTab);
 
-            // Tab key from Memory tab switches to Editor tab
-            var recallChars = FindDescendants<TextField>(window).First(tf => tf.Text == settings.TranscriptRecallCharacters.ToString());
-            recallChars.NewKeyDownEvent(Key.Tab);
+            window.SwitchToTab(window.EditorTabView);
             Assert.Equal(window.EditorTabView, window.ActiveTab);
 
-            // Shift+Tab from Memory tab switches back to Engine tab
-            window.SwitchToTab(window.MemoryTabView);
-            recallChars.NewKeyDownEvent(Key.Tab.WithShift);
-            Assert.Equal(window.EngineTabView, window.ActiveTab);
+            // Press Esc to cancel without saving
+            var cancelledFired = false;
+            window.Cancelled += () => cancelledFired = true;
+            window.NewKeyDownEvent(Key.Esc);
+
+            Assert.True(cancelledFired);
+            Assert.Null(window.Chosen);
         }
     }
 }
