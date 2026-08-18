@@ -16,6 +16,9 @@ namespace TerminalQuest.Ui
             new("character", "[name]", "who you have met, and what happened with them"),
             new("characters", "[name]", "who you have met, and what happened with them", IsAlias: true),
             new("who", "[name]", "who you have met, and what happened with them", IsAlias: true),
+            new("player", "<name|id>", "transfer the player tag to another character"),
+            new("switch", "<name|id>", "transfer the player tag to another character", IsAlias: true),
+            new("play", "<name|id>", "transfer the player tag to another character", IsAlias: true),
             new("location", "[name]", "where you have been, and what happened there"),
             new("locations", "[name]", "where you have been, and what happened there", IsAlias: true),
             new("where", "[name]", "where you have been, and what happened there", IsAlias: true),
@@ -133,6 +136,29 @@ namespace TerminalQuest.Ui
                                     ? "(you)"
                                     : (c.Description.Length > 0 ? c.Description : $"Health {c.Health}/{c.MaxHealth}"),
                                 Role: TextRole.Normal))
+                            .ToArray();
+                    }
+                    catch (SaveException)
+                    {
+                        return [];
+                    }
+
+                case "player":
+                case "switch":
+                case "play":
+                    if (store is null) return [];
+                    try
+                    {
+                        var chars = store.ReadCharacters().Characters;
+                        return chars
+                            .Where(c => c.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase) || c.Id.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
+                            .Select(c => new SuggestionItem(
+                                InsertText: $"/{commandName} {c.Name}",
+                                DisplayText: $"{c.Name} ({c.Id})",
+                                Summary: c.Kind == CharacterKind.Player
+                                    ? "(current player)"
+                                    : (c.Description.Length > 0 ? c.Description : $"Health {c.Health}/{c.MaxHealth}"),
+                                Role: TextRole.Character))
                             .ToArray();
                     }
                     catch (SaveException)
@@ -316,6 +342,10 @@ namespace TerminalQuest.Ui
                     case "who":
                         Characters(lines, store, argument);
                         break;
+                    case "player":
+                    case "switch":
+                    case "play":
+                        return Player(lines, store, argument);
                     case "location":
                     case "locations":
                     case "where":
@@ -596,6 +626,53 @@ namespace TerminalQuest.Ui
                     lines.Add(StyledLine.FromText($"        {ev.Detail}", TextRole.System));
                 }
             }
+        }
+
+        private static PlayerCommandResult Player(List<StyledLine> lines, SaveStore store, string argument)
+        {
+            if (string.IsNullOrWhiteSpace(argument))
+            {
+                var characters = store.ReadCharacters();
+                var currentPlayer = SaveStore.Player(characters);
+                if (currentPlayer is not null)
+                {
+                    lines.Add(StyledLine.FromText($"Currently playing as {currentPlayer.Name}.", TextRole.System));
+                }
+
+                lines.Add(StyledLine.FromText("Name of the character to become the player: /player <name>.", TextRole.System));
+                return new PlayerCommandResult { Lines = lines };
+            }
+
+            var query = argument.Trim();
+            var file = store.ReadCharacters();
+            var target = SaveStore.FindCharacterById(file, query) ?? SaveStore.FindCharacter(file, query);
+
+            if (target is null)
+            {
+                lines.Add(StyledLine.FromText($"You know nobody called '{query}'.", TextRole.Danger));
+                return new PlayerCommandResult { Lines = lines };
+            }
+
+            var previousPlayer = SaveStore.Player(file);
+            if (previousPlayer is not null && string.Equals(previousPlayer.Id, target.Id, StringComparison.Ordinal))
+            {
+                lines.Add(StyledLine.FromText($"You are already playing as {target.Name}.", TextRole.System));
+                return new PlayerCommandResult { Lines = lines };
+            }
+
+            store.SetPlayer(target.Id);
+
+            var line = new StyledLine();
+            line.Append("Transferred player tag to ", TextRole.System);
+            line.Append(target.Name, TextRole.Character);
+            line.Append(".", TextRole.System);
+            lines.Add(line);
+
+            return new PlayerCommandResult
+            {
+                Lines = lines,
+                RefreshState = true,
+            };
         }
 
         private static void Locations(List<StyledLine> lines, SaveStore store, string argument)

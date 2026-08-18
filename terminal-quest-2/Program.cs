@@ -611,6 +611,11 @@ namespace TerminalQuest
                     EntityDetailsDialog.Show(app, store, inspectId);
                 }
 
+                if (result.RefreshState)
+                {
+                    RefreshStatus();
+                }
+
                 if (result.EditSystemPrompt)
                 {
                     EditSystemPrompt();

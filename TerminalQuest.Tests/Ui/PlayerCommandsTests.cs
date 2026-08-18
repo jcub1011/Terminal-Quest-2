@@ -659,5 +659,109 @@ namespace TerminalQuest.Tests.Ui
             Assert.Contains(suggestions, s => s.DisplayText.StartsWith("The Ford") && s.Role == TextRole.Place);
             Assert.Contains(suggestions, s => s.DisplayText.Contains("longsword") && s.Role == TextRole.Item);
         }
+
+        [Fact]
+        public void Player_command_transfers_the_tag_and_sets_RefreshState()
+        {
+            using var save = Seeded();
+            var file = save.Store.ReadCharacters();
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc });
+            save.Store.WriteCharacters(file);
+
+            var result = PlayerCommands.Execute("/player Bess", save.Store);
+
+            Assert.True(result.RefreshState);
+            Assert.Contains("Transferred player tag to Bess", TextOf(result), StringComparison.Ordinal);
+
+            var updated = save.Store.ReadCharacters();
+            Assert.Equal("Bess", SaveStore.PlayerName(updated));
+            Assert.Equal(CharacterKind.Npc, SaveStore.FindCharacter(updated, "Rowan")!.Kind);
+            Assert.Equal(CharacterKind.Player, SaveStore.FindCharacter(updated, "Bess")!.Kind);
+        }
+
+        [Fact]
+        public void Player_command_accepts_character_id()
+        {
+            using var save = Seeded();
+            var file = save.Store.ReadCharacters();
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc });
+            save.Store.WriteCharacters(file);
+
+            var result = PlayerCommands.Execute("/player chr_2", save.Store);
+
+            Assert.True(result.RefreshState);
+            Assert.Contains("Transferred player tag to Bess", TextOf(result), StringComparison.Ordinal);
+            Assert.Equal("Bess", SaveStore.PlayerName(save.Store.ReadCharacters()));
+        }
+
+        [Theory]
+        [InlineData("/switch")]
+        [InlineData("/play")]
+        public void Player_command_aliases_work_identically(string command)
+        {
+            using var save = Seeded();
+            var file = save.Store.ReadCharacters();
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc });
+            save.Store.WriteCharacters(file);
+
+            var result = PlayerCommands.Execute($"{command} Bess", save.Store);
+
+            Assert.True(result.RefreshState);
+            Assert.Contains("Transferred player tag to Bess", TextOf(result), StringComparison.Ordinal);
+            Assert.Equal("Bess", SaveStore.PlayerName(save.Store.ReadCharacters()));
+        }
+
+        [Fact]
+        public void Player_command_without_arguments_shows_current_player_and_instructions()
+        {
+            using var save = Seeded();
+
+            var result = PlayerCommands.Execute("/player", save.Store);
+
+            Assert.False(result.RefreshState);
+            Assert.Contains("Currently playing as Rowan", TextOf(result), StringComparison.Ordinal);
+            Assert.Contains("Name of the character to become the player", TextOf(result), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Player_command_on_current_player_reports_already_playing()
+        {
+            using var save = Seeded();
+
+            var result = PlayerCommands.Execute("/player Rowan", save.Store);
+
+            Assert.False(result.RefreshState);
+            Assert.Contains("already playing as Rowan", TextOf(result), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Player_command_reports_danger_for_unknown_character()
+        {
+            using var save = Seeded();
+
+            var result = PlayerCommands.Execute("/player Nonexistent", save.Store);
+
+            Assert.False(result.RefreshState);
+            Assert.Contains("know nobody called", TextOf(result), StringComparison.Ordinal);
+            Assert.Equal("Rowan", SaveStore.PlayerName(save.Store.ReadCharacters()));
+        }
+
+        [Fact]
+        public void Player_command_suggests_characters_with_current_player_status()
+        {
+            using var save = Seeded();
+            var file = save.Store.ReadCharacters();
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc, Health = 10, MaxHealth = 10 });
+            save.Store.WriteCharacters(file);
+
+            var (suggestions, isChoosing) = PlayerCommands.GetSuggestions("/player ", save.Store);
+
+            Assert.True(isChoosing);
+            var rowanSuggestion = Assert.Single(suggestions, s => s.DisplayText.StartsWith("Rowan"));
+            Assert.Equal("(current player)", rowanSuggestion.Summary);
+
+            var bessSuggestion = Assert.Single(suggestions, s => s.DisplayText.StartsWith("Bess"));
+            Assert.Contains("10/10", bessSuggestion.Summary);
+        }
     }
 }

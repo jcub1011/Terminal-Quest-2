@@ -637,5 +637,84 @@ namespace TerminalQuest.Tests.Mcp
             Assert.False(outcome.IsError);
             Assert.False(string.IsNullOrWhiteSpace(outcome.Text));
         }
+
+        // ---- Transferring player -------------------------------------------------------------
+
+        [Fact]
+        public void Transfer_player_transfers_control_by_id()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+
+            var outcome = Call(save.Store, "transfer_player", $$"""{"character":"{{bess.Id}}"}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Contains("Transferred player control", outcome.Text, StringComparison.Ordinal);
+            Assert.Contains("Bess", outcome.Text, StringComparison.Ordinal);
+
+            var chars = save.Store.ReadCharacters();
+            Assert.Equal("Bess", SaveStore.PlayerName(chars));
+            Assert.Equal(CharacterKind.Npc, SaveStore.FindCharacter(chars, "Rowan")!.Kind);
+            Assert.Equal(CharacterKind.Player, SaveStore.FindCharacter(chars, "Bess")!.Kind);
+        }
+
+        [Fact]
+        public void Transfer_player_transfers_control_by_name()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+
+            var outcome = Call(save.Store, "transfer_player", """{"character":"Bess"}""");
+
+            Assert.False(outcome.IsError);
+            var chars = save.Store.ReadCharacters();
+            Assert.Equal("Bess", SaveStore.PlayerName(chars));
+        }
+
+        [Fact]
+        public void Transfer_player_is_idempotent_when_already_player()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(save.Store, "transfer_player", """{"character":"Rowan"}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Contains("already the player", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Transfer_player_fails_with_missing_character()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(save.Store, "transfer_player", "{}");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("needs a character name or ID", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Transfer_player_fails_with_unknown_character()
+        {
+            using var save = Seeded();
+
+            var outcome = Call(save.Store, "transfer_player", """{"character":"Nonexistent"}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("no character matching", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Set_character_with_kind_player_makes_other_characters_npcs()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess","kind":"player"}""");
+
+            var chars = save.Store.ReadCharacters();
+            Assert.Equal("Bess", SaveStore.PlayerName(chars));
+            Assert.Equal(CharacterKind.Npc, SaveStore.FindCharacter(chars, "Rowan")!.Kind);
+            Assert.Equal(CharacterKind.Player, SaveStore.FindCharacter(chars, "Bess")!.Kind);
+        }
     }
 }

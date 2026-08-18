@@ -189,5 +189,65 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(900, state.LastDurationMs);
             Assert.True(state.IsBusy);
         }
+
+        [Fact]
+        public void A_refresh_updates_to_new_player_when_tag_is_transferred()
+        {
+            using var save = Seeded(startLocation: "The Ford");
+            var state = new GameState();
+            state.RefreshFrom(save.Store);
+
+            Assert.Equal("Rowan", state.PlayerName);
+            Assert.Equal("The Ford", state.Location);
+
+            // Add new character Bess at The Mill with distinct stats, inventory, and purse
+            var charFile = save.Store.ReadCharacters();
+            var bess = new Character
+            {
+                Id = "chr_2",
+                Name = "Bess",
+                Kind = CharacterKind.Npc,
+                Health = 15,
+                MaxHealth = 18,
+            };
+            CharacterAttributes.Seed(bess, null);
+            CharacterAttributes.Set(bess, "Strength", 16);
+            charFile.Characters.Add(bess);
+            save.Store.WriteCharacters(charFile);
+
+            var locFile = save.Store.ReadLocations();
+            var mill = new Location { Id = "loc_2", Name = "The Mill" };
+            mill.CharacterIds.Add(bess.Id);
+            locFile.Locations.Add(mill);
+            save.Store.WriteLocations(locFile);
+
+            var itemFile = save.Store.ReadItems();
+            var herb = new ItemDefinition { Id = "itm_10", Name = "Healing Herb" };
+            itemFile.Items.Add(herb);
+            save.Store.WriteItems(itemFile);
+
+            var invFile = save.Store.ReadInventory();
+            var bessInv = invFile.GetOrCreate(bess.Id);
+            bessInv.Money = 75;
+            bessInv.Items.Add(new ItemStack { ItemId = herb.Id, Quantity = 3 });
+            save.Store.WriteInventory(invFile);
+
+            // Transfer player tag to Bess
+            save.Store.SetPlayer(bess.Id);
+
+            // Refresh state
+            state.RefreshFrom(save.Store);
+
+            Assert.Equal("Bess", state.PlayerName);
+            Assert.Equal("The Mill", state.Location);
+            Assert.Equal(15, state.Health);
+            Assert.Equal(18, state.MaxHealth);
+            Assert.Equal(75, state.Money);
+            Assert.Equal(16, state.Attributes.Single(a => a.Label == "STR").Score);
+            var itemEntry = Assert.Single(state.Inventory);
+            Assert.Equal("Healing Herb", itemEntry.Name);
+            Assert.Equal(3, itemEntry.Quantity);
+            Assert.Equal("itm_10", itemEntry.Id);
+        }
     }
 }

@@ -26,5 +26,10 @@ namespace TerminalQuest.Ui
         /// If set, requests opening the Entity Details modal for the specified entity ID.
         /// </summary>
         public string? InspectEntityId { get; init; }
+
+        /// <summary>
+        /// Whether the command modified save state and requires refreshing GameState and UI status views.
+        /// </summary>
+        public bool RefreshState { get; init; }
     }
 }

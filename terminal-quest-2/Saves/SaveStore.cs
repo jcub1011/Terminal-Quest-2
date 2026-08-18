@@ -200,6 +200,28 @@ namespace TerminalQuest.Saves
             return true;
         }
 
+        public bool SetPlayer(string characterIdOrName)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(characterIdOrName);
+
+            var file = ReadCharacters();
+            var target = FindCharacterById(file, characterIdOrName) ?? FindCharacter(file, characterIdOrName);
+            if (target is null)
+            {
+                return false;
+            }
+
+            foreach (var character in file.Characters)
+            {
+                character.Kind = string.Equals(character.Id, target.Id, StringComparison.Ordinal)
+                    ? CharacterKind.Player
+                    : CharacterKind.Npc;
+            }
+
+            WriteCharacters(file);
+            return true;
+        }
+
         public static int NextId<T>(List<T> items, Func<T, int> id) =>
             items.Count == 0 ? 1 : items.Max(id) + 1;
 

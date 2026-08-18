@@ -206,6 +206,18 @@ namespace TerminalQuest.Mcp
                 """,
                 Role: ToolRole.Narrator),
 
+            new("transfer_player",
+                "Transfer the player tag (active player control) to another character by name or entity ID. "
+              + "The previous player becomes an NPC, and the new character becomes the player. "
+              + "Updates which character the player controls, their vitals, and their inventory.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "character":{"type":"string","description":"The entity ID (e.g. chr_2) or name of the character to become the player."}},
+                 "required":["character"]}
+                """,
+                Role: ToolRole.Narrator),
+
             new("modify_money",
                 "Give or take coin. Positive amount adds coin; negative amount spends/takes coin. "
               + "Refused if the character cannot afford it. Defaults to player if character is omitted.",
@@ -349,6 +361,8 @@ namespace TerminalQuest.Mcp
             "move_character" => MoveCharacter(store, arguments),
             "modify_item" => ModifyItem(store, arguments),
             "transfer_item" => TransferItem(store, arguments),
+            "transfer_player" => TransferPlayer(store, arguments),
+            "set_player" => TransferPlayer(store, arguments),
             "modify_money" => ModifyMoney(store, arguments),
             "record_event" => RecordEvent(store, arguments),
             "recall" => Recall(store, arguments),
@@ -598,6 +612,18 @@ namespace TerminalQuest.Mcp
                 {
                     return ToolOutcome.Fail($"'{kind}' is not a valid kind. Use 'player' or 'npc'.");
                 }
+
+                if (parsed == CharacterKind.Player)
+                {
+                    foreach (var other in file.Characters)
+                    {
+                        if (!ReferenceEquals(other, character) && other.Kind == CharacterKind.Player)
+                        {
+                            other.Kind = CharacterKind.Npc;
+                        }
+                    }
+                }
+
                 character.Kind = parsed;
             }
 
@@ -1150,6 +1176,47 @@ namespace TerminalQuest.Mcp
             store.WriteInventory(inventoryFile);
             return ToolOutcome.Ok(
                 $"Transferred {QuestRender.Item(itemDef, quantity).Trim()} from {fromChar.Name} ({fromChar.Id}) to {toChar.Name} ({toChar.Id}).");
+        }
+
+        private static ToolOutcome TransferPlayer(SaveStore store, JsonElement arguments)
+        {
+            var target = Text(arguments, "character")
+                ?? Text(arguments, "name")
+                ?? Text(arguments, "character_id")
+                ?? Text(arguments, "id")
+                ?? Text(arguments, "target");
+
+            if (target is not { Length: > 0 })
+            {
+                return ToolOutcome.Fail("transfer_player needs a character name or ID.");
+            }
+
+            var file = store.ReadCharacters();
+            var targetChar = SaveStore.FindCharacterById(file, target) ?? SaveStore.FindCharacter(file, target);
+
+            if (targetChar is null)
+            {
+                return ToolOutcome.Fail($"There is no character matching '{target}'.");
+            }
+
+            var previousPlayer = SaveStore.Player(file);
+
+            if (previousPlayer is not null && string.Equals(previousPlayer.Id, targetChar.Id, StringComparison.Ordinal))
+            {
+                return ToolOutcome.Ok($"{targetChar.Name} ({targetChar.Id}) is already the player.");
+            }
+
+            foreach (var character in file.Characters)
+            {
+                character.Kind = string.Equals(character.Id, targetChar.Id, StringComparison.Ordinal)
+                    ? CharacterKind.Player
+                    : CharacterKind.Npc;
+            }
+
+            store.WriteCharacters(file);
+
+            var prevDesc = previousPlayer is not null ? $"{previousPlayer.Name} ({previousPlayer.Id})" : "none";
+            return ToolOutcome.Ok($"Transferred player control from {prevDesc} to {targetChar.Name} ({targetChar.Id}).");
         }
 
         private static ToolOutcome ModifyMoney(SaveStore store, JsonElement arguments)

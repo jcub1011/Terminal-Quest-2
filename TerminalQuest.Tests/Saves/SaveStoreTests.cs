@@ -500,5 +500,51 @@ namespace TerminalQuest.Tests.Saves
             Assert.Contains("Rowan", name, StringComparison.Ordinal);
             Assert.Empty(save.TempFiles);
         }
+
+        [Fact]
+        public void Set_player_transfers_the_tag_and_makes_all_others_npcs()
+        {
+            using var save = new TempSave();
+            var file = new CharacterFile();
+            file.Characters.Add(new Character { Id = "chr_1", Name = "Rowan", Kind = CharacterKind.Player });
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc });
+            save.Store.WriteCharacters(file);
+
+            var changed = save.Store.SetPlayer("chr_2");
+
+            Assert.True(changed);
+            var updated = save.Store.ReadCharacters();
+            Assert.Equal(CharacterKind.Npc, updated.Characters.Single(c => c.Id == "chr_1").Kind);
+            Assert.Equal(CharacterKind.Player, updated.Characters.Single(c => c.Id == "chr_2").Kind);
+            Assert.Equal("Bess", SaveStore.PlayerName(updated));
+        }
+
+        [Fact]
+        public void Set_player_by_name_is_case_insensitive()
+        {
+            using var save = new TempSave();
+            var file = new CharacterFile();
+            file.Characters.Add(new Character { Id = "chr_1", Name = "Rowan", Kind = CharacterKind.Player });
+            file.Characters.Add(new Character { Id = "chr_2", Name = "Bess", Kind = CharacterKind.Npc });
+            save.Store.WriteCharacters(file);
+
+            var changed = save.Store.SetPlayer("bess");
+
+            Assert.True(changed);
+            var updated = save.Store.ReadCharacters();
+            Assert.Equal("Bess", SaveStore.PlayerName(updated));
+        }
+
+        [Fact]
+        public void Set_player_returns_false_for_unknown_character()
+        {
+            using var save = new TempSave();
+            var file = new CharacterFile();
+            file.Characters.Add(new Character { Id = "chr_1", Name = "Rowan", Kind = CharacterKind.Player });
+            save.Store.WriteCharacters(file);
+
+            Assert.False(save.Store.SetPlayer("Nobody"));
+            Assert.Equal("Rowan", SaveStore.PlayerName(save.Store.ReadCharacters()));
+        }
     }
 }
