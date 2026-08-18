@@ -133,5 +133,49 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal("Entity: chr_999", title);
             Assert.Contains("No entity found on record", content, StringComparison.Ordinal);
         }
+
+        [Fact]
+        public void CalculateDialogDimensions_respects_minimum_and_maximum_bounds()
+        {
+            // Short content should respect the minimum height of 18
+            var (widthShort, heightShort) = EntityDetailsDialog.CalculateDialogDimensions("A short line.");
+            Assert.Equal(18, heightShort);
+            Assert.Equal(56, widthShort);
+
+            // Tall content should expand up to 36 rows
+            var tallContent = string.Join("\n", Enumerable.Range(1, 50).Select(i => $"Line {i}"));
+            var (widthTall, heightTall) = EntityDetailsDialog.CalculateDialogDimensions(tallContent);
+            Assert.Equal(36, heightTall);
+
+            // Content with 20 lines -> 20 + 4 = 24 rows
+            var mediumContent = string.Join("\n", Enumerable.Range(1, 20).Select(i => $"Line {i}"));
+            var (_, heightMedium) = EntityDetailsDialog.CalculateDialogDimensions(mediumContent);
+            Assert.Equal(24, heightMedium);
+
+            // Constrained terminal rows/cols clamps safely
+            var (widthConstrained, heightConstrained) = EntityDetailsDialog.CalculateDialogDimensions(tallContent, terminalRows: 24, terminalCols: 50);
+            Assert.Equal(22, heightConstrained);
+            Assert.Equal(46, widthConstrained);
+        }
+
+        [Fact]
+        public void CreateDialog_configures_textView_with_scrollbars_and_close_button()
+        {
+            var dialog = EntityDetailsDialog.CreateDialog(null, "Test Title", "Sample details text.");
+
+            Assert.Equal("Test Title", dialog.Title);
+            Assert.NotNull(dialog.Buttons);
+            Assert.Single(dialog.Buttons);
+            Assert.Equal("Close", dialog.Buttons[0].Text);
+
+#pragma warning disable CS0618
+            var textView = dialog.SubViews.OfType<Terminal.Gui.Views.TextView>().FirstOrDefault();
+#pragma warning restore CS0618
+            Assert.NotNull(textView);
+            Assert.True(textView.ReadOnly);
+            Assert.True(textView.WordWrap);
+            Assert.True(textView.ScrollBars);
+            Assert.Equal("Sample details text.", textView.Text);
+        }
     }
 }

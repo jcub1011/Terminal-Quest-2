@@ -22,11 +22,32 @@ namespace TerminalQuest.Ui
             }
 
             var (title, content) = FormatEntityDetails(store, entityId.Trim());
+            var dialog = CreateDialog(app, title, content);
 
+            app.Run(dialog);
+        }
+
+        internal static (int Width, int Height) CalculateDialogDimensions(string content, int? terminalRows = null, int? terminalCols = null)
+        {
             var lines = content.Split('\n');
-            var dialogHeight = Math.Clamp(lines.Length + 6, 12, 24);
             var maxLineWidth = lines.Length > 0 ? lines.Max(l => l.Length) : 40;
-            var dialogWidth = Math.Clamp(maxLineWidth + 6, 50, 76);
+
+            var maxAllowedHeight = Math.Max(10, (terminalRows ?? 40) - 2);
+            var minHeight = Math.Min(18, maxAllowedHeight);
+            var maxHeight = Math.Min(36, maxAllowedHeight);
+            var height = Math.Clamp(lines.Length + 4, minHeight, maxHeight);
+
+            var maxAllowedWidth = Math.Max(40, (terminalCols ?? 100) - 4);
+            var minWidth = Math.Min(56, maxAllowedWidth);
+            var maxWidth = Math.Min(80, maxAllowedWidth);
+            var width = Math.Clamp(maxLineWidth + 6, minWidth, maxWidth);
+
+            return (width, height);
+        }
+
+        internal static Dialog CreateDialog(IApplication? app, string title, string content)
+        {
+            var (dialogWidth, dialogHeight) = CalculateDialogDimensions(content, app?.Driver?.Rows, app?.Driver?.Cols);
 
             var dialog = new Dialog
             {
@@ -42,11 +63,12 @@ namespace TerminalQuest.Ui
             {
                 X = 1,
                 Y = 0,
-                Width = Dim.Fill() - 2,
-                Height = Dim.Fill() - 2,
+                Width = Dim.Fill(1),
+                Height = Dim.Fill(1),
                 Text = content,
                 ReadOnly = true,
                 WordWrap = true,
+                ScrollBars = true,
             };
 #pragma warning restore CS0618
             textView.SetScheme(Theme.CreateScheme());
@@ -57,11 +79,14 @@ namespace TerminalQuest.Ui
                 IsDefault = true,
             };
             closeButton.SetScheme(Theme.CreateScheme());
-            closeButton.Accepting += (_, _) => app.RequestStop(dialog);
+            if (app is not null)
+            {
+                closeButton.Accepting += (_, _) => app.RequestStop(dialog);
+            }
 
             dialog.KeyDown += (_, key) =>
             {
-                if (key == Key.Esc)
+                if (key == Key.Esc && app is not null)
                 {
                     app.RequestStop(dialog);
                 }
@@ -72,7 +97,7 @@ namespace TerminalQuest.Ui
 
             dialog.Initialized += (_, _) => closeButton.SetFocus();
 
-            app.Run(dialog);
+            return dialog;
         }
 
         public static (string Title, string Content) FormatEntityDetails(SaveStore store, string entityId)
