@@ -432,6 +432,180 @@ namespace TerminalQuest.Tests.Mcp
             Assert.Equal(start, save.Store.ReadInventory().Find(rowan.Id)!.Money);
         }
 
+        [Fact]
+        public void Transferring_items_between_characters_moves_quantity()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "modify_item", """{"name":"arrows","quantity":10}""");
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "arrows")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","from_character_id":"{{rowan.Id}}","to_character_id":"{{bess.Id}}","quantity":4}""");
+
+            Assert.False(outcome.IsError);
+            Assert.Contains("Transferred", outcome.Text, StringComparison.Ordinal);
+
+            var inv = save.Store.ReadInventory();
+            var rowanInv = inv.Find(rowan.Id)!;
+            var bessInv = inv.Find(bess.Id)!;
+
+            var rowanStack = rowanInv.Items.Single(s => s.ItemId == itemDef.Id);
+            var bessStack = bessInv.Items.Single(s => s.ItemId == itemDef.Id);
+
+            Assert.Equal(6, rowanStack.Quantity);
+            Assert.Equal(4, bessStack.Quantity);
+        }
+
+        [Fact]
+        public void Transferring_items_defaults_from_to_player()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "modify_item", """{"name":"torch","quantity":3}""");
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "torch")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","to_character_id":"{{bess.Id}}","quantity":2}""");
+
+            Assert.False(outcome.IsError);
+
+            var inv = save.Store.ReadInventory();
+            Assert.Equal(1, inv.Find(rowan.Id)!.Items.Single(s => s.ItemId == itemDef.Id).Quantity);
+            Assert.Equal(2, inv.Find(bess.Id)!.Items.Single(s => s.ItemId == itemDef.Id).Quantity);
+        }
+
+        [Fact]
+        public void Transferring_entire_stack_removes_from_source_inventory()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "modify_item", """{"name":"gem","quantity":1}""");
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "gem")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","to_character_id":"{{bess.Id}}","quantity":1}""");
+
+            Assert.False(outcome.IsError);
+
+            var inv = save.Store.ReadInventory();
+            Assert.DoesNotContain(inv.Find(rowan.Id)!.Items, s => s.ItemId == itemDef.Id);
+            Assert.Equal(1, inv.Find(bess.Id)!.Items.Single(s => s.ItemId == itemDef.Id).Quantity);
+        }
+
+        [Fact]
+        public void Transferring_more_than_carried_is_refused()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "modify_item", """{"name":"arrows","quantity":5}""");
+
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "arrows")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","to_character_id":"{{bess.Id}}","quantity":10}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("only has 5", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Transferring_item_not_carried_is_refused()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "modify_item", """{"name":"oar","quantity":2,"character":"Bess"}""");
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "oar")!;
+
+            // Rowan tries to give Bess the oar that only Bess has
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","from_character_id":"{{rowan.Id}}","to_character_id":"{{bess.Id}}","quantity":1}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("is not carrying", outcome.Text, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Transferring_to_same_character_is_refused()
+        {
+            using var save = Seeded();
+            Call(save.Store, "modify_item", """{"name":"arrows","quantity":5}""");
+
+            var rowan = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Rowan")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "arrows")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","from_character_id":"{{rowan.Id}}","to_character_id":"{{rowan.Id}}","quantity":1}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("same character", outcome.Text, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Transferring_between_two_npcs_works()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            Call(save.Store, "set_character", """{"name":"Kael"}""");
+            Call(save.Store, "modify_item", """{"name":"potion","quantity":2,"character":"Bess"}""");
+
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+            var kael = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Kael")!;
+            var itemDef = SaveStore.FindItem(save.Store.ReadItems(), "potion")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"{{itemDef.Id}}","from_character_id":"{{bess.Id}}","to_character_id":"{{kael.Id}}","quantity":1}""");
+
+            Assert.False(outcome.IsError);
+
+            var inv = save.Store.ReadInventory();
+            Assert.Equal(1, inv.Find(bess.Id)!.Items.Single(s => s.ItemId == itemDef.Id).Quantity);
+            Assert.Equal(1, inv.Find(kael.Id)!.Items.Single(s => s.ItemId == itemDef.Id).Quantity);
+        }
+
+        [Fact]
+        public void Transferring_with_invalid_quantity_is_refused()
+        {
+            using var save = Seeded();
+            Call(save.Store, "set_character", """{"name":"Bess"}""");
+            var bess = SaveStore.FindCharacter(save.Store.ReadCharacters(), "Bess")!;
+
+            var outcome = Call(
+                save.Store,
+                "transfer_item",
+                $$"""{"item_id":"itm_1","to_character_id":"{{bess.Id}}","quantity":0}""");
+
+            Assert.True(outcome.IsError);
+            Assert.Contains("positive quantity", outcome.Text, StringComparison.Ordinal);
+        }
+
         // ---- Story and Recall -----------------------------------------------------------------------
 
         [Fact]

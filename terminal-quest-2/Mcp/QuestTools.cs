@@ -192,6 +192,20 @@ namespace TerminalQuest.Mcp
                 """,
                 Role: ToolRole.Narrator),
 
+            new("transfer_item",
+                "Move an item stack or partial stack from one character to another using entity IDs. "
+              + "Defaults to the player if from_character_id is omitted.",
+                """
+                {"type":"object",
+                 "properties":{
+                   "item_id":{"type":"string","description":"The entity ID (e.g. itm_1) or name of the item to transfer."},
+                   "to_character_id":{"type":"string","description":"The entity ID (e.g. chr_2) or name of the receiving character."},
+                   "from_character_id":{"type":"string","description":"The entity ID (e.g. chr_1) or name of the giving character. Defaults to the player."},
+                   "quantity":{"type":"integer","description":"Quantity to transfer. Defaults to 1."}},
+                 "required":["item_id","to_character_id"]}
+                """,
+                Role: ToolRole.Narrator),
+
             new("modify_money",
                 "Give or take coin. Positive amount adds coin; negative amount spends/takes coin. "
               + "Refused if the character cannot afford it. Defaults to player if character is omitted.",
@@ -334,6 +348,7 @@ namespace TerminalQuest.Mcp
             "get_location" => GetLocation(store, arguments),
             "move_character" => MoveCharacter(store, arguments),
             "modify_item" => ModifyItem(store, arguments),
+            "transfer_item" => TransferItem(store, arguments),
             "modify_money" => ModifyMoney(store, arguments),
             "record_event" => RecordEvent(store, arguments),
             "recall" => Recall(store, arguments),
@@ -1038,6 +1053,103 @@ namespace TerminalQuest.Mcp
             store.WriteInventory(inventoryFile);
             return ToolOutcome.Ok(
                 $"{character.Name}: {(quantity > 0 ? "Gained" : "Lost")} {QuestRender.Item(itemDef, Math.Abs(quantity))}.");
+        }
+
+        private static ToolOutcome TransferItem(SaveStore store, JsonElement arguments)
+        {
+            var itemId = Text(arguments, "item_id") ?? Text(arguments, "item") ?? Text(arguments, "name");
+            if (itemId is not { Length: > 0 })
+            {
+                return ToolOutcome.Fail("transfer_item needs an item ID.");
+            }
+
+            var quantity = Number(arguments, "quantity") ?? 1;
+            if (quantity <= 0)
+            {
+                return ToolOutcome.Fail("transfer_item needs a positive quantity.");
+            }
+
+            var characters = store.ReadCharacters();
+            var fromId = Text(arguments, "from_character_id")
+                ?? Text(arguments, "from_character")
+                ?? Text(arguments, "from")
+                ?? Text(arguments, "from_id")
+                ?? Text(arguments, "giver");
+
+            var fromChar = fromId is { Length: > 0 }
+                ? (SaveStore.FindCharacterById(characters, fromId) ?? SaveStore.FindCharacter(characters, fromId))
+                : SaveStore.Player(characters);
+
+            if (fromChar is null)
+            {
+                return ToolOutcome.Fail(fromId is { Length: > 0 }
+                    ? $"There is no character matching '{fromId}'."
+                    : "No player character on record.");
+            }
+
+            var toId = Text(arguments, "to_character_id")
+                ?? Text(arguments, "to_character")
+                ?? Text(arguments, "to")
+                ?? Text(arguments, "to_id")
+                ?? Text(arguments, "recipient");
+
+            if (toId is not { Length: > 0 })
+            {
+                return ToolOutcome.Fail("transfer_item needs a recipient character ID.");
+            }
+
+            var toChar = SaveStore.FindCharacterById(characters, toId) ?? SaveStore.FindCharacter(characters, toId);
+            if (toChar is null)
+            {
+                return ToolOutcome.Fail($"There is no character matching '{toId}'.");
+            }
+
+            if (string.Equals(fromChar.Id, toChar.Id, StringComparison.Ordinal))
+            {
+                return ToolOutcome.Fail("Cannot transfer items to the same character.");
+            }
+
+            var itemFile = store.ReadItems();
+            var itemDef = SaveStore.FindItemById(itemFile, itemId) ?? SaveStore.FindItem(itemFile, itemId);
+            if (itemDef is null)
+            {
+                return ToolOutcome.Fail($"No item matching '{itemId}' exists.");
+            }
+
+            var inventoryFile = store.ReadInventory();
+            var fromInv = inventoryFile.GetOrCreate(fromChar.Id);
+            var fromStack = fromInv.Items.Find(s => string.Equals(s.ItemId, itemDef.Id, StringComparison.Ordinal));
+
+            if (fromStack is null || fromStack.Quantity <= 0)
+            {
+                return ToolOutcome.Fail($"{fromChar.Name} ({fromChar.Id}) is not carrying '{itemDef.Name}' ({itemDef.Id}).");
+            }
+
+            if (fromStack.Quantity < quantity)
+            {
+                return ToolOutcome.Fail($"{fromChar.Name} ({fromChar.Id}) only has {fromStack.Quantity} of '{itemDef.Name}' ({itemDef.Id}) (requested {quantity}).");
+            }
+
+            fromStack.Quantity -= quantity;
+            if (fromStack.Quantity <= 0)
+            {
+                fromInv.Items.Remove(fromStack);
+            }
+
+            var toInv = inventoryFile.GetOrCreate(toChar.Id);
+            var toStack = toInv.Items.Find(s => string.Equals(s.ItemId, itemDef.Id, StringComparison.Ordinal));
+            if (toStack is null)
+            {
+                toInv.Items.Add(new ItemStack { ItemId = itemDef.Id, Quantity = quantity });
+            }
+            else
+            {
+                toStack.Quantity += quantity;
+            }
+
+            store.WriteInventory(inventoryFile);
+            return ToolOutcome.Ok(
+                $"Transferred {QuestRender.Item(itemDef, quantity).Trim()} from {fromChar.Name} ({fromChar.Id}) to {toChar.Name} ({toChar.Id}).");
         }
 
         private static ToolOutcome ModifyMoney(SaveStore store, JsonElement arguments)
