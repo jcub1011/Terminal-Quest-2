@@ -66,6 +66,7 @@ namespace TerminalQuest.Ui
 
         private bool _isWaiting;
         private int? _highlightedOption;
+        private IReadOnlyList<NarrationOption>? _activeOptionsCache;
 
         /// <summary>
         /// Raised when the player clicks on a rendered entity in the transcript.
@@ -97,17 +98,22 @@ namespace TerminalQuest.Ui
         /// </summary>
         public IReadOnlyList<NarrationOption> GetActiveOptions()
         {
+            if (_activeOptionsCache is not null)
+            {
+                return _activeOptionsCache;
+            }
+
             if (_committedRows.Count > 0)
             {
-                return NarrationOptionDetector.Detect(_committedRows);
+                return _activeOptionsCache = NarrationOptionDetector.Detect(_committedRows);
             }
 
             if (_committed.Count > 0)
             {
-                return NarrationOptionDetector.Detect(_committed);
+                return _activeOptionsCache = NarrationOptionDetector.Detect(_committed);
             }
 
-            return [];
+            return _activeOptionsCache = [];
         }
 
         /// <summary>
@@ -282,6 +288,7 @@ namespace TerminalQuest.Ui
 
         private void AfterContentChanged()
         {
+            _activeOptionsCache = null;
             SyncContentSize();
             SetNeedsDraw();
         }
@@ -391,8 +398,6 @@ namespace TerminalQuest.Ui
                 RebuildAllRows();
             }
 
-            BeginPaint(width, height);
-
             // The pane may have been resized since the row count last changed, which moves the
             // bottom without going through any of the callers that would have re-synced it.
             SyncContentSize();
@@ -409,49 +414,61 @@ namespace TerminalQuest.Ui
 
             for (var y = 0; y < height; y++)
             {
-                var index = Viewport.Y + y;
-                if (index >= TotalRows)
-                {
-                    break;
-                }
-
-                var row = RowAt(index);
-
-                if (row.Spans.Count == 0)
-                {
-                    continue;
-                }
-
                 Move(0, y);
+                var index = Viewport.Y + y;
 
-                if (highlightedRows is not null && highlightedRows.Contains(index))
+                if (index < TotalRows)
                 {
-                    SetAttribute(Theme.OptionSelection);
-                    var drawn = 0;
-                    foreach (var span in row.Spans)
+                    var row = RowAt(index);
+
+                    if (highlightedRows is not null && highlightedRows.Contains(index))
                     {
-                        if (drawn >= width)
+                        SetAttribute(Theme.OptionSelection);
+                        var drawn = 0;
+                        foreach (var span in row.Spans)
                         {
-                            break;
+                            if (drawn >= width)
+                            {
+                                break;
+                            }
+
+                            var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                            AddStr(text);
+                            drawn += text.Length;
                         }
 
-                        var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
-                        AddStr(text);
-                        drawn += text.Length;
+                        if (drawn < width)
+                        {
+                            AddStr(Blank(width - drawn));
+                        }
                     }
-
-                    if (drawn < width)
+                    else
                     {
-                        AddStr(new string(' ', width - drawn));
+                        var drawn = 0;
+                        foreach (var span in row.Spans)
+                        {
+                            if (drawn >= width)
+                            {
+                                break;
+                            }
+
+                            var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                            SetRole(span.Role);
+                            AddStr(text);
+                            drawn += text.Length;
+                        }
+
+                        if (drawn < width)
+                        {
+                            SetRole(TextRole.Normal);
+                            AddStr(Blank(width - drawn));
+                        }
                     }
                 }
                 else
                 {
-                    foreach (var span in row.Spans)
-                    {
-                        SetRole(span.Role);
-                        AddStr(span.Text);
-                    }
+                    SetRole(TextRole.Normal);
+                    AddStr(Blank(width));
                 }
             }
 
@@ -498,6 +515,7 @@ namespace TerminalQuest.Ui
 
         private void RebuildAllRows()
         {
+            _activeOptionsCache = null;
             _committedRows = [];
             foreach (var line in _committed)
             {

@@ -652,5 +652,16 @@ namespace TerminalQuest.Tests.Saves
             // the player told the name is fine and then handed an IO error from Open.
             Assert.False(SavePaths.IsValidName(name));
         }
+
+        [Fact]
+        public void ListNames_enumerates_existing_save_folder_names()
+        {
+            using var root = new SavesRoot();
+            SavePaths.Open("Alpha");
+            SavePaths.Open("Beta");
+
+            var names = SavePaths.ListNames().Order(StringComparer.Ordinal).ToList();
+            Assert.Equal(["Alpha", "Beta"], names);
+        }
     }
 }

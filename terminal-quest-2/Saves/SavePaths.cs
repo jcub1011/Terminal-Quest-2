@@ -41,6 +41,28 @@ namespace TerminalQuest.Saves
         /// </summary>
         public static string Root => PathProvider.Saves;
 
+        /// <summary>Names of existing saves in the root folder.</summary>
+        public static IReadOnlyList<string> ListNames()
+        {
+            var root = Root;
+            if (!Directory.Exists(root))
+            {
+                return [];
+            }
+
+            try
+            {
+                return Directory.EnumerateDirectories(root)
+                    .Select(Path.GetFileName)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToArray()!;
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
         /// <summary>Existing saves, most recently played first.</summary>
         /// <remarks>
         /// A folder with unreadable or missing metadata is still listed - it is a save that needs

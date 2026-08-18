@@ -270,14 +270,14 @@ namespace TerminalQuest.Ui
                 case "delete":
                     try
                     {
-                        var saves = SavePaths.List();
-                        return saves
-                            .Where(s => !SaveStore.Matches(s.Name, store?.Name)
-                                && s.Name.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
+                        var names = SavePaths.ListNames();
+                        return names
+                            .Where(s => !SaveStore.Matches(s, store?.Name)
+                                && s.StartsWith(argPrefix, StringComparison.OrdinalIgnoreCase))
                             .Select(s => new SuggestionItem(
-                                InsertText: $"/{commandName} {s.Name}",
-                                DisplayText: s.Name,
-                                Summary: $"turn {s.Turn}  {s.SizeText}",
+                                InsertText: $"/{commandName} {s}",
+                                DisplayText: s,
+                                Summary: "save",
                                 Role: TextRole.Normal))
                             .ToArray();
                     }

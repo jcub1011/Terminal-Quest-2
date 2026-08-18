@@ -77,20 +77,42 @@ namespace TerminalQuest.Ui
                 RebuildLines();
             }
 
-            BeginPaint(width, height);
-
             var maxOffset = Math.Max(0, _lines.Count - height);
             _offsetY = Math.Clamp(_offsetY, 0, maxOffset);
 
-            for (var y = 0; y < height && _offsetY + y < _lines.Count; y++)
+            for (var y = 0; y < height; y++)
             {
-                var line = _lines[_offsetY + y];
                 Move(0, y);
+                var index = _offsetY + y;
 
-                foreach (var span in line.Spans)
+                if (index < _lines.Count)
                 {
-                    SetRole(span.Role);
-                    AddStr(span.Text);
+                    var line = _lines[index];
+                    var drawn = 0;
+
+                    foreach (var span in line.Spans)
+                    {
+                        if (drawn >= width)
+                        {
+                            break;
+                        }
+
+                        var text = span.Text.Length > width - drawn ? span.Text[..(width - drawn)] : span.Text;
+                        SetRole(span.Role);
+                        AddStr(text);
+                        drawn += text.Length;
+                    }
+
+                    if (drawn < width)
+                    {
+                        SetRole(TextRole.Normal);
+                        AddStr(Blank(width - drawn));
+                    }
+                }
+                else
+                {
+                    SetRole(TextRole.Normal);
+                    AddStr(Blank(width));
                 }
             }
 

@@ -46,8 +46,13 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>A row of spaces <paramref name="width"/> wide, reusing the last one when it fits.</summary>
-        private static string Blank(int width)
+        internal static string Blank(int width)
         {
+            if (width <= 0)
+            {
+                return string.Empty;
+            }
+
             // Read once: drawing is on the UI thread, but the field is shared by every view and
             // there is no reason to read it twice.
             var cached = _blank;

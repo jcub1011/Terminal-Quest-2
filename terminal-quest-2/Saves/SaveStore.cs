@@ -228,6 +228,8 @@ namespace TerminalQuest.Saves
         public static bool Matches(string? left, string? right) =>
             string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
 
+        private readonly Dictionary<string, (DateTime LastWriteUtc, object Data)> _cache = new(StringComparer.OrdinalIgnoreCase);
+
         private T Read<T>(string fileName, JsonTypeInfo<T> typeInfo)
             where T : new()
         {
@@ -236,6 +238,24 @@ namespace TerminalQuest.Saves
             if (!File.Exists(path))
             {
                 return new T();
+            }
+
+            DateTime lastWrite;
+            try
+            {
+                lastWrite = File.GetLastWriteTimeUtc(path);
+            }
+            catch
+            {
+                lastWrite = DateTime.MinValue;
+            }
+
+            lock (_cache)
+            {
+                if (_cache.TryGetValue(fileName, out var entry) && entry.LastWriteUtc == lastWrite && entry.Data is T cached)
+                {
+                    return cached;
+                }
             }
 
             string text;
@@ -250,12 +270,22 @@ namespace TerminalQuest.Saves
 
             if (text.AsSpan().IsWhiteSpace())
             {
-                return new T();
+                var empty = new T();
+                lock (_cache)
+                {
+                    _cache[fileName] = (lastWrite, empty);
+                }
+                return empty;
             }
 
             try
             {
-                return JsonSerializer.Deserialize(text, typeInfo) ?? new T();
+                var result = JsonSerializer.Deserialize(text, typeInfo) ?? new T();
+                lock (_cache)
+                {
+                    _cache[fileName] = (lastWrite, result);
+                }
+                return result;
             }
             catch (JsonException ex)
             {
@@ -339,6 +369,11 @@ namespace TerminalQuest.Saves
                 File.WriteAllText(temporary, JsonSerializer.Serialize(value, typeInfo), Utf8NoBom);
 
                 File.Move(temporary, path, overwrite: true);
+
+                lock (_cache)
+                {
+                    _cache.Remove(fileName);
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {

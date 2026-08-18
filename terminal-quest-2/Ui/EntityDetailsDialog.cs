@@ -57,6 +57,7 @@ namespace TerminalQuest.Ui
                 BorderStyle = LineStyle.Rounded,
             };
             dialog.SetScheme(Theme.CreateScheme());
+            dialog.Padding.Thickness = new Thickness(0);
 
 #pragma warning disable CS0618 // TextView is obsolete in Terminal.Gui v2
             var textView = new TextView
@@ -77,6 +78,8 @@ namespace TerminalQuest.Ui
             {
                 Text = "Close",
                 IsDefault = true,
+                X = Pos.Center(),
+                Y = Pos.AnchorEnd(1),
             };
             closeButton.SetScheme(Theme.CreateScheme());
             if (app is not null)
@@ -92,8 +95,7 @@ namespace TerminalQuest.Ui
                 }
             };
 
-            dialog.Add(textView);
-            dialog.AddButton(closeButton);
+            dialog.Add(textView, closeButton);
 
             dialog.Initialized += (_, _) => closeButton.SetFocus();
 

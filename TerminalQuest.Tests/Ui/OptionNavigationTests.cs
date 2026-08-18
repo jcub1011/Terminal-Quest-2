@@ -263,5 +263,23 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(Color.White, Theme.OptionSelection.Background);
             Assert.Equal(Color.Black, Theme.OptionSelection.Foreground);
         }
+
+        [Fact]
+        public void GetActiveOptions_caches_result_until_content_changes()
+        {
+            var view = new NarrationView();
+            view.AddLine("1. First choice", TextRole.Normal);
+            view.AddLine("2. Second choice", TextRole.Normal);
+
+            var first = view.GetActiveOptions();
+            var second = view.GetActiveOptions();
+            Assert.Same(first, second);
+
+            // Adding a line invalidates the cache
+            view.AddLine("3. Third choice", TextRole.Normal);
+            var third = view.GetActiveOptions();
+            Assert.NotSame(first, third);
+            Assert.Equal(3, third.Count);
+        }
     }
 }

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Terminal.Gui.App;
 
 namespace TerminalQuest.Ui
@@ -22,16 +23,22 @@ namespace TerminalQuest.Ui
     /// TimeSpan sleepFor = TimeSpan.FromMilliseconds (timeAllowed) - took;
     /// if (sleepFor.Milliseconds > 0) { Task.Delay (sleepFor).Wait (); }
     /// </code>
-    /// An iteration that overruns its budget leaves nothing to sleep for, so the loop stops
-    /// sleeping and spins - redrawing continuously and competing with the input thread it is
-    /// supposed to be draining. The cap therefore has to leave room for the slowest honest draw.
-    /// Little is given up by leaving that room, because <c>Task.Delay</c> cannot resolve finer than
-    /// about 15ms on Windows by default - so 100 and 200 ask for very different things and get
-    /// nearly the same one.
+    /// On Windows, standard .NET <c>Task.Delay</c> and <c>Thread.Sleep</c> default to the system timer
+    /// resolution (~15.6ms). We lower the Windows timer resolution to 1ms via <c>timeBeginPeriod</c>
+    /// so the main loop can sleep for the requested fraction of a frame accurately instead of
+    /// quantizing to 16ms boundaries.
     /// </para>
     /// </summary>
     internal static class Responsiveness
     {
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        private static extern uint TimeBeginPeriod(uint uMilliseconds);
+
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        private static extern uint TimeEndPeriod(uint uMilliseconds);
+
+        private static bool _timerPeriodSet;
+
         /// <summary>One iteration every 10ms, against the framework default of one every 25ms.</summary>
         private const ushort DefaultIterationsPerSecond = 100;
 
@@ -41,8 +48,8 @@ namespace TerminalQuest.Ui
         private const ushort MaximumIterationsPerSecond = 1000;
 
         /// <summary>
-        /// Raises the main loop's iteration cap, and keeps it raised for the life of the
-        /// application.
+        /// Raises the main loop's iteration cap, sets high-resolution system timers, and keeps them
+        /// active for the life of the application.
         /// <para>
         /// Re-asserted as each screen opens, for the same reason <see cref="MouseReporting"/> is:
         /// the game runs a fresh driver session per screen, and a setting applied once before any
@@ -53,8 +60,37 @@ namespace TerminalQuest.Ui
         {
             ArgumentNullException.ThrowIfNull(app);
 
+            EnsureHighResolutionTimer();
             Set();
             app.SessionBegun += (_, _) => Set();
+        }
+
+        private static void EnsureHighResolutionTimer()
+        {
+            if (_timerPeriodSet || !OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            try
+            {
+                if (TimeBeginPeriod(1) == 0)
+                {
+                    _timerPeriodSet = true;
+                    AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+                    {
+                        if (_timerPeriodSet)
+                        {
+                            TimeEndPeriod(1);
+                            _timerPeriodSet = false;
+                        }
+                    };
+                }
+            }
+            catch
+            {
+                // Fallback to default timer resolution if winmm is unavailable
+            }
         }
 
         private static void Set() => Application.MaximumIterationsPerSecond = Cap();
@@ -69,3 +105,4 @@ namespace TerminalQuest.Ui
                 : DefaultIterationsPerSecond;
     }
 }
+

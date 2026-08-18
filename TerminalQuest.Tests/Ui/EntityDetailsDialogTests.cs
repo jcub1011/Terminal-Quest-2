@@ -164,9 +164,11 @@ namespace TerminalQuest.Tests.Ui
             var dialog = EntityDetailsDialog.CreateDialog(null, "Test Title", "Sample details text.");
 
             Assert.Equal("Test Title", dialog.Title);
-            Assert.NotNull(dialog.Buttons);
-            Assert.Single(dialog.Buttons);
-            Assert.Equal("Close", dialog.Buttons[0].Text);
+            Assert.Equal(0, dialog.Padding.Thickness.Bottom);
+
+            var closeButton = dialog.SubViews.OfType<Terminal.Gui.Views.Button>().FirstOrDefault(b => b.Text == "Close");
+            Assert.NotNull(closeButton);
+            Assert.True(closeButton.IsDefault);
 
 #pragma warning disable CS0618
             var textView = dialog.SubViews.OfType<Terminal.Gui.Views.TextView>().FirstOrDefault();
@@ -176,6 +178,10 @@ namespace TerminalQuest.Tests.Ui
             Assert.True(textView.WordWrap);
             Assert.True(textView.ScrollBars);
             Assert.Equal("Sample details text.", textView.Text);
+
+            dialog.Layout();
+            Assert.Equal(dialog.Viewport.Height - 1, textView.Frame.Height);
+            Assert.Equal(dialog.Viewport.Height - 1, closeButton.Frame.Y);
         }
     }
 }
