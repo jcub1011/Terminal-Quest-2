@@ -1,7 +1,8 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using TerminalQuest.Agents.LmStudio;
 
 namespace TerminalQuest.Agents.Claude
 {
@@ -41,6 +42,8 @@ namespace TerminalQuest.Agents.Claude
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly StringBuilder _standardError = new();
         private readonly Lock _standardErrorLock = new();
+        private readonly ThinkTagFilter _thinkTagFilter = new();
+        private readonly Lock _filterLock = new();
 
         private Process? _process;
         private Task? _stdoutReader;
@@ -187,6 +190,11 @@ namespace TerminalQuest.Agents.Claude
 
                 var turn = new TaskCompletionSource<AgentTurnResult>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _pendingTurn = turn;
+
+                lock (_filterLock)
+                {
+                    _thinkTagFilter.Flush();
+                }
 
                 await WriteLineAsync(process, BuildUserMessage(prompt), cancellationToken).ConfigureAwait(false);
 
@@ -536,7 +544,16 @@ namespace TerminalQuest.Agents.Claude
 
             if (ReadString(delta, "text") is { } chunk)
             {
-                handler.Invoke(chunk);
+                string visible;
+                lock (_filterLock)
+                {
+                    visible = _thinkTagFilter.Feed(chunk);
+                }
+
+                if (visible.Length > 0)
+                {
+                    handler.Invoke(visible);
+                }
             }
         }
 
@@ -546,6 +563,17 @@ namespace TerminalQuest.Agents.Claude
             if (turn is null)
             {
                 return;
+            }
+
+            string flushed;
+            lock (_filterLock)
+            {
+                flushed = _thinkTagFilter.Flush();
+            }
+
+            if (flushed.Length > 0)
+            {
+                OnTextDelta?.Invoke(flushed);
             }
 
             var usage = root.TryGetProperty("usage", out var candidate) && candidate.ValueKind == JsonValueKind.Object
@@ -563,12 +591,16 @@ namespace TerminalQuest.Agents.Claude
                   + ReadInt32(usage, "cache_read_input_tokens")
                   + ReadInt32(usage, "cache_creation_input_tokens");
 
+            var rawResult = ReadString(root, "result") ?? string.Empty;
+            var isError = root.TryGetProperty("is_error", out var errorProp) && errorProp.ValueKind == JsonValueKind.True;
+            var resultText = isError ? rawResult : ThinkTagFilter.Filter(rawResult);
+
             turn.TrySetResult(new AgentTurnResult
             {
                 ContextTokens = context,
                 ContextWindowTokens = ClaudeContextTokens,
-                Text = ReadString(root, "result") ?? string.Empty,
-                IsError = root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True,
+                Text = resultText,
+                IsError = isError,
                 CostUsd = ReadDouble(root, "total_cost_usd"),
                 DurationMs = ReadInt32(root, "duration_ms"),
                 InputTokens = ReadInt32(usage, "input_tokens"),

@@ -100,6 +100,22 @@ namespace TerminalQuest.Tests.Infrastructure
                 "data: [DONE]");
         }
 
+        /// <summary>Answers with a chat completion that emits both text content and a tool call.</summary>
+        public ScriptedHandler CallsWithContent(
+            string text,
+            string tool,
+            string arguments,
+            string id = "call_1")
+        {
+            var call = $"\"tool_calls\":[{{\"index\":0,\"id\":\"{id}\","
+                + $"\"function\":{{\"name\":\"{tool}\",\"arguments\":{Quote(arguments)}}}}}]";
+
+            return Stream(
+                "data: " + Chunk($"\"content\":{Quote(text)}"),
+                "data: " + Chunk(call),
+                "data: [DONE]");
+        }
+
         /// <summary>Answers with a chat completion that asks for one tool and stops.</summary>
         /// <remarks>
         /// Reports no usage unless asked to. Most callers have no interest in the counts, and a

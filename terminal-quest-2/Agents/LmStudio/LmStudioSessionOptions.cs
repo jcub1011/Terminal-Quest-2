@@ -75,5 +75,10 @@ namespace TerminalQuest.Agents.LmStudio
 
         /// <summary>How long <see cref="LmStudioSession.StartAsync"/> waits for the server to answer.</summary>
         public TimeSpan StartupTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// Delay between emitted word chunks when streaming final narration. Set to <see cref="TimeSpan.Zero"/> to disable pacing.
+        /// </summary>
+        public TimeSpan StreamPacing { get; init; } = TimeSpan.FromMilliseconds(15);
     }
 }

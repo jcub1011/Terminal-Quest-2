@@ -148,6 +148,26 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task Story_tags_are_stripped_from_the_stream_and_result()
+        {
+            using var script = new Script("story_tags");
+            await using var session = new ClaudeSession(Options());
+
+            var streamed = new List<string>();
+            session.OnTextDelta += delta => { lock (streamed) { streamed.Add(delta); } };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal("The road was empty.", result.Text);
+
+            lock (streamed)
+            {
+                Assert.Equal("The road was empty.", string.Concat(streamed));
+            }
+        }
+
+        [Fact]
         public async Task A_failure_the_model_reports_is_a_result_rather_than_an_exception()
         {
             // Failures about the turn come back through IsError; only provider failures throw.

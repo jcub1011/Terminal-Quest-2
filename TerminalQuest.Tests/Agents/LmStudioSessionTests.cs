@@ -33,6 +33,7 @@ namespace TerminalQuest.Tests.Agents
                 SystemPrompt = "You narrate.",
                 MaxToolIterations = maxToolIterations,
                 TurnTimeout = turnTimeout ?? TimeSpan.FromSeconds(30),
+                StreamPacing = TimeSpan.Zero,
             };
 
         private static TempSave Seeded()
@@ -264,6 +265,37 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task Paced_streaming_emits_multiple_word_chunks()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .Says("The road was empty and cold.");
+            var options = new LmStudioSessionOptions
+            {
+                BaseUrl = "http://localhost:1234/v1",
+                Model = "a-model",
+                SystemPrompt = "You narrate.",
+                StreamPacing = TimeSpan.FromMilliseconds(1),
+            };
+            await using var session = new LmStudioSession(options, save.Store, handler);
+
+            var streamed = new List<string>();
+            session.OnTextDelta += delta => { lock (streamed) { streamed.Add(delta); } };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal("The road was empty and cold.", result.Text);
+
+            lock (streamed)
+            {
+                Assert.True(streamed.Count > 1);
+                Assert.Equal("The road was empty and cold.", string.Concat(streamed));
+            }
+        }
+
+        [Fact]
         public async Task Reasoning_is_stripped_out_of_the_narration()
         {
             using var save = Seeded();
@@ -382,6 +414,79 @@ namespace TerminalQuest.Tests.Agents
 
             // The second request carries the tool's answer, which is how the model sees the world.
             Assert.Contains("Rowan", handler.Bodies[^1], StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task Tool_iteration_content_followed_by_final_narration_emits_deltas_only_once()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .CallsWithContent("<story>Rowan stands at the ford.</story>", "mcp__quest__get_state", "{}")
+                .Says("<story>Rowan stands at the ford.</story>");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            var streamed = new List<string>();
+            session.OnTextDelta += delta => { lock (streamed) { streamed.Add(delta); } };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal("Rowan stands at the ford.", result.Text);
+
+            lock (streamed)
+            {
+                Assert.Equal("Rowan stands at the ford.", string.Concat(streamed));
+            }
+        }
+
+        [Fact]
+        public async Task Tool_iteration_content_followed_by_empty_final_reply_falls_back_to_tool_iteration_content()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .CallsWithContent("<story>Rowan stands at the ford.</story>", "mcp__quest__get_state", "{}")
+                .Stream("data: " + "{\"choices\":[{\"delta\":{\"content\":\"\"}}]}", "data: [DONE]");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            var streamed = new List<string>();
+            session.OnTextDelta += delta => { lock (streamed) { streamed.Add(delta); } };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal("Rowan stands at the ford.", result.Text);
+
+            lock (streamed)
+            {
+                Assert.Equal("Rowan stands at the ford.", string.Concat(streamed));
+            }
+        }
+
+        [Fact]
+        public async Task Multiple_tool_iterations_with_content_before_final_narration_does_not_duplicate()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("a-model")
+                .CallsWithContent("<story>Draft 1</story>", "mcp__quest__get_state", "{}")
+                .CallsWithContent("<story>Draft 2</story>", "mcp__quest__get_state", "{\"retry\":true}")
+                .Says("<story>Final narration.</story>");
+            await using var session = new LmStudioSession(Options(), save.Store, handler);
+
+            var streamed = new List<string>();
+            session.OnTextDelta += delta => { lock (streamed) { streamed.Add(delta); } };
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal("Final narration.", result.Text);
+
+            lock (streamed)
+            {
+                Assert.Equal("Final narration.", string.Concat(streamed));
+            }
         }
 
         [Fact]

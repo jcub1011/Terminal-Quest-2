@@ -211,9 +211,13 @@ namespace TerminalQuest.Agents.LmStudio
                 // the context counts - the earlier ones are already inside inputTokens.
                 var lastOutputTokens = 0;
 
+                string? lastAssistantTextWithTools = null;
+
                 for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
                 {
-                    var reply = await StreamReplyAsync(turn.Token).ConfigureAwait(false);
+                    var reply = await StreamReplyAsync(
+                        turn.Token,
+                        allowEmpty: !string.IsNullOrWhiteSpace(lastAssistantTextWithTools)).ConfigureAwait(false);
 
                     // Input tokens are the whole prompt, so the last request's count is the turn's;
                     // output accumulates across every request the turn made.
@@ -225,7 +229,23 @@ namespace TerminalQuest.Agents.LmStudio
 
                     if (reply.ToolCalls.Count == 0)
                     {
-                        return Finish(reply.Text, isError: false, inputTokens, outputTokens, lastOutputTokens, start);
+                        var finalText = reply.Text;
+                        if (string.IsNullOrWhiteSpace(finalText) && !string.IsNullOrWhiteSpace(lastAssistantTextWithTools))
+                        {
+                            finalText = lastAssistantTextWithTools;
+                        }
+
+                        if (!string.IsNullOrEmpty(finalText))
+                        {
+                            await StreamPacedAsync(finalText, turn.Token).ConfigureAwait(false);
+                        }
+
+                        return Finish(finalText, isError: false, inputTokens, outputTokens, lastOutputTokens, start);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(reply.Text))
+                    {
+                        lastAssistantTextWithTools = reply.Text;
                     }
 
                     foreach (var call in reply.ToolCalls)
@@ -415,10 +435,11 @@ namespace TerminalQuest.Agents.LmStudio
         }
 
         /// <summary>
-        /// Sends the transcript and reads the reply off the wire, raising <see cref="OnTextDelta"/>
-        /// as prose arrives.
+        /// Sends the transcript and reads the reply off the wire.
         /// </summary>
-        private async Task<Reply> StreamReplyAsync(CancellationToken cancellationToken)
+        private async Task<Reply> StreamReplyAsync(
+            CancellationToken cancellationToken,
+            bool allowEmpty = false)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint("chat/completions"))
             {
@@ -453,12 +474,15 @@ namespace TerminalQuest.Agents.LmStudio
                     .ReadAsStreamAsync(cancellationToken)
                     .ConfigureAwait(false);
 
-                return await ReadEventsAsync(stream, cancellationToken).ConfigureAwait(false);
+                return await ReadEventsAsync(stream, cancellationToken, allowEmpty).ConfigureAwait(false);
             }
         }
 
         /// <summary>Consumes the server-sent event stream and assembles one reply out of it.</summary>
-        private async Task<Reply> ReadEventsAsync(Stream stream, CancellationToken cancellationToken)
+        private async Task<Reply> ReadEventsAsync(
+            Stream stream,
+            CancellationToken cancellationToken,
+            bool allowEmpty = false)
         {
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
@@ -602,8 +626,11 @@ namespace TerminalQuest.Agents.LmStudio
                         Quote(nonSse));
                 }
 
-                throw new AgentException(
-                    $"{_options.BaseUrl} returned an empty response with no narration or tool calls.");
+                if (!allowEmpty)
+                {
+                    throw new AgentException(
+                        $"{_options.BaseUrl} returned an empty response with no narration or tool calls.");
+                }
             }
 
             return new Reply(
@@ -614,7 +641,7 @@ namespace TerminalQuest.Agents.LmStudio
                 thoughtSignature);
         }
 
-        private void Emit(string visible, StringBuilder text)
+        private static void Emit(string visible, StringBuilder text)
         {
             if (visible.Length == 0)
             {
@@ -622,7 +649,76 @@ namespace TerminalQuest.Agents.LmStudio
             }
 
             text.Append(visible);
-            OnTextDelta?.Invoke(visible);
+        }
+
+        private async Task StreamPacedAsync(string text, CancellationToken cancellationToken)
+        {
+            var handler = OnTextDelta;
+            if (handler is null || text.Length == 0)
+            {
+                return;
+            }
+
+            if (_options.StreamPacing <= TimeSpan.Zero)
+            {
+                handler.Invoke(text);
+                return;
+            }
+
+            var chunks = SliceWords(text);
+            if (chunks.Count <= 1)
+            {
+                handler.Invoke(text);
+                return;
+            }
+
+            var delayMs = (int)_options.StreamPacing.TotalMilliseconds;
+            if (chunks.Count * delayMs > 2500)
+            {
+                delayMs = Math.Max(3, 2500 / chunks.Count);
+            }
+
+            foreach (var chunk in chunks)
+            {
+                handler.Invoke(chunk);
+                try
+                {
+                    await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        private static List<string> SliceWords(string text)
+        {
+            var list = new List<string>();
+            var span = text.AsSpan();
+            var i = 0;
+
+            while (i < span.Length)
+            {
+                var start = i;
+
+                while (i < span.Length && char.IsWhiteSpace(span[i]))
+                {
+                    i++;
+                }
+
+                while (i < span.Length && !char.IsWhiteSpace(span[i]))
+                {
+                    i++;
+                }
+
+                if (i > start)
+                {
+                    list.Add(text.Substring(start, i - start));
+                }
+            }
+
+            return list;
         }
 
         /// <summary>

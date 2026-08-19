@@ -101,6 +101,14 @@ namespace TerminalQuest.Tests.FakeClaude
                 Result("The road was empty."),
             ],
 
+            "story_tags" =>
+            [
+                Init(),
+                Delta("<story>The road "),
+                Delta("was empty.</story>"),
+                Result("<story>The road was empty.</story>"),
+            ],
+
             // Two turns, to prove the session id is only taken from the first.
             "resession" => [Init($"session-{turn}"), Delta($"turn {turn}"), Result($"turn {turn}")],
 
