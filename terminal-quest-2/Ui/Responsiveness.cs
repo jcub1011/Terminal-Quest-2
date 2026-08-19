@@ -45,7 +45,20 @@ namespace TerminalQuest.Ui
         /// <summary>The framework's own default, and the floor this will accept.</summary>
         private const ushort MinimumIterationsPerSecond = 20;
 
-        private const ushort MaximumIterationsPerSecond = 1000;
+        /// <summary>
+        /// The ceiling, and it is not arbitrary. The main loop sleeps for what is left of the
+        /// frame using the quoted code above, and <c>TimeSpan.Milliseconds</c> there is the
+        /// whole-millisecond <em>component</em>, not the total. Ask for more than about 500
+        /// iterations a second and the remainder is under a millisecond, that component is zero,
+        /// and the loop stops sleeping at all: measured at <c>TQ_FPS=1000</c> it free-spun at
+        /// 60,000 iterations a second, pegging a core.
+        /// <para>
+        /// It bought nothing. Key-to-paint latency was ~43ms at 100 iterations a second and ~43ms
+        /// at 60,000, because the wait is not in this loop. Raising this is not a fix for input
+        /// lag; it is only a way to spend a core discovering that.
+        /// </para>
+        /// </summary>
+        private const ushort MaximumIterationsPerSecond = 500;
 
         /// <summary>
         /// Raises the main loop's iteration cap, sets high-resolution system timers, and keeps them

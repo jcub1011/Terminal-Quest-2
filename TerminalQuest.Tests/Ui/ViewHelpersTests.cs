@@ -255,8 +255,11 @@ namespace TerminalQuest.Tests.Ui
             [InlineData("0", 20)]
             [InlineData("20", 20)]
             [InlineData("60", 60)]
-            [InlineData("1000", 1000)]
-            [InlineData("2000", 1000)]
+            [InlineData("500", 500)]
+            // Above the ceiling the main loop's own sleep rounds down to nothing and it free-spins,
+            // so the clamp has to hold well short of where a frame budget falls under a millisecond.
+            [InlineData("1000", 500)]
+            [InlineData("2000", 500)]
             public void A_usable_setting_is_clamped_into_range(string value, int expected)
             {
                 Assert.Equal(expected, CapWith(value));

@@ -25,26 +25,6 @@ namespace TerminalQuest.Ui
             CanFocus = false;
         }
 
-        /// <summary>
-        /// Clears the viewport. Call once at the top of <c>OnDrawingContent</c>.
-        /// <para>
-        /// The clear is explicit rather than left to the base class so that shrinking content -
-        /// a shorter status value, a scrolled-away row - cannot leave stale glyphs behind. It
-        /// writes spaces in the terminal's default colours, so it erases without tinting.
-        /// </para>
-        /// </summary>
-        protected void BeginPaint(int width, int height)
-        {
-            SetRole(TextRole.Normal);
-
-            var blank = Blank(width);
-            for (var y = 0; y < height; y++)
-            {
-                Move(0, y);
-                AddStr(blank);
-            }
-        }
-
         /// <summary>A row of spaces <paramref name="width"/> wide, reusing the last one when it fits.</summary>
         internal static string Blank(int width)
         {

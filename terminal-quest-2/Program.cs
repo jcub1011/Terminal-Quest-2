@@ -1,4 +1,5 @@
 using Terminal.Gui.App;
+using Terminal.Gui.Drivers;
 
 using TerminalQuest.Agents;
 using TerminalQuest.Mcp;
@@ -108,19 +109,58 @@ namespace TerminalQuest
             // 24-bit colour incorrectly under conhost, so set TQ_DRIVER=ansi if colours look
             // wrong in cmd or PowerShell. Windows Terminal handles the default fine.
             //
-            // This is not a knob for input lag: every driver shares one input loop, which polls
-            // on a fixed 20ms delay, so switching drivers cannot make typing land sooner. What
-            // can is Responsiveness, below.
+            // It may well be a knob for input lag, contrary to what this comment used to say.
+            // Measured, a keystroke takes ~43ms to reach the screen, and none of that is the main
+            // loop: raising its rate from 100 to 60,000 iterations a second moved the figure by
+            // nothing. The whole cost sits in producing one frame, it is the same for a one-row
+            // edit as for a full scroll, and it is zero when no frame is produced - which is the
+            // shape of a synchronous round trip to the terminal, not of work proportional to what
+            // changed. Which driver is doing the talking is therefore very much the question.
             var driver = Environment.GetEnvironmentVariable("TQ_DRIVER");
 
+            // TQ_SIZE=polling asks Terminal.Gui to read the terminal size with a native syscall
+            // instead of its default, which is to send a CSI 18t escape sequence and wait for the
+            // terminal to answer. A reply has to come back through the input thread, so anything
+            // that waits on one pays a full round trip to the terminal and back; this exists to
+            // find out whether that is what a frame is waiting for.
+            if (Environment.GetEnvironmentVariable("TQ_SIZE") is { Length: > 0 } sizeMode
+                && Enum.TryParse<SizeDetectionMode>(sizeMode, ignoreCase: true, out var detection))
+            {
+                Driver.SizeDetection = detection;
+            }
+
             using var app = Application.Create().Init(driver);
+
+            // TQ_16COLOR=1 drops the palette to the sixteen ANSI colours. Measured, it does not
+            // make the game faster - an indexed colour is a four-byte escape sequence where a
+            // 24-bit one is twenty, and cutting the payload that far moved key-to-paint by nothing
+            // at all, which is one of the ways we know the cost of a frame is not its size. Kept as
+            // a knob because it costs a line and it is the quickest way to re-check that.
+            //
+            // Note that the sixteen are reached by rounding Theme's colours to the nearest, and the
+            // rounding is poor: Item, Danger and Character all land on the same red, and Place,
+            // System and Roll on the same grey. It is a diagnostic, not a supported look.
+            if (string.Equals(Environment.GetEnvironmentVariable("TQ_16COLOR"), "1", StringComparison.Ordinal)
+                && app.Driver is { } activeDriver)
+            {
+                activeDriver.Force16Colors = true;
+            }
 
             // Before any screen opens: the transcript scrolls on the wheel, so the application wants
             // the mouse. The cost is the terminal's own selection, which moves onto Shift+drag.
             MouseReporting.Enable(app);
 
-            // And so that a keystroke is drawn on the next tick rather than up to 25ms later.
+            // Still worth having - an idle iteration is genuinely free - but it is not the fix for
+            // input lag that it was written to be. See the measurement in Responsiveness itself.
             Responsiveness.Apply(app);
+
+            // Works around a Terminal.Gui output defect that charges a frame for its gaps rather
+            // than its content. Always on; TQ_NOFILL=1 measures life without it.
+            FrameCompaction.Enable(app);
+
+            // Silent unless TQ_DIAG=1, and then it answers the one question a profiler cannot:
+            // how many frames there are, rather than what each one costs.
+            RenderDiagnostics.Enable(app);
 
             // Migrate legacy data (settings, unnested saves) to new folder structure if needed
             PathProvider.EnsureMigrated();

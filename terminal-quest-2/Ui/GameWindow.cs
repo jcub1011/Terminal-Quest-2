@@ -1,5 +1,6 @@
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -44,6 +45,11 @@ namespace TerminalQuest.Ui
 
             // No border title: the title row below draws it, because a border title takes a single
             // colour and the place name has to stay green while the rest of the row does not.
+            //
+            // The border was briefly removed as a performance measure and then put back, because it
+            // was not costing anything: with the border gone all seventy-two rows of a full-screen
+            // terminal were still marked dirty by a keystroke, so it was never what flagged them.
+            // What made those rows expensive is dealt with in FrameCompaction instead.
             BorderStyle = LineStyle.Rounded;
 
             // Said out loud now that the mouse is reported to the application: this screen fills the
@@ -118,8 +124,8 @@ namespace TerminalQuest.Ui
             _input.Accepting += OnInputAccepting;
             _input.ValueChanged += (_, _) =>
             {
-                RefreshSuggestions();
-                SyncOptionHighlight();
+                RenderDiagnostics.Time("key:suggestions", RefreshSuggestions);
+                RenderDiagnostics.Time("key:highlight", SyncOptionHighlight);
             };
 
             Options.OptionClicked += opt =>
@@ -307,6 +313,13 @@ namespace TerminalQuest.Ui
         /// </para>
         /// </summary>
         protected override bool OnKeyDown(Key key)
+        {
+            var handled = false;
+            RenderDiagnostics.Time("key:onkeydown", () => handled = OnKeyDownCore(key));
+            return handled;
+        }
+
+        private bool OnKeyDownCore(Key key)
         {
             // Nothing else happens while the line is in another program. Esc and Ctrl+Q would leave
             // the save, taking a command the player is still writing with them.

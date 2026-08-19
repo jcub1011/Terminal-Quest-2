@@ -42,6 +42,16 @@ namespace TerminalQuest.Ui
         {
             ArgumentNullException.ThrowIfNull(app);
 
+            // TQ_MOUSE=0 leaves the mouse to the terminal, which costs the wheel and click-to-inspect
+            // but takes the game out of the mouse input path entirely. It exists to be measured
+            // against: mouse reporting is the one thing the game asks of the terminal that a
+            // keyboard-only session does not need, and the only way to price it is to turn it off.
+            if (string.Equals(Environment.GetEnvironmentVariable("TQ_MOUSE"), "0", StringComparison.Ordinal))
+            {
+                app.Mouse.IsMouseDisabled = true;
+                return;
+            }
+
             Apply(app);
             app.SessionBegun += (_, _) => Apply(app);
         }
