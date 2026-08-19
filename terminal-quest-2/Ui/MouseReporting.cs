@@ -66,9 +66,10 @@ namespace TerminalQuest.Ui
             // Lets Terminal.Gui dispatch mouse events internally...
             app.Mouse.IsMouseDisabled = false;
 
-            // ...and this asks the terminal to send them, which is the half an outside program can
-            // have undone.
-            app.Driver?.WriteRaw(EscSeqUtils.CSI_EnableMouseEvents);
+            // Enable standard button tracking (1000), drag tracking (1002), and SGR mode (1006),
+            // while explicitly disabling all-motion/any-event tracking (1003) so mouse movement does
+            // not flood the terminal input stream and delay keyboard input.
+            app.Driver?.WriteRaw("\u001b[?1003l\u001b[?1000h\u001b[?1002h\u001b[?1006h");
         }
     }
 }

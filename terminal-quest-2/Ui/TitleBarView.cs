@@ -65,11 +65,5 @@ namespace TerminalQuest.Ui
 
             SetNeedsDraw();
         }
-
-        protected override bool OnDrawingContent(DrawContext? context)
-        {
-            Refresh();
-            return base.OnDrawingContent(context);
-        }
     }
 }

@@ -552,6 +552,32 @@ namespace TerminalQuest.Ui
                 row = new StyledLine();
             }
 
+            void AppendRun(int start, int count)
+            {
+                var runStart = start;
+                var end = start + count;
+                while (runStart < end)
+                {
+                    var role = word[runStart].Role;
+                    var entityId = word[runStart].EntityId;
+                    var runEnd = runStart + 1;
+                    while (runEnd < end && word[runEnd].Role == role && string.Equals(word[runEnd].EntityId, entityId, StringComparison.Ordinal))
+                    {
+                        runEnd++;
+                    }
+
+                    var runLen = runEnd - runStart;
+                    var chars = new char[runLen];
+                    for (var j = 0; j < runLen; j++)
+                    {
+                        chars[j] = word[runStart + j].Ch;
+                    }
+
+                    row.Append(new string(chars), role, entityId);
+                    runStart = runEnd;
+                }
+            }
+
             void FlushWord()
             {
                 if (word.Count == 0)
@@ -567,11 +593,7 @@ namespace TerminalQuest.Ui
                         CommitRow();
                     }
 
-                    for (var i = 0; i < width; i++)
-                    {
-                        row.Append(word[i].Ch.ToString(), word[i].Role, word[i].EntityId);
-                    }
-
+                    AppendRun(0, width);
                     word.RemoveRange(0, width);
                     CommitRow();
                 }
@@ -581,11 +603,7 @@ namespace TerminalQuest.Ui
                     CommitRow();
                 }
 
-                foreach (var (ch, role, entityId) in word)
-                {
-                    row.Append(ch.ToString(), role, entityId);
-                }
-
+                AppendRun(0, word.Count);
                 word.Clear();
             }
 

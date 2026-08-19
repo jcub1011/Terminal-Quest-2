@@ -231,12 +231,6 @@ namespace TerminalQuest.Ui
             SetNeedsDraw();
         }
 
-        protected override bool OnDrawingContent(DrawContext? context)
-        {
-            Refresh();
-            return base.OnDrawingContent(context);
-        }
-
         /// <summary>
         /// Abbreviates a token count to five columns at most.
         /// </summary>

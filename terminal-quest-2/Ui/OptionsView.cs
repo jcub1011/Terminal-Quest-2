@@ -12,6 +12,7 @@ namespace TerminalQuest.Ui
     {
         private IReadOnlyList<NarrationOption> _options = [];
         private int? _highlightedOption;
+        private int _renderedWidth;
         private readonly List<(NarrationOption Option, int RowIndex, string Prefix, string Text)> _renderedRows = [];
 
         public OptionsView()
@@ -123,6 +124,7 @@ namespace TerminalQuest.Ui
 
         private void RebuildRenderedRows(int width)
         {
+            _renderedWidth = width;
             _renderedRows.Clear();
             if (_options.Count == 0)
             {
@@ -248,10 +250,13 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
-            BeginPaint(width, height);
-            RebuildRenderedRows(width);
+            if (width != _renderedWidth)
+            {
+                RebuildRenderedRows(width);
+            }
 
-            for (var y = 0; y < Math.Min(height, _renderedRows.Count); y++)
+            var drawnRows = Math.Min(height, _renderedRows.Count);
+            for (var y = 0; y < drawnRows; y++)
             {
                 Move(0, y);
                 var row = _renderedRows[y];
@@ -287,6 +292,13 @@ namespace TerminalQuest.Ui
                         AddStr(Blank(width - drawn));
                     }
                 }
+            }
+
+            for (var y = drawnRows; y < height; y++)
+            {
+                Move(0, y);
+                SetRole(TextRole.Normal);
+                AddStr(Blank(width));
             }
 
             return true;
