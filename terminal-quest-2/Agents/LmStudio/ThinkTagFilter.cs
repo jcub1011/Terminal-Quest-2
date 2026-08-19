@@ -3,15 +3,18 @@ using System.Text;
 namespace TerminalQuest.Agents.LmStudio
 {
     /// <summary>
-    /// Removes <c>&lt;think&gt;...&lt;/think&gt;</c> spans from a stream of text deltas.
+    /// Removes reasoning (<c>&lt;think&gt;...&lt;/think&gt;</c>) and extracts narration
+    /// (<c>&lt;story&gt;...&lt;/story&gt;</c> or <c>&lt;narration&gt;...&lt;/narration&gt;</c>)
+    /// from a stream of text deltas.
     /// <para>
-    /// Locally served reasoning models routinely put their chain of thought inline in the content
-    /// rather than in a separate field, and none of it is story. Left in, it reaches the narration
-    /// pane as prose, because it is prose as far as everything downstream can tell.
+    /// Locally served models routinely output thoughts, planning, and checklist reviews inline
+    /// in the content stream. When story tags are present, anything outside them (pre-story thoughts
+    /// and post-story rambles) is discarded. When story tags are absent, the stream falls back
+    /// to stripping <c>&lt;think&gt;...&lt;/think&gt;</c> blocks.
     /// </para>
     /// </summary>
     /// <remarks>
-    /// Tags arrive split across deltas - <c>"&lt;th"</c> then <c>"ink&gt;"</c> - so text that could
+    /// Tags arrive split across deltas - <c>"&lt;st"</c> then <c>"ory&gt;"</c> - so text that could
     /// still turn out to be the start of a tag is held back until the next delta decides. This is
     /// the same problem <c>MarkupParser</c> solves for the narrator's own markup, and for the same
     /// reason: the boundaries of a token and the boundaries of a delta have nothing to do with
@@ -19,12 +22,30 @@ namespace TerminalQuest.Agents.LmStudio
     /// </remarks>
     internal sealed class ThinkTagFilter
     {
-        private const string Open = "<think>";
-        private const string Close = "</think>";
+        private const string ThinkOpen = "<think>";
+        private const string ThinkClose = "</think>";
+
+        private static readonly string[] StoryOpenTags = ["<story>", "<narration>"];
+        private static readonly string[] StoryCloseTags = ["</story>", "</narration>"];
+        private static readonly string[] ThinkCloseArray = [ThinkClose];
 
         private readonly StringBuilder _held = new();
 
-        private bool _inside;
+        private bool _insideThink;
+        private bool _insideStory;
+        private bool _hasSeenStoryTag;
+
+        /// <summary>Filters a complete string through a fresh filter instance.</summary>
+        public static string Filter(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            var filter = new ThinkTagFilter();
+            return filter.Feed(text) + filter.Flush();
+        }
 
         /// <summary>Feeds one delta in and returns the part of it that is safe to show.</summary>
         public string Feed(string chunk)
@@ -42,34 +63,89 @@ namespace TerminalQuest.Agents.LmStudio
 
             while (index < text.Length)
             {
-                if (_inside)
+                if (_insideThink)
                 {
-                    var close = text.IndexOf(Close, index, StringComparison.OrdinalIgnoreCase);
+                    var close = text.IndexOf(ThinkClose, index, StringComparison.OrdinalIgnoreCase);
                     if (close < 0)
                     {
-                        // Everything from here is reasoning, apart from what might be a partial
-                        // closing tag - discard the rest and keep only that.
-                        index = text.Length - PartialSuffix(text, index, Close);
+                        var keep = MaxPartialSuffix(text, index, ThinkCloseArray);
+                        index = text.Length - keep;
                         break;
                     }
 
-                    index = close + Close.Length;
-                    _inside = false;
+                    index = close + ThinkClose.Length;
+                    _insideThink = false;
                     continue;
                 }
 
-                var open = text.IndexOf(Open, index, StringComparison.OrdinalIgnoreCase);
-                if (open < 0)
+                string[] candidateTags;
+                if (!_hasSeenStoryTag)
                 {
-                    var keep = PartialSuffix(text, index, Open);
-                    visible.Append(text, index, text.Length - index - keep);
+                    candidateTags = [ThinkOpen, .. StoryOpenTags];
+                }
+                else if (_insideStory)
+                {
+                    candidateTags = [ThinkOpen, .. StoryCloseTags];
+                }
+                else
+                {
+                    candidateTags = [ThinkOpen, .. StoryOpenTags];
+                }
+
+                var earliestIndex = -1;
+                string? matchedTag = null;
+
+                foreach (var tag in candidateTags)
+                {
+                    var pos = text.IndexOf(tag, index, StringComparison.OrdinalIgnoreCase);
+                    if (pos >= 0 && (earliestIndex < 0 || pos < earliestIndex))
+                    {
+                        earliestIndex = pos;
+                        matchedTag = tag;
+                    }
+                }
+
+                if (earliestIndex < 0)
+                {
+                    var keep = MaxPartialSuffix(text, index, candidateTags);
+                    var safeLength = text.Length - index - keep;
+
+                    if (safeLength > 0)
+                    {
+                        if (!_hasSeenStoryTag || _insideStory)
+                        {
+                            visible.Append(text, index, safeLength);
+                        }
+                    }
+
                     index = text.Length - keep;
                     break;
                 }
 
-                visible.Append(text, index, open - index);
-                index = open + Open.Length;
-                _inside = true;
+                var segmentLen = earliestIndex - index;
+                if (segmentLen > 0)
+                {
+                    if (!_hasSeenStoryTag || _insideStory)
+                    {
+                        visible.Append(text, index, segmentLen);
+                    }
+                }
+
+                index = earliestIndex + matchedTag!.Length;
+
+                if (string.Equals(matchedTag, ThinkOpen, StringComparison.OrdinalIgnoreCase))
+                {
+                    _insideThink = true;
+                }
+                else if (IsStoryOpen(matchedTag))
+                {
+                    _hasSeenStoryTag = true;
+                    _insideStory = true;
+                }
+                else if (IsStoryClose(matchedTag))
+                {
+                    _insideStory = false;
+                }
             }
 
             _held.Clear();
@@ -79,25 +155,43 @@ namespace TerminalQuest.Agents.LmStudio
         }
 
         /// <summary>
-        /// Releases whatever is still held once the stream has ended. A held fragment at that point
-        /// was never a tag, so it is ordinary text - unless the model opened a think block and
-        /// never closed it, in which case it stays reasoning and stays dropped.
+        /// Releases whatever is still held once the stream has ended.
         /// </summary>
         public string Flush()
         {
-            var remainder = _inside ? string.Empty : _held.ToString();
+            var remainder = (_insideThink || (_hasSeenStoryTag && !_insideStory))
+                ? string.Empty
+                : _held.ToString();
 
             _held.Clear();
-            _inside = false;
+            _insideThink = false;
+            _insideStory = false;
+            _hasSeenStoryTag = false;
 
-            return remainder;
+            return remainder.ToString();
         }
 
-        /// <summary>
-        /// How many characters at the end of <paramref name="text"/> could be the beginning of
-        /// <paramref name="tag"/>. Zero when the tail cannot become one however the stream
-        /// continues.
-        /// </summary>
+        private static bool IsStoryOpen(string tag) =>
+            StoryOpenTags.Contains(tag, StringComparer.OrdinalIgnoreCase);
+
+        private static bool IsStoryClose(string tag) =>
+            StoryCloseTags.Contains(tag, StringComparer.OrdinalIgnoreCase);
+
+        private static int MaxPartialSuffix(string text, int from, string[] tags)
+        {
+            var max = 0;
+            foreach (var tag in tags)
+            {
+                var suffix = PartialSuffix(text, from, tag);
+                if (suffix > max)
+                {
+                    max = suffix;
+                }
+            }
+
+            return max;
+        }
+
         private static int PartialSuffix(string text, int from, string tag)
         {
             var longest = Math.Min(tag.Length - 1, text.Length - from);

@@ -251,5 +251,120 @@ namespace TerminalQuest.Tests.Agents
             Assert.Equal("<th", filter.Flush());
             Assert.Equal(string.Empty, filter.Flush());
         }
+
+        // ---- Story tag extraction & thought filtering --------------------------------------------------
+
+        [Fact]
+        public void A_story_block_is_extracted()
+        {
+            Assert.Equal("The road was empty.", Whole("<story>The road was empty.</story>"));
+        }
+
+        [Fact]
+        public void Think_blocks_before_story_tag_are_discarded()
+        {
+            Assert.Equal("The road was empty.", Whole("<think>planning</think><story>The road was empty.</story>"));
+        }
+
+        [Fact]
+        public void Thoughts_after_story_tag_are_discarded()
+        {
+            const string input = "<story>The road was empty.</story>The player has just started. I should check tools: 1. READ, 2. SEED...";
+            Assert.Equal("The road was empty.", Whole(input));
+        }
+
+        [Fact]
+        public void Thoughts_both_before_and_after_story_are_discarded()
+        {
+            const string input = "<think>Planning the turn...</think><story>The road was empty.</story>Reviewing checklist: done with turn.";
+            Assert.Equal("The road was empty.", Whole(input));
+        }
+
+        [Fact]
+        public void Multiple_story_blocks_are_concatenated()
+        {
+            Assert.Equal("Part 1Part 2", Whole("<story>Part 1</story>interlude thoughts<story>Part 2</story>"));
+        }
+
+        [Theory]
+        [InlineData("<STORY>hello</STORY>")]
+        [InlineData("<Story>hello</Story>")]
+        [InlineData("<story>hello</STORY>")]
+        public void Story_tag_case_is_ignored(string block)
+        {
+            Assert.Equal("hello", Whole(block));
+        }
+
+        [Fact]
+        public void Narration_tags_are_supported_as_alias()
+        {
+            Assert.Equal("The road was empty.", Whole("<think>Thought</think><narration>The road was empty.</narration>Post thought"));
+        }
+
+        [Fact]
+        public void Static_filter_helper_works()
+        {
+            Assert.Equal("The road was empty.", ThinkTagFilter.Filter("<story>The road was empty.</story>"));
+            Assert.Equal(string.Empty, ThinkTagFilter.Filter(string.Empty));
+        }
+
+        [Fact]
+        public void Opening_story_tag_split_across_deltas_is_recognised()
+        {
+            var filter = new ThinkTagFilter();
+
+            var first = filter.Feed("<st");
+            var second = filter.Feed("ory>The road was empty.</story>");
+
+            Assert.Equal(string.Empty, first);
+            Assert.Equal("The road was empty.", second);
+        }
+
+        [Fact]
+        public void Closing_story_tag_split_across_deltas_is_recognised()
+        {
+            var filter = new ThinkTagFilter();
+
+            var first = filter.Feed("<story>The road was empty.</st");
+            var second = filter.Feed("ory>Trailing thoughts that should not be shown");
+
+            Assert.Equal("The road was empty.", first);
+            Assert.Equal(string.Empty, second);
+            Assert.Equal(string.Empty, filter.Flush());
+        }
+
+        [Fact]
+        public void Post_narration_checklist_audit_loop_is_completely_discarded()
+        {
+            const string story = "The air in [Home](loc_1) is thick with aged paper.\n\nOutside, the mist clings to the trees, silent and waiting.";
+            const string rambling = "\n\nThe player has just started the game and is presented with four options. They need to make a move. I will wait for the player's choice. Since this was the first turn and I have already called the required tools... Wait, I need to make sure I didn't miss any required tools for the *first* turn.\n1. READ: get_transcript, get_state (Done)\n2. SEED: random_noun, random_adjective (Done)\n3. ROLL: (Not needed yet)\n4. WRITE: (Done)\n5. RECORD STORY: record_event...";
+
+            var fullModelOutput = $"<story>{story}</story>{rambling}";
+
+            Assert.Equal(story, Whole(fullModelOutput));
+            Assert.Equal(story, ThinkTagFilter.Filter(fullModelOutput));
+        }
+
+        [Theory]
+        [InlineData("<story>The road was empty.</story>")]
+        [InlineData("<think>Scratchpad thought</think><story>The road was empty.</story>Checklist audit")]
+        [InlineData("<think>planning</think><story>The road was empty.</story><think>done</think>")]
+        [InlineData("<story>Part 1</story>interlude<story>Part 2</story>")]
+        public void Cutting_story_stream_anywhere_gives_the_same_result(string source)
+        {
+            var whole = Whole(source);
+
+            Assert.Equal(whole, CharByChar(source));
+
+            for (var split = 0; split <= source.Length; split++)
+            {
+                var filter = new ThinkTagFilter();
+                var visible = filter.Feed(source[..split])
+                    + filter.Feed(source[split..])
+                    + filter.Flush();
+
+                Assert.Equal(whole, visible);
+            }
+        }
     }
 }
