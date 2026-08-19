@@ -54,5 +54,17 @@ namespace TerminalQuest.Tests.Saves
             Assert.Contains("YES, AND", content);
             Assert.Equal(content, DirectorPromptFile.StoryDefault);
         }
+
+        [Fact]
+        public void Item_generator_prompt_asset_exists_and_loads()
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "assets", "item-generator-prompt.txt");
+            Assert.True(File.Exists(path), $"Expected {path} to exist in test output directory.");
+
+            var content = File.ReadAllText(path);
+            Assert.False(string.IsNullOrWhiteSpace(content));
+            Assert.Contains("INSTRUCTIONS", content);
+            Assert.Equal(content, ItemGeneratorPromptFile.DefaultPrompt);
+        }
     }
 }

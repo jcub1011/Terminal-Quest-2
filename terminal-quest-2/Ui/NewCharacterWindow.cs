@@ -1,12 +1,14 @@
 using System.Collections.ObjectModel;
 using System.Text;
 
+using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 using TerminalQuest.Saves;
+using TerminalQuest.Settings;
 
 namespace TerminalQuest.Ui
 {
@@ -19,7 +21,11 @@ namespace TerminalQuest.Ui
     {
         private const int MaxNameLength = 40;
 
-        private readonly IReadOnlyList<ClassTemplate> _classes = ClassTemplates.All;
+        private readonly IApplication? _app;
+        private readonly AppSettings _settings;
+        private readonly List<ClassTemplate> _classes;
+        private ClassTemplate _customTemplate;
+
         private readonly ListView _classList;
         private readonly Markdown _classDetailsText;
 
@@ -29,17 +35,23 @@ namespace TerminalQuest.Ui
 
         private readonly Label _statusLabel;
         private readonly Button _beginButton;
+        private readonly Button _customizeButton;
         private readonly Button _promptButton;
         private readonly Button _cancelButton;
 
-        public NewCharacterWindow(string saveName)
+        public NewCharacterWindow(string saveName, AppSettings? settings = null, IApplication? app = null)
         {
+            _app = app;
+            _settings = settings ?? new AppSettings();
+
+            _customTemplate = ClassTemplates.CreateDefaultCustom();
+            _classes = [.. ClassTemplates.All, _customTemplate];
+
             Title = $"New Character - {saveName}";
             BorderStyle = LineStyle.Rounded;
             SetScheme(Theme.CreateScheme());
 
             // Left Pane: Archetypes List
-            var classNames = _classes.Select(c => $" {c.Name.PadRight(12)} (HP {c.MaxHealth,2})").ToList();
             _classList = new ListView
             {
                 Title = "Archetypes",
@@ -51,7 +63,7 @@ namespace TerminalQuest.Ui
                 CanFocus = true,
             };
             _classList.SetScheme(Theme.CreateScheme());
-            _classList.SetSource(new ObservableCollection<string>(classNames));
+            RefreshClassListSource();
             _classList.SelectedItem = 0;
             _classList.ValueChanged += (_, _) => UpdateClassDetails();
 
@@ -101,7 +113,17 @@ namespace TerminalQuest.Ui
             _descriptionField.Accepting += (_, _) => _placeField.SetFocus();
             _placeField.Accepting += (_, _) => TryConfirm();
 
-            _classList.Accepting += (_, _) => _nameField.SetFocus();
+            _classList.Accepting += (_, _) =>
+            {
+                if (IsCustomSelected)
+                {
+                    OpenArchetypeBuilder();
+                }
+                else
+                {
+                    _nameField.SetFocus();
+                }
+            };
 
             // Status message
             _statusLabel = new Label
@@ -111,21 +133,24 @@ namespace TerminalQuest.Ui
                 Width = Dim.Fill() - 2,
                 Height = 1,
                 CanFocus = false,
-                Text = "Tab: Next Field | Up/Down: Navigate List / Scroll | Enter: Advance | Ctrl+G: Editor | Esc: Cancel",
+                Text = "Tab: Next Field | Up/Down: Navigate List / Scroll | Enter: Advance | Ctrl+B: Build Custom | Ctrl+G: Editor | Esc: Cancel",
             };
             _statusLabel.SetScheme(Theme.CreateScheme());
 
             // Bottom Action Buttons
             var btnY = Pos.Bottom(_statusLabel);
             _beginButton = new Button { Text = "Begin Adventure (Enter)", X = 1, Y = btnY, CanFocus = true };
-            _promptButton = new Button { Text = "Rewrite Prompt (Ctrl+P)", X = Pos.Right(_beginButton) + 2, Y = btnY, CanFocus = true };
+            _customizeButton = new Button { Text = "Build Custom (Ctrl+B)", X = Pos.Right(_beginButton) + 2, Y = btnY, CanFocus = true };
+            _promptButton = new Button { Text = "Rewrite Prompt (Ctrl+P)", X = Pos.Right(_customizeButton) + 2, Y = btnY, CanFocus = true };
             _cancelButton = new Button { Text = "Cancel (Esc)", X = Pos.Right(_promptButton) + 2, Y = btnY, CanFocus = true };
 
             _beginButton.SetScheme(Theme.CreateScheme());
+            _customizeButton.SetScheme(Theme.CreateScheme());
             _promptButton.SetScheme(Theme.CreateScheme());
             _cancelButton.SetScheme(Theme.CreateScheme());
 
             _beginButton.Accepting += (_, _) => TryConfirm();
+            _customizeButton.Accepting += (_, _) => OpenArchetypeBuilder();
             _promptButton.Accepting += (_, _) => BeginPromptEdit();
             _cancelButton.Accepting += (_, _) => Cancelled?.Invoke();
 
@@ -141,6 +166,7 @@ namespace TerminalQuest.Ui
                 _placeField,
                 _statusLabel,
                 _beginButton,
+                _customizeButton,
                 _promptButton,
                 _cancelButton);
 
@@ -160,6 +186,10 @@ namespace TerminalQuest.Ui
         public string Description { get; private set; } = string.Empty;
 
         public ClassTemplate Template { get; private set; } = ClassTemplates.All[0];
+
+        public bool IsCustomSelected => (_classList.SelectedItem ?? 0) == _classes.Count - 1;
+
+        public ClassTemplate CustomTemplate => _customTemplate;
 
         public string? StartLocation { get; private set; }
 
@@ -183,6 +213,12 @@ namespace TerminalQuest.Ui
             if (key == Key.P.WithCtrl)
             {
                 BeginPromptEdit();
+                return true;
+            }
+
+            if (key == Key.B.WithCtrl)
+            {
+                OpenArchetypeBuilder();
                 return true;
             }
 
@@ -234,6 +270,46 @@ namespace TerminalQuest.Ui
             }
 
             base.Dispose(disposing);
+        }
+
+        private void RefreshClassListSource()
+        {
+            var classNames = _classes.Select((c, i) =>
+                i == _classes.Count - 1
+                    ? $" [Custom] {c.Name.PadRight(10)} (HP {c.MaxHealth,2})"
+                    : $" {c.Name.PadRight(12)} (HP {c.MaxHealth,2})").ToList();
+            _classList.SetSource(new ObservableCollection<string>(classNames));
+        }
+
+        public void OpenArchetypeBuilder()
+        {
+            var dialog = new ArchetypeBuilderDialog(_app, _settings, _customTemplate, Editor);
+
+            dialog.Done += () =>
+            {
+                if (dialog.Confirmed && dialog.ResultTemplate is { } result)
+                {
+                    _customTemplate = result;
+                    _classes[^1] = _customTemplate;
+                    RefreshClassListSource();
+                    _classList.SelectedItem = _classes.Count - 1;
+                    UpdateClassDetails();
+                }
+            };
+
+            if (_app is not null)
+            {
+                _app.Run(dialog);
+            }
+
+            if (dialog.Confirmed && dialog.ResultTemplate is { } res)
+            {
+                _customTemplate = res;
+                _classes[^1] = _customTemplate;
+                RefreshClassListSource();
+                _classList.SelectedItem = _classes.Count - 1;
+                UpdateClassDetails();
+            }
         }
 
         private void UpdateClassDetails()

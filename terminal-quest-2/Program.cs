@@ -256,7 +256,7 @@ namespace TerminalQuest
 
             if (needsCharacter && startupError is null)
             {
-                var created = CreateCharacter(app, store, editor);
+                var created = CreateCharacter(app, store, editor, settings);
 
                 // Backing out of the character screen means backing out of the save. The folder is
                 // left as the menu made it - empty, and offered again on the menu this returns to.
@@ -1350,11 +1350,15 @@ namespace TerminalQuest
         /// answers have to exist before the narrator is started, because the whole point is that it
         /// reads the character rather than inventing one.
         /// </remarks>
-        private static StartedCharacter? CreateCharacter(IApplication app, SaveStore store, ExternalEditor editor)
+        private static StartedCharacter? CreateCharacter(
+            IApplication app,
+            SaveStore store,
+            ExternalEditor editor,
+            AppSettings settings)
         {
             // The prompt file is already on disk by now - RunSessionAsync seeds it before this screen
             // opens - so the window is handed a path it can simply give to an editor.
-            using var window = new NewCharacterWindow(store.Name)
+            using var window = new NewCharacterWindow(store.Name, settings, app)
             {
                 Editor = editor,
                 SystemPromptPath = store.SystemPromptPath,

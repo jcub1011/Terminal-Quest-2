@@ -127,5 +127,82 @@ namespace TerminalQuest.Tests.Saves
             Assert.All(ClassTemplates.All, template =>
                 Assert.All(template.StartingItems, item => Assert.True(string.IsNullOrEmpty(item.Id))));
         }
+
+        [Fact]
+        public void Every_class_has_fifteen_starting_gold()
+        {
+            Assert.All(ClassTemplates.All, template =>
+                Assert.Equal(ClassTemplates.StandardStartingMoney, template.StartingMoney));
+        }
+
+        [Fact]
+        public void Every_class_has_two_healing_items_and_three_rations()
+        {
+            Assert.All(ClassTemplates.All, template =>
+            {
+                var bandages = template.StartingItems.FirstOrDefault(i => i.Name == "bandages");
+                Assert.NotNull(bandages);
+                Assert.Equal(ClassTemplates.StandardHealingItemQuantity, bandages.Quantity);
+
+                var rations = template.StartingItems.FirstOrDefault(i => i.Name == "rations");
+                Assert.NotNull(rations);
+                Assert.Equal(ClassTemplates.StandardRationsQuantity, rations.Quantity);
+            });
+        }
+
+        [Fact]
+        public void Default_custom_archetype_has_standard_allocation()
+        {
+            var custom = ClassTemplates.CreateDefaultCustom();
+            Assert.Equal("Custom", custom.Name);
+            Assert.Equal(ClassTemplates.StandardStartingMoney, custom.StartingMoney);
+            Assert.Equal(ClassTemplates.DefaultPointBudget, custom.Attributes.Sum(a => a.Score));
+
+            var bandages = custom.StartingItems.FirstOrDefault(i => i.Name == "bandages");
+            Assert.NotNull(bandages);
+            Assert.Equal(ClassTemplates.StandardHealingItemQuantity, bandages.Quantity);
+
+            var rations = custom.StartingItems.FirstOrDefault(i => i.Name == "rations");
+            Assert.NotNull(rations);
+            Assert.Equal(ClassTemplates.StandardRationsQuantity, rations.Quantity);
+        }
+
+        [Fact]
+        public void Build_custom_archetype_includes_selected_items_and_standard_allocation()
+        {
+            var weapon = new Item { Name = "mithril blade", Quantity = 1, Description = "Keen and bright." };
+            var offhand = new Item { Name = "tome of shadows", Quantity = 1, Description = "Whispering pages." };
+            var special = new Item { Name = "skeleton key", Quantity = 1, Description = "Opens old wards." };
+            var attrs = new List<CharacterAttribute>
+            {
+                new() { Name = "Strength", Score = 15 },
+                new() { Name = "Dexterity", Score = 14 },
+                new() { Name = "Constitution", Score = 13 },
+                new() { Name = "Intelligence", Score = 12 },
+                new() { Name = "Wisdom", Score = 10 },
+                new() { Name = "Charisma", Score = 10 },
+                new() { Name = "Luck", Score = 12 },
+            };
+
+            var built = ClassTemplates.BuildCustom(
+                "Spellsword",
+                "Blade and sorcery.",
+                "Trained in the arcane arts and the sword.",
+                28,
+                attrs,
+                weapon,
+                offhand,
+                special);
+
+            Assert.Equal("Spellsword", built.Name);
+            Assert.Equal(28, built.MaxHealth);
+            Assert.Equal(ClassTemplates.StandardStartingMoney, built.StartingMoney);
+            Assert.Equal(7, built.Attributes.Count);
+            Assert.Contains(built.StartingItems, i => i.Name == "mithril blade");
+            Assert.Contains(built.StartingItems, i => i.Name == "tome of shadows");
+            Assert.Contains(built.StartingItems, i => i.Name == "skeleton key");
+            Assert.Contains(built.StartingItems, i => i.Name == "bandages" && i.Quantity == 2);
+            Assert.Contains(built.StartingItems, i => i.Name == "rations" && i.Quantity == 3);
+        }
     }
 }

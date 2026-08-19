@@ -116,7 +116,7 @@ namespace TerminalQuest.Tests.Ui
             var sequence = new System.Collections.Generic.List<Type>();
             window.SetFocus();
 
-            for (var i = 0; i < 9; i++)
+            for (var i = 0; i < 10; i++)
             {
                 sequence.Add(window.MostFocused!.GetType());
                 window.AdvanceFocus(NavigationDirection.Forward, TabBehavior.TabStop);
@@ -130,6 +130,7 @@ namespace TerminalQuest.Tests.Ui
                     typeof(TextField),
                     typeof(TextField),
                     typeof(TextField),
+                    typeof(Button),
                     typeof(Button),
                     typeof(Button),
                     typeof(Button),

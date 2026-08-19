@@ -46,6 +46,11 @@ namespace TerminalQuest.Saves
     /// <summary>The archetypes offered on the character screen, in the order they are listed.</summary>
     internal static class ClassTemplates
     {
+        public const int StandardStartingMoney = 15;
+        public const int StandardHealingItemQuantity = 2;
+        public const int StandardRationsQuantity = 3;
+        public const int DefaultPointBudget = 74;
+
         public static IReadOnlyList<ClassTemplate> All { get; } =
         [
             new ClassTemplate(
@@ -54,13 +59,13 @@ namespace TerminalQuest.Saves
                 "A warrior, trained to arms and armour, at home in a shield wall and slow to yield.",
                 30,
                 Spread(strength: 16, dexterity: 11, constitution: 15, intelligence: 9, wisdom: 11, charisma: 12),
-                15,
+                StandardStartingMoney,
                 [
                     Make("iron longsword", 1, "Notched along one edge and sharp along the rest."),
                     Make("battered shield", 1, "Oak faced with hide, and dented past straightening."),
                     Make("chain hauberk", 1, "Heavy, well-oiled, and missing a few links at the hem."),
-                    Make("bandages", 2, "Clean linen, rolled tight."),
-                    Make("rations", 3, "Hard bread and salt meat, a day's worth apiece."),
+                    MakeHealingItem(),
+                    MakeRations(),
                 ]),
 
             new ClassTemplate(
@@ -69,13 +74,14 @@ namespace TerminalQuest.Saves
                 "A mage, schooled in the old syllables, quick to read a ward and quicker to raise one.",
                 18,
                 Spread(strength: 8, dexterity: 12, constitution: 11, intelligence: 16, wisdom: 14, charisma: 13),
-                25,
+                StandardStartingMoney,
                 [
                     Make("ashwood staff", 1, "Worn pale where a hand has always held it."),
                     Make("spellbook", 1, "Half its pages are still blank."),
                     Make("chalk", 3, "For circles, wards and the marks that hold them."),
                     Make("vial of ink", 1, "Iron gall, dark enough to write on stone."),
-                    Make("rations", 3, "Hard bread and salt meat, a day's worth apiece."),
+                    MakeHealingItem(),
+                    MakeRations(),
                 ]),
 
             new ClassTemplate(
@@ -84,13 +90,14 @@ namespace TerminalQuest.Saves
                 "A rogue, light-fingered and lighter-footed, who reads a room before entering it.",
                 22,
                 Spread(strength: 10, dexterity: 16, constitution: 12, intelligence: 13, wisdom: 11, charisma: 12),
-                30,
+                StandardStartingMoney,
                 [
                     Make("dagger", 2, "Plain, balanced, and easy to lose without regret."),
                     Make("lockpicks", 1, "A wrap of oiled leather holding six picks and a tension wrench."),
                     Make("dark cloak", 1, "Undyed wool gone the colour of a wet street."),
                     Make("coil of rope", 1, "Thirty feet of hemp, knotted every arm's length."),
-                    Make("rations", 3, "Hard bread and salt meat, a day's worth apiece."),
+                    MakeHealingItem(),
+                    MakeRations(),
                 ]),
 
             new ClassTemplate(
@@ -99,13 +106,14 @@ namespace TerminalQuest.Saves
                 "A ranger, at ease in wild country, who can follow a day-old trail and put an arrow where they look.",
                 24,
                 Spread(strength: 12, dexterity: 15, constitution: 13, intelligence: 10, wisdom: 15, charisma: 9),
-                12,
+                StandardStartingMoney,
                 [
                     Make("yew shortbow", 1, "Strung with waxed sinew, and a spare string in the grip."),
                     Make("arrows", 20, "Goose-fletched, in a stiffened leather quiver."),
                     Make("hunting knife", 1, "For skinning, mostly."),
                     Make("snare wire", 2, "A loop of brass wire, enough for a hare."),
-                    Make("rations", 3, "Dried meat and berries, a day's worth apiece."),
+                    MakeHealingItem(),
+                    MakeRations("Dried meat and berries, a day's worth apiece."),
                 ]),
 
             new ClassTemplate(
@@ -114,15 +122,66 @@ namespace TerminalQuest.Saves
                 "A cleric, sworn to a quiet god, whose hands mend more often than they harm.",
                 24,
                 Spread(strength: 12, dexterity: 10, constitution: 13, intelligence: 11, wisdom: 16, charisma: 12),
-                18,
+                StandardStartingMoney,
                 [
                     Make("oak mace", 1, "Banded in iron. It breaks bones without breaking an oath."),
                     Make("holy symbol", 1, "Worn smooth by a thumb that returns to it when afraid."),
                     Make("vial of blessed oil", 2, "Sweet-smelling, and it burns longer than it should."),
-                    Make("bandages", 3, "Clean linen, rolled tight."),
-                    Make("rations", 3, "Hard bread and salt meat, a day's worth apiece."),
+                    MakeHealingItem(),
+                    MakeRations(),
                 ]),
         ];
+
+        public static Item MakeHealingItem() =>
+            Make("bandages", StandardHealingItemQuantity, "Clean linen, rolled tight.");
+
+        public static Item MakeRations(string description = "Hard bread and salt meat, a day's worth apiece.") =>
+            Make("rations", StandardRationsQuantity, description);
+
+        public static ClassTemplate CreateDefaultCustom() =>
+            new(
+                "Custom",
+                "A custom archetype tailored to your design.",
+                "A traveler forged by their own path, unbound by conventional traditions.",
+                24,
+                Spread(strength: 12, dexterity: 12, constitution: 12, intelligence: 12, wisdom: 12, charisma: 14),
+                StandardStartingMoney,
+                [
+                    Make("iron broadsword", 1, "Well-balanced steel with a crossguard wrapped in cord."),
+                    Make("wooden roundshield", 1, "Planks of pine bound in brass, light enough for a skirmish."),
+                    Make("traveler's charm", 1, "A carved river stone hung from a loop of braided leather."),
+                    MakeHealingItem(),
+                    MakeRations(),
+                ]);
+
+        public static ClassTemplate BuildCustom(
+            string name,
+            string summary,
+            string aptitude,
+            int maxHealth,
+            IReadOnlyList<CharacterAttribute> attributes,
+            Item weapon,
+            Item offhand,
+            Item specialItem)
+        {
+            var archetypeItems = new List<Item>
+            {
+                new() { Name = weapon.Name, Quantity = Math.Max(1, weapon.Quantity), Description = weapon.Description },
+                new() { Name = offhand.Name, Quantity = Math.Max(1, offhand.Quantity), Description = offhand.Description },
+                new() { Name = specialItem.Name, Quantity = Math.Max(1, specialItem.Quantity), Description = specialItem.Description },
+                MakeHealingItem(),
+                MakeRations(),
+            };
+
+            return new ClassTemplate(
+                string.IsNullOrWhiteSpace(name) ? "Custom" : name.Trim(),
+                string.IsNullOrWhiteSpace(summary) ? "A custom archetype tailored to your design." : summary.Trim(),
+                string.IsNullOrWhiteSpace(aptitude) ? "A traveler forged by their own path, unbound by conventional traditions." : aptitude.Trim(),
+                Math.Max(1, maxHealth),
+                attributes,
+                StandardStartingMoney,
+                archetypeItems);
+        }
 
         private static Item Make(string name, int quantity, string description) =>
             new() { Name = name, Quantity = quantity, Description = description };
@@ -136,7 +195,7 @@ namespace TerminalQuest.Saves
         /// to transpose two scores in a way that compiles, reads plausibly, and is wrong for the
         /// life of the archetype.
         /// </remarks>
-        private static IReadOnlyList<CharacterAttribute> Spread(
+        public static IReadOnlyList<CharacterAttribute> Spread(
             int strength,
             int dexterity,
             int constitution,
@@ -152,7 +211,7 @@ namespace TerminalQuest.Saves
                 Score("Charisma", charisma),
             ];
 
-        private static CharacterAttribute Score(string name, int score) =>
+        public static CharacterAttribute Score(string name, int score) =>
             new() { Name = name, Score = score };
     }
 }
