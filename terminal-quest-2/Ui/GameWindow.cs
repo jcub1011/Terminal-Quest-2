@@ -162,6 +162,22 @@ namespace TerminalQuest.Ui
 
         public GameState State { get; }
 
+        private IApplication? _app;
+
+        /// <summary>
+        /// The application instance hosting the window.
+        /// </summary>
+        public new IApplication? App
+        {
+            get => base.App ?? _app;
+            set
+            {
+                base.App = value;
+                _app = value;
+                Narration.AppInvoke = value is { } app ? app.Invoke : null;
+            }
+        }
+
         /// <summary>
         /// The save store backing the session, used for command argument completions.
         /// </summary>

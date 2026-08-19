@@ -44,12 +44,83 @@ namespace TerminalQuest.Ui
         /// </summary>
         private const string MoreBelow = " ▼ more below ";
 
+        private const string SerpentHead = "⪢";
+
         /// <summary>
-        /// Stands in for the narration until the first token of it arrives, in the place that
-        /// narration will occupy. It belongs here rather than in the status pane: the player is
-        /// waiting on prose, and this is where the prose appears.
+        /// Builds the single-row animated fantasy serpent frame for the given horizontal animation
+        /// step and available line width. Each cell wraps independently across the pane margins,
+        /// creating a continuous toroidal wrap with fixed characters per column (~ and ≈).
         /// </summary>
-        private static readonly StyledLine WaitingRow = StyledLine.FromText("...thinking", TextRole.Speech);
+        internal static StyledLine BuildWaitingRow(int step, int width)
+        {
+            var line = new StyledLine();
+            if (width <= 0)
+            {
+                return line;
+            }
+
+            if (width == 1)
+            {
+                line.Append(SerpentHead, TextRole.Item);
+                return line;
+            }
+
+            var safeStep = Math.Abs(step);
+            var headCol = safeStep % width;
+            var serpentBodyLen = Math.Min(12, Math.Max(1, width - 1));
+
+            TextRole GetRole(int col)
+            {
+                if (col == headCol)
+                {
+                    return TextRole.Item;
+                }
+
+                var dist = (headCol - col + width) % width;
+                return dist >= 1 && dist <= serpentBodyLen ? TextRole.Place : TextRole.Normal;
+            }
+
+            char GetChar(int col)
+            {
+                if (col == headCol)
+                {
+                    return SerpentHead[0];
+                }
+
+                var dist = (headCol - col + width) % width;
+                if (dist >= 1 && dist <= serpentBodyLen)
+                {
+                    return (col % 2 == 0) ? '~' : '≈';
+                }
+
+                return ' ';
+            }
+
+            var colIndex = 0;
+            while (colIndex < width)
+            {
+                var role = GetRole(colIndex);
+                var runEnd = colIndex + 1;
+                while (runEnd < width && GetRole(runEnd) == role)
+                {
+                    runEnd++;
+                }
+
+                var count = runEnd - colIndex;
+                var chars = new char[count];
+                for (var i = 0; i < count; i++)
+                {
+                    chars[i] = GetChar(colIndex + i);
+                }
+
+                line.Append(new string(chars), role);
+                colIndex = runEnd;
+            }
+
+            return line;
+        }
+
+        private StyledLine WaitingRow => BuildWaitingRow(_animationStep, _wrapWidth);
 
         private readonly List<StyledLine> _committed = [];
         private readonly MarkupParser _parser = new();
@@ -65,6 +136,20 @@ namespace TerminalQuest.Ui
         private bool _stickToBottom = true;
 
         private bool _isWaiting;
+        private int _animationStep;
+        private CancellationTokenSource? _animationCts;
+        private readonly object _animationGate = new();
+
+        /// <summary>
+        /// Marshals animation updates to the UI thread. If null, falls back to <see cref="View.App"/>.
+        /// </summary>
+        public Action<Action>? AppInvoke { get; set; }
+
+        internal int AnimationStep
+        {
+            get => _animationStep;
+            set => _animationStep = value;
+        }
 
         /// <summary>
         /// Raised when the player clicks on a rendered entity in the transcript.
@@ -89,12 +174,90 @@ namespace TerminalQuest.Ui
                 }
 
                 _isWaiting = value;
+                if (_isWaiting && _currentRows.Count == 0)
+                {
+                    _animationStep = 0;
+                    StartAnimation();
+                }
+                else
+                {
+                    StopAnimation();
+                }
+
                 AfterContentChanged();
             }
         }
 
         /// <summary>Whether the placeholder is currently one of the rows.</summary>
         private bool ShowWaiting => _isWaiting && _currentRows.Count == 0;
+
+        private void StartAnimation()
+        {
+            lock (_animationGate)
+            {
+                if (_animationCts is not null || !ShowWaiting)
+                {
+                    return;
+                }
+
+                var cts = new CancellationTokenSource();
+                _animationCts = cts;
+                var token = cts.Token;
+
+                _ = Task.Run(async () =>
+                {
+                    using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(100));
+                    try
+                    {
+                        while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+                        {
+                            if (token.IsCancellationRequested)
+                            {
+                                break;
+                            }
+
+                            var invoke = AppInvoke ?? (App is { } app ? app.Invoke : null);
+                            if (invoke is { })
+                            {
+                                invoke(TickAnimation);
+                            }
+                            else
+                            {
+                                TickAnimation();
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                }, token);
+            }
+        }
+
+        private void StopAnimation()
+        {
+            lock (_animationGate)
+            {
+                if (_animationCts is { } cts)
+                {
+                    _animationCts = null;
+                    cts.Cancel();
+                    cts.Dispose();
+                }
+            }
+        }
+
+        internal void TickAnimation()
+        {
+            if (!ShowWaiting)
+            {
+                StopAnimation();
+                return;
+            }
+
+            _animationStep++;
+            SetNeedsDraw();
+        }
 
         /// <summary>
         /// Every row the view can scroll through, the placeholder included, so scrolling and
@@ -136,6 +299,11 @@ namespace TerminalQuest.Ui
             // yet, and must not yield a blank row - that row would replace the waiting placeholder
             // with nothing at all.
             _currentRows = _current.Length > 0 ? Wrap(_current.Spans, _wrapWidth) : [];
+            if (_currentRows.Count > 0)
+            {
+                StopAnimation();
+            }
+
             AfterContentChanged();
         }
 
@@ -161,6 +329,7 @@ namespace TerminalQuest.Ui
             // marshalled call - long enough for the placeholder to be drawn again under the finished
             // prose in between.
             _isWaiting = false;
+            StopAnimation();
 
             AfterContentChanged();
         }
@@ -360,7 +529,8 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
-            var textWidth = Math.Max(1, width - 1);
+            var padding = width >= 2 ? 1 : 0;
+            var textWidth = Math.Max(1, width - 1 - padding);
 
             // Terminal was resized: everything must be re-wrapped to the new width.
             if (textWidth != _wrapWidth)
@@ -417,6 +587,13 @@ namespace TerminalQuest.Ui
                 {
                     SetRole(TextRole.Normal);
                     AddStr(Blank(textWidth));
+                }
+
+                // 1 character padding between text/serpent and scroll bar
+                if (padding > 0)
+                {
+                    SetRole(TextRole.Normal);
+                    AddStr(" ");
                 }
 
                 // Draw scroll bar column at x = width - 1
@@ -648,6 +825,16 @@ namespace TerminalQuest.Ui
             }
 
             return rows;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                StopAnimation();
+            }
+
+            base.Dispose(disposing);
         }
     }
 }
