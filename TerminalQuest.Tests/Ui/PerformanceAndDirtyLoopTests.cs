@@ -15,9 +15,8 @@ namespace TerminalQuest.Tests.Ui
     /// Terminal.Gui descends into a subview during a draw only if that subview says it needs one -
     /// <see cref="View.NeedsDraw"/>, <c>SubViewNeedsDraw</c> or <see cref="View.NeedsLayout"/>. A
     /// view that re-arms one of those from outside its own draw is asking to be repainted on every
-    /// iteration of the main loop, for as long as its screen is open, and at the frame cap
-    /// <see cref="TerminalQuest.Ui.Responsiveness"/> sets that is a hundred repaints a second of a
-    /// screen nobody is touching. It costs little per frame, which is exactly why it survives
+    /// iteration of the main loop, for as long as its screen is open, and at the framework's
+    /// frame cap that is twenty-five repaints a second of a screen nobody is touching. It costs little per frame, which is exactly why it survives
     /// inspection of any one frame.
     /// </para>
     /// <para>

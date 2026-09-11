@@ -150,13 +150,6 @@ namespace TerminalQuest
             // the mouse. The cost is the terminal's own selection, which moves onto Shift+drag.
             MouseReporting.Enable(app);
 
-            // Still worth having - an idle iteration is genuinely free - but it is not the fix for
-            // input lag that it was written to be. See the measurement in Responsiveness itself.
-            Responsiveness.Apply(app);
-
-            // Works around a Terminal.Gui output defect that charges a frame for its gaps rather
-            // than its content. Always on; TQ_NOFILL=1 measures life without it.
-            FrameCompaction.Enable(app);
 
             // Silent unless TQ_DIAG=1, and then it answers the one question a profiler cannot:
             // how many frames there are, rather than what each one costs.

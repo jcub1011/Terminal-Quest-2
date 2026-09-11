@@ -47,7 +47,7 @@ namespace TerminalQuest.Ui
             // The border was briefly removed as a performance measure and then put back, because it
             // was not costing anything: with the border gone all seventy-two rows of a full-screen
             // terminal were still marked dirty by a keystroke, so it was never what flagged them.
-            // What made those rows expensive is dealt with in FrameCompaction instead.
+            // Terminal.Gui 2.5.0 batches writes across clean gaps natively.
             BorderStyle = LineStyle.Rounded;
 
             // Said out loud now that the mouse is reported to the application: this screen fills the

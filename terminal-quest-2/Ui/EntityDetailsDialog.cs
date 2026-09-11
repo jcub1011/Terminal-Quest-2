@@ -370,21 +370,15 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class EntityDetailsContentView : ThemedView
     {
-        private readonly string _rawText;
         private List<string> _wrappedLines = [];
         private int _wrapWidth = -1;
         private int _offsetY;
 
         public EntityDetailsContentView(string text)
         {
-            _rawText = text ?? string.Empty;
+            Text = text ?? string.Empty;
             CanFocus = true;
-        }
-
-        public override string Text
-        {
-            get => _rawText;
-            set { }
+            TextChanged += (_, _) => _wrapWidth = -1;
         }
 
         public IReadOnlyList<string> WrappedLines => _wrappedLines;
@@ -399,7 +393,7 @@ namespace TerminalQuest.Ui
                 return;
             }
 
-            var paragraphs = _rawText.Split('\n');
+            var paragraphs = Text.Split('\n');
             foreach (var para in paragraphs)
             {
                 var clean = para.TrimEnd('\r');
