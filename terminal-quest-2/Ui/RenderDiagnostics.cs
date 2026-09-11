@@ -77,7 +77,7 @@ namespace TerminalQuest.Ui
         /// <remarks>
         /// Subscribed once rather than per session. Both events are the application's own and
         /// outlive the individual screens, so re-subscribing as each opens - which is what
-        /// <see cref="MouseReporting"/> and <see cref="Responsiveness"/> have to do - would only
+        /// <see cref="MouseReporting"/> has to do - would only
         /// count each iteration twice.
         /// </remarks>
         public static void Enable(IApplication app)
@@ -165,7 +165,7 @@ namespace TerminalQuest.Ui
 
             StartMeterListener();
 
-            Write($"# started {DateTime.Now:HH:mm:ss}  TQ_FPS={Responsiveness.Cap()}  " +
+            Write($"# started {DateTime.Now:HH:mm:ss}  FPS={Application.MaximumIterationsPerSecond}  " +
                   $"TQ_DRIVER={Environment.GetEnvironmentVariable("TQ_DRIVER") ?? "(default)"}  " +
                   $"TQ_MOUSE={Environment.GetEnvironmentVariable("TQ_MOUSE") ?? "1"}  " +
                   $"build={(IsDebugBuild() ? "Debug" : "Release")}");

@@ -216,54 +216,6 @@ namespace TerminalQuest.Tests.Ui
             Assert.NotNull(Theme.CreateScheme());
         }
 
-        // ---- Frame rate clamp ---------------------------------------------------------------------
 
-        [Collection(EnvironmentCollection.Name)]
-        [Trait(Categories.Name, Categories.Environment)]
-        public sealed class FrameRateTests
-        {
-            private static ushort CapWith(string? value)
-            {
-                var previous = Environment.GetEnvironmentVariable("TQ_FPS");
-
-                try
-                {
-                    Environment.SetEnvironmentVariable("TQ_FPS", value);
-                    return Responsiveness.Cap();
-                }
-                finally
-                {
-                    Environment.SetEnvironmentVariable("TQ_FPS", previous);
-                }
-            }
-
-            [Theory]
-            [InlineData(null)]
-            [InlineData("")]
-            [InlineData("not a number")]
-            [InlineData("-1")]
-            [InlineData("99999")]   // beyond ushort, so the parse fails rather than clamping
-            [InlineData("1.5")]
-            public void An_unusable_setting_falls_back_to_the_default(string? value)
-            {
-                // A typo must not stall the loop or spin it.
-                Assert.Equal(100, CapWith(value));
-            }
-
-            [Theory]
-            [InlineData("1", 20)]
-            [InlineData("0", 20)]
-            [InlineData("20", 20)]
-            [InlineData("60", 60)]
-            [InlineData("500", 500)]
-            // Above the ceiling the main loop's own sleep rounds down to nothing and it free-spins,
-            // so the clamp has to hold well short of where a frame budget falls under a millisecond.
-            [InlineData("1000", 500)]
-            [InlineData("2000", 500)]
-            public void A_usable_setting_is_clamped_into_range(string value, int expected)
-            {
-                Assert.Equal(expected, CapWith(value));
-            }
-        }
     }
 }

@@ -18,7 +18,7 @@
     <!-- xunit.v3 pins the whole Microsoft.Testing.Platform stack at 1.9.1. Do not add an
          explicit Microsoft.Testing.Platform* reference: upgrading one package without the
          others splits the set and the host dies with a TypeLoadException at startup. -->
-    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.v3" Version="4.0.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,8 +26,7 @@
 
     <!-- Built alongside the tests but never referenced in code: ClaudeSession launches it as a
          process, so all the tests need is for it to exist on disk next to them. -->
-    <ProjectReference Include="..\TerminalQuest.Tests.FakeClaude\TerminalQuest.Tests.FakeClaude.csproj"
-                      ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TerminalQuest.Tests.FakeClaude\TerminalQuest.Tests.FakeClaude.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <!--
@@ -40,18 +39,14 @@
     <ItemGroup>
       <FakeClaudeFiles Include="$(MSBuildThisFileDirectory)..\TerminalQuest.Tests.FakeClaude\bin\$(Configuration)\$(TargetFramework)\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(FakeClaudeFiles)"
-          DestinationFolder="$(OutDir)%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(FakeClaudeFiles)" DestinationFolder="$(OutDir)%(RecursiveDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyAssets" AfterTargets="Build">
     <ItemGroup>
       <AssetFiles Include="$(MSBuildThisFileDirectory)..\terminal-quest-2\assets\**\*" />
     </ItemGroup>
-    <Copy SourceFiles="@(AssetFiles)"
-          DestinationFolder="$(OutDir)assets\%(RecursiveDir)"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(AssetFiles)" DestinationFolder="$(OutDir)assets\%(RecursiveDir)" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>
