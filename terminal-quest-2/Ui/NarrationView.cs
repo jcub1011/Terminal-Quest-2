@@ -182,6 +182,24 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// Returns to the first row of the transcript. The keyboard twin of dragging the
+        /// scrollbar to the top - and the far end of Ctrl+End, which rejoins the narrator.
+        /// </summary>
+        public void ScrollToTop()
+        {
+            Viewport = Viewport with { Y = 0 };
+            _stickToBottom = AtBottom(Viewport.Y, TotalRows, Viewport.Height);
+            SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// Whether the foot of the transcript is off screen - the condition the "more below"
+        /// marker is drawn for. Exposed so hosts and tests can tell a detached pane (which needs
+        /// a Ctrl+End) from one that is following the narrator.
+        /// </summary>
+        internal bool IsDetached => HasMoreBelow;
+
+        /// <summary>
         /// Scrolls by whole rows. The scroll offset is <see cref="View.Viewport"/>'s, so the base
         /// class does the clamping; this only has to keep the follow-the-stream flag in step, so
         /// that wheeling up during a turn detaches from the stream and wheeling back down rejoins
@@ -239,13 +257,13 @@ namespace TerminalQuest.Ui
         {
             var page = Math.Max(1, Viewport.Height - 1);
 
-            if (key == Key.PageUp)
+            if (key == Key.PageUp || key == Key.PageUp.WithCtrl)
             {
                 Scroll(-page);
                 return true;
             }
 
-            if (key == Key.PageDown)
+            if (key == Key.PageDown || key == Key.PageDown.WithCtrl)
             {
                 Scroll(page);
                 return true;
@@ -253,12 +271,39 @@ namespace TerminalQuest.Ui
 
             // The one key that rejoins the narrator outright, however far back the player has read.
             //
-            // Not End, and not Ctrl+End, though both are the obvious spelling: focus lives in the
-            // command box, a TextField binds each of them to its own caret and is offered every key
-            // first, so neither would ever reach this view. PageUp and PageDown arrive only because
-            // a single-line field implements no paging command at all - and Shift+PageDown is the
-            // rest of that same gap.
+            // Not End, and not Ctrl+End, though both are the obvious spelling - at least, not
+            // from this view's own focus, which it never has. PageUp and PageDown arrive only
+            // because a single-line field implements no paging command at all - and Shift+PageDown
+            // is the rest of that same gap. The Ctrl variants below arrive the same way, forwarded
+            // by the window that owns the focus.
             if (key == Key.PageDown.WithShift)
+            {
+                ScrollToBottom();
+                return true;
+            }
+
+            // Line-by-line reading without leaving the command box. The bare arrows are the
+            // input field's caret keys and never reach this view; the Ctrl variants mean nothing
+            // to a single-line field and are forwarded here by the window.
+            if (key == Key.CursorUp.WithCtrl)
+            {
+                Scroll(-1);
+                return true;
+            }
+
+            if (key == Key.CursorDown.WithCtrl)
+            {
+                Scroll(1);
+                return true;
+            }
+
+            if (key == Key.Home.WithCtrl)
+            {
+                ScrollToTop();
+                return true;
+            }
+
+            if (key == Key.End.WithCtrl)
             {
                 ScrollToBottom();
                 return true;

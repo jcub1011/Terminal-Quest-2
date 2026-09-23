@@ -17,7 +17,10 @@ namespace TerminalQuest.Ui
 
         public OptionsView()
         {
-            CanFocus = false;
+            // Focusable so Tab reaches the choices: keyboard selection lives here as well as in
+            // the input field (Up/Down when suggestions are hidden, Alt+1-9 from anywhere).
+            // Skipped by the focus chain while hidden, like every invisible view.
+            CanFocus = true;
             Visible = false;
         }
 
@@ -51,8 +54,24 @@ namespace TerminalQuest.Ui
 
         /// <summary>
         /// Raised when the player double clicks on an option row to submit it immediately.
+        /// Also raised by Enter/Space while this view has focus - the keyboard twin of the
+        /// double click, so nothing is only clickable.
         /// </summary>
         public event Action<NarrationOption>? OptionDoubleClicked;
+
+        /// <summary>
+        /// Raised when keyboard navigation inside this view moves the highlight. The host fills
+        /// the input line from it, the same as a single click, but without moving focus - the
+        /// player is still arrowing through the list.
+        /// </summary>
+        public event Action<NarrationOption>? OptionHighlighted;
+
+        /// <summary>
+        /// Raised when the player presses Esc while this view has focus. The host returns focus
+        /// to the input line. Handled here rather than left to bubble: the window treats Esc as
+        /// leaving the save.
+        /// </summary>
+        public event Action? ExitRequested;
 
         /// <summary>
         /// Updates the options displayed by this view.
@@ -210,6 +229,124 @@ namespace TerminalQuest.Ui
             }
 
             return lines.Count == 0 ? [string.Empty] : lines;
+        }
+
+        protected override bool OnKeyDown(Key key)
+        {
+            if (_options.Count == 0)
+            {
+                return false;
+            }
+
+            // Esc returns to the command box. Claimed here so one press cannot both leave this
+            // list and walk out of the save underneath it.
+            if (key == Key.Esc)
+            {
+                ExitRequested?.Invoke();
+                return true;
+            }
+
+            if (key == Key.CursorUp)
+            {
+                MoveHighlight(-1);
+                return true;
+            }
+
+            if (key == Key.CursorDown)
+            {
+                MoveHighlight(1);
+                return true;
+            }
+
+            if (key == Key.Home)
+            {
+                Highlight(_options[0]);
+                return true;
+            }
+
+            if (key == Key.End)
+            {
+                Highlight(_options[^1]);
+                return true;
+            }
+
+            // 1-9 jumps straight to that choice. Plain digits, not Alt ones: the input field
+            // keeps Alt+digit for itself (it never sees this view's keys), and this view has no
+            // text to type into, so there is nothing to collide with.
+            if (DigitFor(key) is { } number)
+            {
+                var match = _options.FirstOrDefault(o => o.Number == number);
+                if (match is not null)
+                {
+                    Highlight(match);
+                    return true;
+                }
+
+                return false;
+            }
+
+            // Enter/Space submits the highlighted choice - the keyboard double click. With no
+            // highlight yet, the first press only highlights the first choice, so Enter never
+            // fires a choice the player has not seen selected.
+            if ((key == Key.Enter || key == Key.Space) && _options.Count > 0)
+            {
+                var current = _options.FirstOrDefault(o => o.Number == _highlightedOption)
+                    ?? _options[0];
+
+                if (_highlightedOption == current.Number)
+                {
+                    HighlightedOption = current.Number;
+                    OptionDoubleClicked?.Invoke(current);
+                }
+                else
+                {
+                    Highlight(current);
+                }
+
+                return true;
+            }
+
+            return base.OnKeyDown(key);
+        }
+
+        /// <summary>
+        /// The option number for a digit key, or null when the key is not a plain digit.
+        /// </summary>
+        internal static int? DigitFor(Key key)
+        {
+            if (key == Key.D1) return 1;
+            if (key == Key.D2) return 2;
+            if (key == Key.D3) return 3;
+            if (key == Key.D4) return 4;
+            if (key == Key.D5) return 5;
+            if (key == Key.D6) return 6;
+            if (key == Key.D7) return 7;
+            if (key == Key.D8) return 8;
+            if (key == Key.D9) return 9;
+            return null;
+        }
+
+        private void MoveHighlight(int delta)
+        {
+            var current = _options.ToList().FindIndex(o => o.Number == _highlightedOption);
+            int next;
+
+            if (current < 0)
+            {
+                next = delta < 0 ? _options.Count - 1 : 0;
+            }
+            else
+            {
+                next = Math.Clamp(current + delta, 0, _options.Count - 1);
+            }
+
+            Highlight(_options[next]);
+        }
+
+        private void Highlight(NarrationOption option)
+        {
+            HighlightedOption = option.Number;
+            OptionHighlighted?.Invoke(option);
         }
 
         protected override bool OnMouseEvent(Mouse mouse)
