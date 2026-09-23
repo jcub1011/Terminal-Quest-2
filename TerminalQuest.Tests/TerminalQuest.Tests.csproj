@@ -18,7 +18,7 @@
     <!-- xunit.v3 pins the whole Microsoft.Testing.Platform stack at 1.9.1. Do not add an
          explicit Microsoft.Testing.Platform* reference: upgrading one package without the
          others splits the set and the host dies with a TypeLoadException at startup. -->
-    <PackageReference Include="xunit.v3" Version="4.0.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
 
   <ItemGroup>
