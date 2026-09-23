@@ -34,11 +34,11 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(TextRole.Normal, line.Spans[1].Role);
             Assert.Equal(" ", line.Spans[1].Text);
 
+            // Body and head share the dim Hint ink by design, so StyledLine merges
+            // them into a single span; the head position is still pinned by the
+            // StartsWith above and by the per-column tests below.
             Assert.Equal(TextRole.Hint, line.Spans[2].Role);
-            Assert.Equal("~≈~≈~≈~≈~≈~≈", line.Spans[2].Text);
-
-            Assert.Equal(TextRole.Hint, line.Spans[3].Role);
-            Assert.Equal("⪢", line.Spans[3].Text);
+            Assert.Equal("~≈~≈~≈~≈~≈~≈⪢", line.Spans[2].Text);
         }
 
         [Fact]

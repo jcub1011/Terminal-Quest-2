@@ -86,6 +86,65 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// A scheme for an action button whose hotkey letter wears
+        /// <paramref name="hotRole"/> instead of the default <see cref="TextRole.Button"/> blue.
+        /// The focused-input ink is unchanged, so keyboard focus still reads bright while the
+        /// hotkey carries the severity (e.g. <see cref="TextRole.Danger"/> red for Delete/Reset).
+        /// The background stays the terminal's own, like <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme ButtonScheme(TextRole hotRole)
+        {
+            var normal = Attr(TextRole.Normal);
+            var hot = Attr(hotRole);
+
+            return new Scheme(normal)
+            {
+                Normal = normal,
+                HotNormal = hot,
+                Focus = Attr(TextRole.Input),
+                HotFocus = hot,
+                Active = Attr(TextRole.Input),
+                HotActive = hot,
+                Highlight = hot,
+                Disabled = Attr(TextRole.Hint),
+                Editable = Attr(TextRole.Input),
+                ReadOnly = Attr(TextRole.Hint),
+            };
+        }
+
+        /// <summary>
+        /// A scheme for destructive action buttons (Delete, Reset): the hotkey letter reads
+        /// <see cref="TextRole.Danger"/> red while everything else matches <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme DangerButtonScheme() => ButtonScheme(TextRole.Danger);
+
+        /// <summary>
+        /// A scheme for a frame border and title tinted with
+        /// <paramref name="role"/>. Used to mark the focused pane: the active pane's border
+        /// wears <see cref="TextRole.Button"/> blue, the idle pane recedes into
+        /// <see cref="TextRole.Hint"/> grey. The <c>*</c> title marker is kept, so the focus
+        /// never depends on colour alone. The background stays the terminal's own.
+        /// </summary>
+        public static Scheme FrameScheme(TextRole role)
+        {
+            var ink = Attr(role);
+
+            return new Scheme(ink)
+            {
+                Normal = ink,
+                HotNormal = ink,
+                Focus = ink,
+                HotFocus = ink,
+                Active = Attr(TextRole.Input),
+                HotActive = Attr(TextRole.Button),
+                Highlight = Attr(TextRole.Button),
+                Disabled = Attr(TextRole.Hint),
+                Editable = Attr(TextRole.Input),
+                ReadOnly = Attr(TextRole.Hint),
+            };
+        }
+
+        /// <summary>
         /// The scheme applied to the window and every stock control inside it.
         /// <para>
         /// Every role is pinned explicitly with a <see cref="Color.None"/> background. That matters

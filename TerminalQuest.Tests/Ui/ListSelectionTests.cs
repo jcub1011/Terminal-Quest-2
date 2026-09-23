@@ -629,5 +629,92 @@ namespace TerminalQuest.Tests.Ui
             Assert.True(table.NewKeyDownEvent(Key.CursorDown));
             Assert.Equal(1, table.Value?.SelectedCell.Y);
         }
+
+        [Fact]
+        public void SaveMenu_header_help_and_separators_use_distinct_roles()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var labels = FindDescendants<Label>(window).ToList();
+
+            // Title level reads bright; help text recedes.
+            var header = labels.Single(l => $"{l.Text}".StartsWith("Narrator:", StringComparison.Ordinal));
+            Assert.Equal(Theme.Attr(TextRole.Command), header.GetAttributeForRole(VisualRole.Normal));
+
+            var hints = labels.Single(l => $"{l.Text}".Contains("Tab:", StringComparison.Ordinal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), hints.GetAttributeForRole(VisualRole.Normal));
+
+            // Group dividers stay dim rather than competing with the buttons.
+            var separators = labels.Where(l => $"{l.Text}" == "│").ToList();
+            Assert.Equal(2, separators.Count);
+            foreach (var separator in separators)
+            {
+                Assert.Equal(Theme.Attr(TextRole.Hint), separator.GetAttributeForRole(VisualRole.Normal));
+            }
+        }
+
+        [Fact]
+        public void SaveMenu_destructive_buttons_wear_a_danger_hotkey()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var buttons = FindDescendants<Button>(window).ToList();
+            Assert.Equal(10, buttons.Count);
+
+            Button Named(string text) => buttons.Single(b => $"{b.Text}" == text);
+
+            // Delete/Reset stand apart in red; safe actions keep the standard blue hotkey.
+            Assert.Equal(Theme.Attr(TextRole.Danger), Named("Delete (Del)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Danger), Named("Reset (Ctrl+R)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Button), Named("Load (Enter)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Button), Named("New (N)").GetAttributeForRole(VisualRole.HotNormal));
+        }
+
+        [Fact]
+        public void SaveMenu_focused_pane_border_and_hints_follow_focus()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            FrameView Frame(string title) =>
+                FindDescendants<FrameView>(window).Single(f => $"{f.Title}" == title);
+            var hints = FindDescendants<Label>(window).Single(l => $"{l.Text}".Contains("Tab:", StringComparison.Ordinal));
+
+            // Saves focused: blue border there, dimmed actions, saves hints.
+            Assert.Equal("* Saves", $"{Frame("* Saves").Title}");
+            Assert.Equal(Theme.Attr(TextRole.Button), Frame("* Saves").GetAttributeForRole(VisualRole.Normal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), Frame("Actions").GetAttributeForRole(VisualRole.Normal));
+            Assert.Contains("Up/Down: saves", $"{hints.Text}", StringComparison.Ordinal);
+
+            // Tab into the action bar: the border and hints move with focus.
+            window.NewKeyDownEvent(Key.Tab);
+
+            Assert.Equal("* Actions", $"{Frame("* Actions").Title}");
+            Assert.Equal(Theme.Attr(TextRole.Button), Frame("* Actions").GetAttributeForRole(VisualRole.Normal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), Frame("Saves").GetAttributeForRole(VisualRole.Normal));
+            Assert.Contains("Left/Right: actions", $"{hints.Text}", StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void SaveMenu_empty_details_recede_as_guidance()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var detailsFrame = FindDescendants<FrameView>(window).Single(f => $"{f.Title}" == "Save Details");
+            var details = detailsFrame.SubViews.OfType<Label>().Single();
+
+            Assert.Equal(Theme.Attr(TextRole.Hint), details.GetAttributeForRole(VisualRole.Normal));
+        }
     }
 }

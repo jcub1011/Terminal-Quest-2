@@ -18,6 +18,9 @@ namespace TerminalQuest.Ui
     /// Keyboard-first: the saves table and the grouped action bar are two panes. Tab toggles
     /// between them, arrows move within the focused pane, Enter runs. The footer buttons stay
     /// clickable for the mouse.
+    /// Visual language: the header reads bright, the focused pane wears a blue border (with
+    /// a <c>*</c> marker so focus never depends on colour alone), destructive hotkeys read
+    /// red, feedback reads green/red, and help text recedes into dim grey.
     /// </summary>
     internal sealed class SaveMenuWindow : Window
     {
@@ -80,7 +83,8 @@ namespace TerminalQuest.Ui
                 CanFocus = false,
                 Text = $"Narrator: {narrator} | Choose a save or create a new character",
             };
-            _headerLabel.SetScheme(Theme.CreateScheme());
+            // Title level: bright, so it reads above the Normal table body.
+            _headerLabel.SetScheme(Theme.LabelScheme(TextRole.Command));
 
             // Left pane: Saves Table inside a frame so the focused pane has a visible cue.
             _savesFrame = new FrameView
@@ -129,7 +133,8 @@ namespace TerminalQuest.Ui
                 Height = Dim.Fill(),
                 CanFocus = false,
             };
-            _detailsText.SetScheme(Theme.CreateScheme());
+            // Read-only info body: plain Normal, never the bright Input ink.
+            _detailsText.SetScheme(Theme.LabelScheme(TextRole.Normal));
             _detailsFrame.Add(_detailsText);
 
             // Feedback line: errors and confirmations only, so they never wipe the hints.
@@ -142,7 +147,7 @@ namespace TerminalQuest.Ui
                 CanFocus = false,
                 Text = string.Empty,
             };
-            _messageLabel.SetScheme(Theme.CreateScheme());
+            _messageLabel.SetScheme(Theme.LabelScheme(TextRole.Normal));
 
             // Bottom pane: grouped actions. Row 0 is Play + core Manage, row 1 is
             // extra Manage + System. Both rows fit an 80-column terminal.
@@ -157,7 +162,8 @@ namespace TerminalQuest.Ui
             };
             _actionsFrame.SetScheme(Theme.CreateScheme());
 
-            _loadButton = new Button { Text = "Load (Enter)", X = 0, Y = 0 };
+            // Load is the primary action: the default button, so it carries extra weight.
+            _loadButton = new Button { Text = "Load (Enter)", X = 0, Y = 0, IsDefault = true };
             _newSaveButton = new Button { Text = "New (N)", X = Pos.Right(_loadButton) + 1, Y = 0 };
             var playManageSeparator = new Label { Text = "│", CanFocus = false, X = Pos.Right(_newSaveButton) + 1, Y = 0, Width = 1, Height = 1 };
             playManageSeparator.SetScheme(Theme.LabelScheme(TextRole.Hint));
@@ -177,14 +183,15 @@ namespace TerminalQuest.Ui
             _newSaveButton.SetScheme(Theme.CreateScheme());
             _renameButton.SetScheme(Theme.CreateScheme());
             _duplicateButton.SetScheme(Theme.CreateScheme());
-            _resetButton.SetScheme(Theme.CreateScheme());
+            // Destructive actions wear a red hotkey while keeping the standard focus ink,
+            // so Delete/Reset stand apart without losing keyboard-focus visibility.
+            _resetButton.SetScheme(Theme.DangerButtonScheme());
             _updatePromptsButton.SetScheme(Theme.CreateScheme());
             _revealButton.SetScheme(Theme.CreateScheme());
-            _deleteButton.SetScheme(Theme.CreateScheme());
+            _deleteButton.SetScheme(Theme.DangerButtonScheme());
             _settingsButton.SetScheme(Theme.CreateScheme());
             _quitButton.SetScheme(Theme.CreateScheme());
-            playManageSeparator.SetScheme(Theme.CreateScheme());
-            manageSystemSeparator.SetScheme(Theme.CreateScheme());
+            // Group separators stay dim Hint grey: they divide, never compete.
 
             _actionButtons =
             [
@@ -269,9 +276,10 @@ namespace TerminalQuest.Ui
                 Width = Dim.Fill() - 2,
                 Height = 1,
                 CanFocus = false,
-                Text = "Tab: switch pane | Up/Down: saves | Left/Right: actions | Enter: load / run | N: new | S: settings | Q: quit",
+                Text = "Up/Down: saves | Enter: load | N: new | Tab: actions | S: settings | Q: quit",
             };
-            _hintLabel.SetScheme(Theme.CreateScheme());
+            // Help text recedes into dim grey: read last, never first.
+            _hintLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
 
             Add(
                 _headerLabel,
@@ -371,7 +379,9 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Marks the focused pane in the frame titles, so it reads without colour.
+        /// Marks the focused pane three ways: a <c>*</c> title marker (reads without
+        /// colour), a blue frame border on the active pane with the idle pane dimmed grey,
+        /// and hints for the pane in focus. The feedback line is separate and never touched here.
         /// </summary>
         private void UpdatePaneTitles()
         {
@@ -387,6 +397,22 @@ namespace TerminalQuest.Ui
             var inActions = IsActionFocused();
             _savesFrame.Title = inActions ? "Saves" : "* Saves";
             _actionsFrame.Title = inActions ? "* Actions" : "Actions";
+            _savesFrame.SetScheme(inActions ? Theme.FrameScheme(TextRole.Hint) : Theme.FrameScheme(TextRole.Button));
+            _actionsFrame.SetScheme(inActions ? Theme.FrameScheme(TextRole.Button) : Theme.FrameScheme(TextRole.Hint));
+
+            _hintLabel.Text = inActions
+                ? "Left/Right: actions | Enter: run | Tab: saves | N: new | S: settings | Q: quit"
+                : "Up/Down: saves | Enter: load | N: new | Tab: actions | S: settings | Q: quit";
+        }
+
+        /// <summary>
+        /// Writes the feedback line in the role matching its severity: green for
+        /// confirmations, red for errors, plain for passing information.
+        /// </summary>
+        private void Say(string text, TextRole role = TextRole.Normal)
+        {
+            _messageLabel.Text = text;
+            _messageLabel.SetScheme(Theme.LabelScheme(role));
         }
 
         protected override bool OnKeyDown(Key key)
@@ -535,7 +561,7 @@ namespace TerminalQuest.Ui
             }
             catch (Exception ex)
             {
-                _messageLabel.Text = $"Error reading saves: {ex.Message}";
+                Say($"Error reading saves: {ex.Message}", TextRole.Danger);
                 _saves = [];
             }
 
@@ -589,9 +615,13 @@ namespace TerminalQuest.Ui
             if (SelectedSave is not { } save)
             {
                 _detailsFrame.Title = "Save Details";
+                // Guidance, not content: dimmed so the eye skips to the actions below.
+                _detailsText.SetScheme(Theme.LabelScheme(TextRole.Hint));
                 _detailsText.Text = "No saves found.\n\nPress [N] or pick New below to begin your adventure.";
                 return;
             }
+
+            _detailsText.SetScheme(Theme.LabelScheme(TextRole.Normal));
 
             _detailsFrame.Title = $"Details - {save.Name}";
 
@@ -655,7 +685,7 @@ namespace TerminalQuest.Ui
             }
             catch (Exception ex)
             {
-                _messageLabel.Text = $"Could not open save: {ex.Message}";
+                Say($"Could not open save: {ex.Message}", TextRole.Danger);
             }
         }
 
@@ -670,14 +700,16 @@ namespace TerminalQuest.Ui
             };
             dialog.SetScheme(Theme.CreateScheme());
 
+            // Field prompt in gold, input bright on focus, errors red: input, help,
+            // and feedback each read differently at a glance.
             var label = new Label { Text = "Enter name for new save:", X = 1, Y = 1 };
-            label.SetScheme(Theme.CreateScheme());
+            label.SetScheme(Theme.LabelScheme(TextRole.Item));
 
             var nameField = new TextField { X = 1, Y = 3, Width = Dim.Fill() - 2 };
             nameField.SetScheme(Theme.CreateScheme());
 
             var errorLabel = new Label { X = 1, Y = 5, Width = Dim.Fill() - 2, Text = string.Empty };
-            errorLabel.SetScheme(Theme.CreateScheme());
+            errorLabel.SetScheme(Theme.LabelScheme(TextRole.Danger));
 
             var okButton = new Button { Text = "Create", IsDefault = true };
             var cancelButton = new Button { Text = "Cancel" };
@@ -743,13 +775,13 @@ namespace TerminalQuest.Ui
             dialog.SetScheme(Theme.CreateScheme());
 
             var label = new Label { Text = "Enter new name:", X = 1, Y = 1 };
-            label.SetScheme(Theme.CreateScheme());
+            label.SetScheme(Theme.LabelScheme(TextRole.Item));
 
             var nameField = new TextField { X = 1, Y = 3, Width = Dim.Fill() - 2, Text = save.Name };
             nameField.SetScheme(Theme.CreateScheme());
 
             var errorLabel = new Label { X = 1, Y = 5, Width = Dim.Fill() - 2, Text = string.Empty };
-            errorLabel.SetScheme(Theme.CreateScheme());
+            errorLabel.SetScheme(Theme.LabelScheme(TextRole.Danger));
 
             var okButton = new Button { Text = "Rename", IsDefault = true };
             var cancelButton = new Button { Text = "Cancel" };
@@ -819,11 +851,11 @@ namespace TerminalQuest.Ui
                 var copyName = SavePaths.Duplicate(save.Name);
                 Reload();
                 SelectSave(copyName);
-                _messageLabel.Text = $"Duplicated save '{save.Name}' as '{copyName}'.";
+                Say($"Duplicated save '{save.Name}' as '{copyName}'.", TextRole.Place);
             }
             catch (Exception ex)
             {
-                _messageLabel.Text = $"Duplicate failed: {ex.Message}";
+                Say($"Duplicate failed: {ex.Message}", TextRole.Danger);
             }
         }
 
@@ -842,11 +874,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.Reset(save.Name);
                     Reload();
-                    _messageLabel.Text = $"Reset save '{save.Name}' to turn 0.";
+                    Say($"Reset save '{save.Name}' to turn 0.", TextRole.Place);
                 }
                 catch (Exception ex)
                 {
-                    _messageLabel.Text = $"Reset failed: {ex.Message}";
+                    Say($"Reset failed: {ex.Message}", TextRole.Danger);
                 }
             }
         }
@@ -866,11 +898,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.UpdatePrompts(save.Name);
                     Reload();
-                    _messageLabel.Text = $"Updated story prompts in '{save.Name}' to latest defaults.";
+                    Say($"Updated story prompts in '{save.Name}' to latest defaults.", TextRole.Place);
                 }
                 catch (Exception ex)
                 {
-                    _messageLabel.Text = $"Update failed: {ex.Message}";
+                    Say($"Update failed: {ex.Message}", TextRole.Danger);
                 }
             }
         }
@@ -890,11 +922,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.Delete(save.Name);
                     Reload();
-                    _messageLabel.Text = $"Deleted save '{save.Name}'.";
+                    Say($"Deleted save '{save.Name}'.", TextRole.Place);
                 }
                 catch (Exception ex)
                 {
-                    _messageLabel.Text = $"Delete failed: {ex.Message}";
+                    Say($"Delete failed: {ex.Message}", TextRole.Danger);
                 }
             }
         }
@@ -904,7 +936,7 @@ namespace TerminalQuest.Ui
             var folder = SavePaths.Folder(save.Name);
             if (!FileExplorer.TryOpen(folder, out var reason))
             {
-                _messageLabel.Text = reason ?? "Could not open save folder.";
+                Say(reason ?? "Could not open save folder.", TextRole.Danger);
             }
         }
 
