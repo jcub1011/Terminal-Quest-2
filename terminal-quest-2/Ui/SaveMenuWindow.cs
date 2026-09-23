@@ -15,6 +15,9 @@ namespace TerminalQuest.Ui
     /// The startup screen: continue, load, manage saves, or open settings.
     /// Modernized to use Terminal.Gui built-in <see cref="TableView"/>, <see cref="FrameView"/>,
     /// <see cref="Button"/>, <see cref="Dialog"/>, and <see cref="MessageBox"/>.
+    /// Keyboard-first: the saves table and the grouped action bar are two panes. Tab toggles
+    /// between them, arrows move within the focused pane, Enter runs. The footer buttons stay
+    /// clickable for the mouse.
     /// </summary>
     internal sealed class SaveMenuWindow : Window
     {
@@ -22,11 +25,28 @@ namespace TerminalQuest.Ui
         private readonly string _narrator;
         private List<SaveEntry> _saves = [];
 
+        /// <summary>
+        /// The saves list. Offers every key to the menu's hotkeys before its own handling,
+        /// because <see cref="TableView"/> otherwise eats letters as type-ahead selection and
+        /// the footer shortcuts would only work with focus already in the footer.
+        /// Navigation keys are never hotkeys, so the table keeps those for itself.
+        /// </summary>
+        private sealed class HotkeyTableView : TableView
+        {
+            public Func<Key, bool>? InterceptHotkey { get; set; }
+
+            protected override bool OnKeyDown(Key key) =>
+                (InterceptHotkey?.Invoke(key) ?? false) || base.OnKeyDown(key);
+        }
+
         private readonly Label _headerLabel;
-        private readonly TableView _savesTable;
+        private readonly FrameView _savesFrame;
+        private readonly HotkeyTableView _savesTable;
         private readonly FrameView _detailsFrame;
         private readonly Label _detailsText;
-        private readonly Label _statusLabel;
+        private readonly Label _messageLabel;
+        private readonly FrameView _actionsFrame;
+        private readonly Label _hintLabel;
 
         private readonly Button _loadButton;
         private readonly Button _newSaveButton;
@@ -38,6 +58,9 @@ namespace TerminalQuest.Ui
         private readonly Button _deleteButton;
         private readonly Button _settingsButton;
         private readonly Button _quitButton;
+
+        private readonly List<Button> _actionButtons;
+        private int _lastActionIndex;
 
         public SaveMenuWindow(IApplication app, string narrator)
         {
@@ -54,32 +77,46 @@ namespace TerminalQuest.Ui
                 Y = 0,
                 Width = Dim.Fill() - 2,
                 Height = 1,
+                CanFocus = false,
                 Text = $"Narrator: {narrator} | Choose a save or create a new character",
             };
             _headerLabel.SetScheme(Theme.CreateScheme());
 
-            // Left: Saves Table
-            _savesTable = new TableView
+            // Left pane: Saves Table inside a frame so the focused pane has a visible cue.
+            _savesFrame = new FrameView
             {
+                Title = "Saves",
                 X = 1,
                 Y = 2,
                 Width = Dim.Percent(60),
-                Height = Dim.Fill() - 5,
+                Height = Dim.Fill() - 8,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _savesFrame.SetScheme(Theme.CreateScheme());
+
+            _savesTable = new HotkeyTableView
+            {
+                X = 0,
+                Y = 0,
+                Width = Dim.Fill(),
+                Height = Dim.Fill(),
                 FullRowSelect = true,
                 MultiSelect = false,
             };
             _savesTable.SetScheme(Theme.CreateScheme());
             _savesTable.ValueChanged += (_, _) => UpdateDetails();
             _savesTable.Accepting += (_, _) => OpenSelected();
+            _savesTable.InterceptHotkey = TryHandleMenuHotkey;
+            _savesFrame.Add(_savesTable);
 
-            // Right: Save Details Frame
+            // Right pane: Save Details Frame (never focusable, for the mouse only).
             _detailsFrame = new FrameView
             {
                 Title = "Save Details",
-                X = Pos.Right(_savesTable) + 1,
+                X = Pos.Right(_savesFrame) + 1,
                 Y = 2,
                 Width = Dim.Fill() - 1,
-                Height = Dim.Fill() - 5,
+                Height = Dim.Fill() - 8,
                 BorderStyle = LineStyle.Rounded,
             };
             _detailsFrame.SetScheme(Theme.CreateScheme());
@@ -95,34 +132,44 @@ namespace TerminalQuest.Ui
             _detailsText.SetScheme(Theme.CreateScheme());
             _detailsFrame.Add(_detailsText);
 
-            // Status message line
-            _statusLabel = new Label
+            // Feedback line: errors and confirmations only, so they never wipe the hints.
+            _messageLabel = new Label
             {
                 X = 1,
-                Y = Pos.Bottom(_savesTable),
+                Y = Pos.Bottom(_savesFrame),
                 Width = Dim.Fill() - 2,
                 Height = 1,
-                Text = "Enter: Load | N: New | R: Rename | D: Duplicate | Ctrl+R: Reset | U: Prompts | F: Folder | Del: Delete | S: Settings | Q: Quit",
+                CanFocus = false,
+                Text = string.Empty,
             };
-            _statusLabel.SetScheme(Theme.CreateScheme());
+            _messageLabel.SetScheme(Theme.CreateScheme());
 
-            // Bottom action buttons: Row 1 (Primary Actions)
-            var row1Y = Pos.Bottom(_statusLabel);
+            // Bottom pane: grouped actions. Row 0 is Play + core Manage, row 1 is
+            // extra Manage + System. Both rows fit an 80-column terminal.
+            _actionsFrame = new FrameView
+            {
+                Title = "Actions",
+                X = 1,
+                Y = Pos.Bottom(_messageLabel),
+                Width = Dim.Fill() - 2,
+                Height = 4,
+                BorderStyle = LineStyle.Rounded,
+            };
+            _actionsFrame.SetScheme(Theme.CreateScheme());
 
-            _loadButton = new Button { Text = "Load (Enter)", X = 1, Y = row1Y };
-            _newSaveButton = new Button { Text = "New Save (N)", X = Pos.Right(_loadButton) + 1, Y = row1Y };
-            _renameButton = new Button { Text = "Rename (R)", X = Pos.Right(_newSaveButton) + 1, Y = row1Y };
-            _duplicateButton = new Button { Text = "Duplicate (D)", X = Pos.Right(_renameButton) + 1, Y = row1Y };
-            _resetButton = new Button { Text = "Reset (Ctrl+R)", X = Pos.Right(_duplicateButton) + 1, Y = row1Y };
+            _loadButton = new Button { Text = "Load (Enter)", X = 0, Y = 0 };
+            _newSaveButton = new Button { Text = "New (N)", X = Pos.Right(_loadButton) + 1, Y = 0 };
+            var playManageSeparator = new Label { Text = "│", CanFocus = false, X = Pos.Right(_newSaveButton) + 1, Y = 0, Width = 1, Height = 1 };
+            _renameButton = new Button { Text = "Rename (R)", X = Pos.Right(playManageSeparator) + 1, Y = 0 };
+            _duplicateButton = new Button { Text = "Duplicate (D)", X = Pos.Right(_renameButton) + 1, Y = 0 };
+            _resetButton = new Button { Text = "Reset (Ctrl+R)", X = Pos.Right(_duplicateButton) + 1, Y = 0 };
 
-            // Bottom action buttons: Row 2 (Manage & System)
-            var row2Y = Pos.Bottom(_loadButton);
-
-            _revealButton = new Button { Text = "Folder (F)", X = 1, Y = row2Y };
-            _updatePromptsButton = new Button { Text = "Prompts (U)", X = Pos.Right(_revealButton) + 1, Y = row2Y };
-            _deleteButton = new Button { Text = "Delete (Del)", X = Pos.Right(_updatePromptsButton) + 1, Y = row2Y };
-            _settingsButton = new Button { Text = "Settings (S)", X = Pos.Right(_deleteButton) + 1, Y = row2Y };
-            _quitButton = new Button { Text = "Quit (Q)", X = Pos.Right(_settingsButton) + 1, Y = row2Y };
+            _updatePromptsButton = new Button { Text = "Prompts (U)", X = 0, Y = 1 };
+            _revealButton = new Button { Text = "Folder (F)", X = Pos.Right(_updatePromptsButton) + 1, Y = 1 };
+            _deleteButton = new Button { Text = "Delete (Del)", X = Pos.Right(_revealButton) + 1, Y = 1 };
+            var manageSystemSeparator = new Label { Text = "│", CanFocus = false, X = Pos.Right(_deleteButton) + 1, Y = 1, Width = 1, Height = 1 };
+            _settingsButton = new Button { Text = "Settings (S)", X = Pos.Right(manageSystemSeparator) + 1, Y = 1 };
+            _quitButton = new Button { Text = "Quit (Q)", X = Pos.Right(_settingsButton) + 1, Y = 1 };
 
             _loadButton.SetScheme(Theme.CreateScheme());
             _newSaveButton.SetScheme(Theme.CreateScheme());
@@ -134,6 +181,22 @@ namespace TerminalQuest.Ui
             _deleteButton.SetScheme(Theme.CreateScheme());
             _settingsButton.SetScheme(Theme.CreateScheme());
             _quitButton.SetScheme(Theme.CreateScheme());
+            playManageSeparator.SetScheme(Theme.CreateScheme());
+            manageSystemSeparator.SetScheme(Theme.CreateScheme());
+
+            _actionButtons =
+            [
+                _loadButton,
+                _newSaveButton,
+                _renameButton,
+                _duplicateButton,
+                _resetButton,
+                _updatePromptsButton,
+                _revealButton,
+                _deleteButton,
+                _settingsButton,
+                _quitButton,
+            ];
 
             _loadButton.Accepting += (_, _) => OpenSelected();
             _newSaveButton.Accepting += (_, _) => ShowNewSaveDialog();
@@ -182,25 +245,55 @@ namespace TerminalQuest.Ui
             _settingsButton.Accepting += (_, _) => SettingsRequested?.Invoke();
             _quitButton.Accepting += (_, _) => Cancelled?.Invoke();
 
-            Add(
-                _headerLabel,
-                _savesTable,
-                _detailsFrame,
-                _statusLabel,
+            _actionsFrame.Add(
                 _loadButton,
                 _newSaveButton,
+                playManageSeparator,
                 _renameButton,
                 _duplicateButton,
                 _resetButton,
                 _updatePromptsButton,
                 _revealButton,
                 _deleteButton,
+                manageSystemSeparator,
                 _settingsButton,
                 _quitButton);
 
+            // Static hints: never overwritten by feedback, which has its own line above.
+            _hintLabel = new Label
+            {
+                X = 1,
+                Y = Pos.Bottom(_actionsFrame),
+                Width = Dim.Fill() - 2,
+                Height = 1,
+                CanFocus = false,
+                Text = "Tab: switch pane | Up/Down: saves | Left/Right: actions | Enter: load / run | N: new | S: settings | Q: quit",
+            };
+            _hintLabel.SetScheme(Theme.CreateScheme());
+
+            Add(
+                _headerLabel,
+                _savesFrame,
+                _detailsFrame,
+                _messageLabel,
+                _actionsFrame,
+                _hintLabel);
+
+            // A mouse click lands focus directly, bypassing the Tab toggle, so the pane
+            // titles follow the actual focus rather than only the toggle path.
+            _savesTable.HasFocusChanged += (_, _) => UpdatePaneTitles();
+            foreach (var button in _actionButtons)
+            {
+                button.HasFocusChanged += (_, _) => UpdatePaneTitles();
+            }
+
             Reload();
 
-            Initialized += (_, _) => _savesTable.SetFocus();
+            Initialized += (_, _) =>
+            {
+                _savesTable.SetFocus();
+                UpdatePaneTitles();
+            };
         }
 
         public SaveStore? Chosen { get; private set; }
@@ -226,7 +319,128 @@ namespace TerminalQuest.Ui
             }
         }
 
+        /// <summary>
+        /// Whether focus currently sits on one of the footer action buttons.
+        /// </summary>
+        private bool IsActionFocused() => MostFocused is Button focused && _actionButtons.Contains(focused);
+
+        /// <summary>
+        /// Jumps between the two panes: the saves table and the action bar.
+        /// </summary>
+        private void TogglePane()
+        {
+            if (IsActionFocused())
+            {
+                _savesTable.SetFocus();
+            }
+            else
+            {
+                FocusActions();
+            }
+        }
+
+        /// <summary>
+        /// Focuses the action bar, returning to the button used last where possible.
+        /// </summary>
+        private void FocusActions()
+        {
+            var index = Math.Clamp(_lastActionIndex, 0, _actionButtons.Count - 1);
+            _actionButtons[index].SetFocus();
+        }
+
+        /// <summary>
+        /// Moves focus linearly through the action buttons, wrapping at both ends so the
+        /// focus never leaks back to the table except through <see cref="TogglePane"/>.
+        /// </summary>
+        private void MoveActionFocus(int delta)
+        {
+            var current = MostFocused is Button focused ? _actionButtons.IndexOf(focused) : _lastActionIndex;
+            if (current < 0)
+            {
+                current = delta < 0 ? _actionButtons.Count - 1 : 0;
+            }
+            else
+            {
+                current = (current + delta + _actionButtons.Count) % _actionButtons.Count;
+            }
+
+            _lastActionIndex = current;
+            _actionButtons[current].SetFocus();
+        }
+
+        /// <summary>
+        /// Marks the focused pane in the frame titles, so it reads without colour.
+        /// </summary>
+        private void UpdatePaneTitles()
+        {
+            if (MostFocused is Button focused)
+            {
+                var index = _actionButtons.IndexOf(focused);
+                if (index >= 0)
+                {
+                    _lastActionIndex = index;
+                }
+            }
+
+            var inActions = IsActionFocused();
+            _savesFrame.Title = inActions ? "Saves" : "* Saves";
+            _actionsFrame.Title = inActions ? "* Actions" : "Actions";
+        }
+
         protected override bool OnKeyDown(Key key)
+        {
+            // Claimed before anything else, so Tab never walks the ten buttons one by one.
+            if (key == Key.Tab || key == Key.Tab.WithShift)
+            {
+                TogglePane();
+                return true;
+            }
+
+            // Inside the footer the arrows stay in the footer: they cycle the buttons.
+            if (IsActionFocused())
+            {
+                if (key == Key.CursorLeft || key == Key.CursorUp)
+                {
+                    MoveActionFocus(-1);
+                    return true;
+                }
+
+                if (key == Key.CursorRight || key == Key.CursorDown)
+                {
+                    MoveActionFocus(1);
+                    return true;
+                }
+
+                if (key == Key.Home)
+                {
+                    _lastActionIndex = 0;
+                    _actionButtons[0].SetFocus();
+                    return true;
+                }
+
+                if (key == Key.End)
+                {
+                    _lastActionIndex = _actionButtons.Count - 1;
+                    _actionButtons[^1].SetFocus();
+                    return true;
+                }
+            }
+
+            if (TryHandleMenuHotkey(key))
+            {
+                return true;
+            }
+
+            return base.OnKeyDown(key);
+        }
+
+        /// <summary>
+        /// Runs the footer action for a menu hotkey, from whichever pane has focus. The table
+        /// calls this before its own handling (see <see cref="HotkeyTableView"/>); the window
+        /// calls it for keys that bubbled up from the footer.
+        /// </summary>
+        /// <returns>True when the key named a menu action, even one with no save to act on.</returns>
+        private bool TryHandleMenuHotkey(Key key)
         {
             if (Letter(key, Key.Q) || key == Key.Esc || key == Key.Q.WithCtrl)
             {
@@ -306,7 +520,7 @@ namespace TerminalQuest.Ui
                 return true;
             }
 
-            return base.OnKeyDown(key);
+            return false;
         }
 
         private static bool Letter(Key key, Key letter) => key == letter || key == letter.WithShift;
@@ -319,9 +533,16 @@ namespace TerminalQuest.Ui
             }
             catch (Exception ex)
             {
-                _statusLabel.Text = $"Error reading saves: {ex.Message}";
+                _messageLabel.Text = $"Error reading saves: {ex.Message}";
                 _saves = [];
             }
+
+            _headerLabel.Text = _saves.Count switch
+            {
+                0 => $"Narrator: {_narrator} | No saves yet - press N for a new character",
+                1 => $"Narrator: {_narrator} | 1 save - Enter loads, Tab reaches actions",
+                _ => $"Narrator: {_narrator} | {_saves.Count} saves - Enter loads, Tab reaches actions",
+            };
 
             var table = new DataTable();
             table.Columns.Add("Save Name", typeof(string));
@@ -365,9 +586,12 @@ namespace TerminalQuest.Ui
         {
             if (SelectedSave is not { } save)
             {
-                _detailsText.Text = "No saves found.\n\nPress [N] or click 'New Save' to begin your adventure.";
+                _detailsFrame.Title = "Save Details";
+                _detailsText.Text = "No saves found.\n\nPress [N] or pick New below to begin your adventure.";
                 return;
             }
+
+            _detailsFrame.Title = $"Details - {save.Name}";
 
             try
             {
@@ -429,7 +653,7 @@ namespace TerminalQuest.Ui
             }
             catch (Exception ex)
             {
-                _statusLabel.Text = $"Could not open save: {ex.Message}";
+                _messageLabel.Text = $"Could not open save: {ex.Message}";
             }
         }
 
@@ -593,11 +817,11 @@ namespace TerminalQuest.Ui
                 var copyName = SavePaths.Duplicate(save.Name);
                 Reload();
                 SelectSave(copyName);
-                _statusLabel.Text = $"Duplicated save '{save.Name}' as '{copyName}'.";
+                _messageLabel.Text = $"Duplicated save '{save.Name}' as '{copyName}'.";
             }
             catch (Exception ex)
             {
-                _statusLabel.Text = $"Duplicate failed: {ex.Message}";
+                _messageLabel.Text = $"Duplicate failed: {ex.Message}";
             }
         }
 
@@ -616,11 +840,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.Reset(save.Name);
                     Reload();
-                    _statusLabel.Text = $"Reset save '{save.Name}' to turn 0.";
+                    _messageLabel.Text = $"Reset save '{save.Name}' to turn 0.";
                 }
                 catch (Exception ex)
                 {
-                    _statusLabel.Text = $"Reset failed: {ex.Message}";
+                    _messageLabel.Text = $"Reset failed: {ex.Message}";
                 }
             }
         }
@@ -640,11 +864,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.UpdatePrompts(save.Name);
                     Reload();
-                    _statusLabel.Text = $"Updated story prompts in '{save.Name}' to latest defaults.";
+                    _messageLabel.Text = $"Updated story prompts in '{save.Name}' to latest defaults.";
                 }
                 catch (Exception ex)
                 {
-                    _statusLabel.Text = $"Update failed: {ex.Message}";
+                    _messageLabel.Text = $"Update failed: {ex.Message}";
                 }
             }
         }
@@ -664,11 +888,11 @@ namespace TerminalQuest.Ui
                 {
                     SavePaths.Delete(save.Name);
                     Reload();
-                    _statusLabel.Text = $"Deleted save '{save.Name}'.";
+                    _messageLabel.Text = $"Deleted save '{save.Name}'.";
                 }
                 catch (Exception ex)
                 {
-                    _statusLabel.Text = $"Delete failed: {ex.Message}";
+                    _messageLabel.Text = $"Delete failed: {ex.Message}";
                 }
             }
         }
@@ -678,7 +902,7 @@ namespace TerminalQuest.Ui
             var folder = SavePaths.Folder(save.Name);
             if (!FileExplorer.TryOpen(folder, out var reason))
             {
-                _statusLabel.Text = reason ?? "Could not open save folder.";
+                _messageLabel.Text = reason ?? "Could not open save folder.";
             }
         }
 

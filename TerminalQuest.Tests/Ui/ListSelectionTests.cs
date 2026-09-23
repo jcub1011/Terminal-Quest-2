@@ -7,6 +7,7 @@ using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 using TerminalQuest.Agents;
+using TerminalQuest.Saves;
 using TerminalQuest.Settings;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
@@ -340,6 +341,107 @@ namespace TerminalQuest.Tests.Ui
 
             Assert.True(cancelledFired);
             Assert.Null(window.Chosen);
+        }
+
+        [Fact]
+        public void SaveMenu_tab_toggles_between_saves_table_and_action_bar()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            Assert.Equal(10, FindDescendants<Button>(window).Count());
+
+            window.SetFocus();
+            table.SetFocus();
+            Assert.Equal(table, window.MostFocused);
+
+            // Tab jumps straight to the action bar instead of walking each button.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.IsType<Button>(window.MostFocused);
+
+            // Arrows cycle within the footer rather than leaking back to the table.
+            var first = window.MostFocused;
+            window.NewKeyDownEvent(Key.CursorRight);
+            Assert.IsType<Button>(window.MostFocused);
+            Assert.NotSame(first, window.MostFocused);
+
+            window.NewKeyDownEvent(Key.CursorLeft);
+            Assert.Same(first, window.MostFocused);
+
+            // Tab returns to the saves table; Shift+Tab goes the other way too.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.Equal(table, window.MostFocused);
+
+            window.NewKeyDownEvent(Key.Tab.WithShift);
+            Assert.IsType<Button>(window.MostFocused);
+        }
+
+        [Fact]
+        public void SaveMenu_single_key_shortcuts_work_from_the_action_bar()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.IsType<Button>(window.MostFocused);
+
+            // Q quits from anywhere, including with focus in the footer.
+            var cancelledFired = false;
+            window.Cancelled += () => cancelledFired = true;
+            window.NewKeyDownEvent(Key.Q);
+
+            Assert.True(cancelledFired);
+        }
+
+        [Fact]
+        public void SaveMenu_hotkeys_fire_while_the_saves_table_has_focus()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+            Assert.Equal(table, window.MostFocused);
+
+            // Routed through the focused table, the way a live keypress travels: the
+            // table must offer menu hotkeys to the window before its own type-ahead
+            // eats them.
+            var settingsFired = false;
+            window.SettingsRequested += () => settingsFired = true;
+            table.NewKeyDownEvent(Key.S);
+            Assert.True(settingsFired);
+
+            var cancelledFired = false;
+            window.Cancelled += () => cancelledFired = true;
+            table.NewKeyDownEvent(Key.Q);
+            Assert.True(cancelledFired);
+        }
+
+        [Fact]
+        public void SaveMenu_saves_table_keeps_arrow_navigation()
+        {
+            using var root = new SavesRoot();
+            SavePaths.Open("Alpha");
+            SavePaths.Open("Beta");
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            Assert.Equal(0, table.Value?.SelectedCell.Y);
+            Assert.True(table.NewKeyDownEvent(Key.CursorDown));
+            Assert.Equal(1, table.Value?.SelectedCell.Y);
         }
     }
 }
