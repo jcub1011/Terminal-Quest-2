@@ -160,6 +160,7 @@ namespace TerminalQuest.Ui
             _loadButton = new Button { Text = "Load (Enter)", X = 0, Y = 0 };
             _newSaveButton = new Button { Text = "New (N)", X = Pos.Right(_loadButton) + 1, Y = 0 };
             var playManageSeparator = new Label { Text = "│", CanFocus = false, X = Pos.Right(_newSaveButton) + 1, Y = 0, Width = 1, Height = 1 };
+            playManageSeparator.SetScheme(Theme.LabelScheme(TextRole.Hint));
             _renameButton = new Button { Text = "Rename (R)", X = Pos.Right(playManageSeparator) + 1, Y = 0 };
             _duplicateButton = new Button { Text = "Duplicate (D)", X = Pos.Right(_renameButton) + 1, Y = 0 };
             _resetButton = new Button { Text = "Reset (Ctrl+R)", X = Pos.Right(_duplicateButton) + 1, Y = 0 };
@@ -168,6 +169,7 @@ namespace TerminalQuest.Ui
             _revealButton = new Button { Text = "Folder (F)", X = Pos.Right(_updatePromptsButton) + 1, Y = 1 };
             _deleteButton = new Button { Text = "Delete (Del)", X = Pos.Right(_revealButton) + 1, Y = 1 };
             var manageSystemSeparator = new Label { Text = "│", CanFocus = false, X = Pos.Right(_deleteButton) + 1, Y = 1, Width = 1, Height = 1 };
+            manageSystemSeparator.SetScheme(Theme.LabelScheme(TextRole.Hint));
             _settingsButton = new Button { Text = "Settings (S)", X = Pos.Right(manageSystemSeparator) + 1, Y = 1 };
             _quitButton = new Button { Text = "Quit (Q)", X = Pos.Right(_settingsButton) + 1, Y = 1 };
 

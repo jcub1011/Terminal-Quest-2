@@ -470,7 +470,7 @@ namespace TerminalQuest.Ui
                     }
                     else
                     {
-                        SetRole(TextRole.System);
+                        SetRole(TextRole.Hint);
                         AddStr("│");
                     }
                 }
@@ -504,7 +504,7 @@ namespace TerminalQuest.Ui
             }
 
             Move(width - scrollBarGutter - MoreBelow.Length, height - 1);
-            SetRole(TextRole.System);
+            SetRole(TextRole.Hint);
             AddStr(MoreBelow);
         }
 

@@ -109,10 +109,10 @@ namespace TerminalQuest.Ui
             };
             var promptScheme = new Scheme
             {
-                Normal = Theme.Attr(TextRole.Item),
-                Focus = Theme.Attr(TextRole.Item),
-                HotNormal = Theme.Attr(TextRole.Item),
-                HotFocus = Theme.Attr(TextRole.Item),
+                Normal = Theme.Attr(TextRole.Button),
+                Focus = Theme.Attr(TextRole.Button),
+                HotNormal = Theme.Attr(TextRole.Button),
+                HotFocus = Theme.Attr(TextRole.Button),
             };
             _promptLabel.SetScheme(promptScheme);
 

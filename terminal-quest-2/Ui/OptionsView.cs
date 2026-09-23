@@ -13,7 +13,7 @@ namespace TerminalQuest.Ui
         private IReadOnlyList<NarrationOption> _options = [];
         private int? _highlightedOption;
         private int _renderedWidth;
-        private readonly List<(NarrationOption Option, int RowIndex, string Prefix, string Text)> _renderedRows = [];
+        private readonly List<(NarrationOption Option, int RowIndex, string Prefix, StyledLine Body)> _renderedRows = [];
 
         public OptionsView()
         {
@@ -134,11 +134,25 @@ namespace TerminalQuest.Ui
             {
                 var prefix = $"[{opt.Number}] ";
                 var availableTextWidth = Math.Max(1, width - prefix.Length);
-                var wrapped = WrapText(opt.Text, availableTextWidth);
-                count += Math.Max(1, wrapped.Count);
+                count += WrapOption(opt.Text, availableTextWidth).Count;
             }
 
             return count;
+        }
+
+        /// <summary>
+        /// Wraps option text honouring narrator markup, so entity names keep their colours and
+        /// markup syntax never leaks into the measured width.
+        /// </summary>
+        private static List<StyledLine> WrapOption(string text, int width)
+        {
+            if (string.IsNullOrEmpty(text) || width <= 0)
+            {
+                return [new StyledLine()];
+            }
+
+            var parsed = MarkupParser.Parse(text);
+            return NarrationView.Wrap(parsed.Spans, width);
         }
 
         private void RebuildRenderedRows(int width)
@@ -158,7 +172,7 @@ namespace TerminalQuest.Ui
                 var prefix = $"[{opt.Number}] ";
                 var indent = new string(' ', prefix.Length);
                 var availableTextWidth = Math.Max(1, availableWidth - prefix.Length);
-                var wrapped = WrapText(opt.Text, availableTextWidth);
+                var wrapped = WrapOption(opt.Text, availableTextWidth);
 
                 for (var lineIdx = 0; lineIdx < wrapped.Count; lineIdx++)
                 {
@@ -166,69 +180,6 @@ namespace TerminalQuest.Ui
                     _renderedRows.Add((opt, rowIndex++, linePrefix, wrapped[lineIdx]));
                 }
             }
-        }
-
-        private static List<string> WrapText(string text, int width)
-        {
-            var lines = new List<string>();
-            if (string.IsNullOrEmpty(text) || width <= 0)
-            {
-                lines.Add(string.Empty);
-                return lines;
-            }
-
-            var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var currentLine = string.Empty;
-
-            foreach (var word in words)
-            {
-                if (currentLine.Length == 0)
-                {
-                    if (word.Length > width)
-                    {
-                        var remaining = word;
-                        while (remaining.Length > width)
-                        {
-                            lines.Add(remaining[..width]);
-                            remaining = remaining[width..];
-                        }
-                        currentLine = remaining;
-                    }
-                    else
-                    {
-                        currentLine = word;
-                    }
-                }
-                else if (currentLine.Length + 1 + word.Length <= width)
-                {
-                    currentLine += " " + word;
-                }
-                else
-                {
-                    lines.Add(currentLine);
-                    if (word.Length > width)
-                    {
-                        var remaining = word;
-                        while (remaining.Length > width)
-                        {
-                            lines.Add(remaining[..width]);
-                            remaining = remaining[width..];
-                        }
-                        currentLine = remaining;
-                    }
-                    else
-                    {
-                        currentLine = word;
-                    }
-                }
-            }
-
-            if (currentLine.Length > 0)
-            {
-                lines.Add(currentLine);
-            }
-
-            return lines.Count == 0 ? [string.Empty] : lines;
         }
 
         protected override bool OnKeyDown(Key key)
@@ -402,7 +353,7 @@ namespace TerminalQuest.Ui
                 if (isHighlighted)
                 {
                     SetAttribute(Theme.OptionSelection);
-                    var fullText = row.Prefix + row.Text;
+                    var fullText = row.Prefix + string.Concat(row.Body.Spans.Select(s => s.Text));
                     if (fullText.Length > width)
                     {
                         fullText = fullText[..width];
@@ -415,15 +366,27 @@ namespace TerminalQuest.Ui
                 }
                 else
                 {
-                    SetRole(TextRole.Item);
+                    // The number is the button; the words keep the narrator's own colours. The
+                    // whole row fills the input on click, so inner entities need no extra marking -
+                    // there is nothing finer-grained here to press.
+                    SetRole(TextRole.Button);
                     AddStr(row.Prefix);
 
-                    SetRole(TextRole.Normal);
-                    var remainingWidth = Math.Max(0, width - row.Prefix.Length);
-                    var lineText = row.Text.Length > remainingWidth ? row.Text[..remainingWidth] : row.Text;
-                    AddStr(lineText);
+                    var drawn = row.Prefix.Length;
+                    foreach (var span in row.Body.Spans)
+                    {
+                        var remainingWidth = Math.Max(0, width - drawn);
+                        if (remainingWidth <= 0)
+                        {
+                            break;
+                        }
 
-                    var drawn = row.Prefix.Length + lineText.Length;
+                        var text = span.Text.Length > remainingWidth ? span.Text[..remainingWidth] : span.Text;
+                        SetRole(span.Role);
+                        AddStr(text);
+                        drawn += text.Length;
+                    }
+
                     if (drawn < width)
                     {
                         AddStr(Blank(width - drawn));

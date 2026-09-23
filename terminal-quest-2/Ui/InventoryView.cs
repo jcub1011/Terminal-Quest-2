@@ -52,7 +52,7 @@ namespace TerminalQuest.Ui
             if (_items.Count == 0)
             {
                 var empty = new StyledLine();
-                empty.Append("(empty pack)", TextRole.Normal);
+                empty.Append("(empty pack)", TextRole.Hint);
                 _lines.Add(empty);
                 return;
             }

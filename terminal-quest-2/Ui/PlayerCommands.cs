@@ -1096,7 +1096,7 @@ namespace TerminalQuest.Ui
         {
             var line = new StyledLine();
             line.Append($"  {command,-20}", TextRole.Command);
-            line.Append(meaning, TextRole.System);
+            line.Append(meaning, TextRole.Hint);
             lines.Add(line);
         }
     }

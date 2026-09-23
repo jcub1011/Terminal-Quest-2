@@ -512,7 +512,7 @@ namespace TerminalQuest.Ui
                         var text = line.Length > textWidth ? line[..textWidth] : line;
                         if (text.StartsWith("---") || text.StartsWith("===") || text.StartsWith("───"))
                         {
-                            SetRole(TextRole.System);
+                            SetRole(TextRole.Hint);
                         }
                         else if (text.StartsWith("[Turn") || text.StartsWith("Health:") || text.StartsWith("Location / Possession:") || text.StartsWith("Items here:"))
                         {

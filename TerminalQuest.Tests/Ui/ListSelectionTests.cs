@@ -70,6 +70,43 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void A_settled_suggestion_strip_offers_no_selection()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            Assert.Equal(0, view.SelectedItem);
+
+            // Settled means reminder, not menu: no row may wear the selection block.
+            view.IsChoosing = false;
+
+            Assert.Null(view.SelectedItem);
+            Assert.Null(view.Selected);
+        }
+
+        [Fact]
+        public void A_settled_strip_never_highlights_refills()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            view.IsChoosing = false;
+
+            view.Suggestions = Commands;
+
+            Assert.Null(view.SelectedItem);
+            Assert.Null(view.Selected);
+        }
+
+        [Fact]
+        public void A_reopened_suggestion_strip_offers_its_first_command_again()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            view.IsChoosing = false;
+
+            view.IsChoosing = true;
+
+            Assert.Equal(0, view.SelectedItem);
+            Assert.Equal(Commands[0], view.Selected);
+        }
+
+        [Fact]
         public void ListView_navigates_up_and_down_with_keys()
         {
             using var list = new ListView();

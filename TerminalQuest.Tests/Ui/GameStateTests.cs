@@ -1,3 +1,6 @@
+using Terminal.Gui.Drawing;
+using Terminal.Gui.ViewBase;
+using Terminal.Gui.Views;
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
@@ -248,6 +251,70 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal("Healing Herb", itemEntry.Name);
             Assert.Equal(3, itemEntry.Quantity);
             Assert.Equal("itm_10", itemEntry.Id);
+        }
+
+        // ---- The status pane's colour hierarchy --------------------------------------------------
+
+        private static IEnumerable<T> FindDescendants<T>(View root) where T : View
+        {
+            foreach (var sub in root.SubViews)
+            {
+                if (sub is T match) yield return match;
+                foreach (var nested in FindDescendants<T>(sub))
+                {
+                    yield return nested;
+                }
+            }
+        }
+
+        private static Label LabelWith(StatusView view, string text) =>
+            FindDescendants<Label>(view).First(l => l.Text == text);
+
+        [Fact]
+        public void Captions_recede_so_values_lead()
+        {
+            using var view = new StatusView(new GameState { Health = 20, MaxHealth = 20 });
+
+            foreach (var caption in new[] { "HP:", "Turn:", "Gold:", "Context:" })
+            {
+                Assert.Equal(Theme.Attr(TextRole.Hint), LabelWith(view, caption).GetAttributeForRole(VisualRole.Normal));
+            }
+        }
+
+        [Fact]
+        public void Healthy_vitals_read_normally()
+        {
+            using var view = new StatusView(new GameState { Health = 20, MaxHealth = 20, Money = 10 });
+
+            Assert.Equal(Theme.Attr(TextRole.Normal), LabelWith(view, "20 / 20").GetAttributeForRole(VisualRole.Normal));
+            Assert.Equal(Theme.Attr(TextRole.Item), LabelWith(view, "10 gp").GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Fact]
+        public void Low_health_reads_as_danger()
+        {
+            using var view = new StatusView(new GameState { Health = 5, MaxHealth = 20 });
+
+            Assert.Equal(Theme.Attr(TextRole.Danger), LabelWith(view, "5 / 20").GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Theory]
+        [InlineData(50, (int)TextRole.Normal)]
+        [InlineData(85, (int)TextRole.Important)]
+        [InlineData(96, (int)TextRole.Danger)]
+        public void Context_pressure_escalates_through_warning_to_danger(int percent, int expectedRole)
+        {
+            using var view = new StatusView(new GameState { ContextTokens = percent, ContextWindowTokens = 100 });
+
+            Assert.Equal(Theme.Attr((TextRole)expectedRole), LabelWith(view, $"{percent} ({percent}%)").GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Fact]
+        public void Placeholders_recede_like_captions()
+        {
+            using var view = new StatusView(new GameState());
+
+            Assert.Equal(Theme.Attr(TextRole.Hint), LabelWith(view, "(No attributes)").GetAttributeForRole(VisualRole.Normal));
         }
     }
 }

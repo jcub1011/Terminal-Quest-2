@@ -1,3 +1,4 @@
+using Terminal.Gui.Drawing;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
 
@@ -214,6 +215,41 @@ namespace TerminalQuest.Tests.Ui
         public void A_scheme_can_be_built_without_a_running_application()
         {
             Assert.NotNull(Theme.CreateScheme());
+        }
+
+        [Fact]
+        public void Hints_buttons_inputs_and_important_are_distinguishable()
+        {
+            // Each hierarchy lane needs its own ink, or the lanes collapse back into one.
+            var roles = new[]
+            {
+                TextRole.Normal,
+                TextRole.Hint,
+                TextRole.Button,
+                TextRole.Input,
+                TextRole.Important,
+                TextRole.Item,
+                TextRole.Danger,
+            };
+
+            Assert.Equal(roles.Length, roles.Select(Theme.For).Distinct().Count());
+        }
+
+        [Fact]
+        public void Buttons_do_not_borrow_the_item_colour()
+        {
+            // Gold means furniture of the world; a pressable thing must read differently.
+            Assert.NotEqual(Theme.For(TextRole.Item), Theme.For(TextRole.Button));
+        }
+
+        [Fact]
+        public void No_role_uses_an_underline()
+        {
+            // Underlines read as noise in a dense terminal; hierarchy comes from colour alone.
+            foreach (var role in Enum.GetValues<TextRole>())
+            {
+                Assert.True((Theme.Attr(role).Style & TextStyle.Underline) == 0, $"{role} should not underline");
+            }
         }
 
 

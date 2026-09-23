@@ -6,14 +6,14 @@ namespace TerminalQuest.Tests.Ui
     public sealed class CommandTitleViewTests
     {
         [Fact]
-        public void BuildLine_when_idle_displays_command_text_with_command_role()
+        public void BuildLine_when_idle_displays_command_text_with_hint_role()
         {
             var line = CommandTitleView.BuildLine(isBusy: false, step: 0, width: 80);
 
             Assert.Equal(80, line.Length);
             var text = string.Concat(line.Spans.Select(s => s.Text));
             Assert.StartsWith("Command", text);
-            Assert.Equal(TextRole.Command, line.Spans[0].Role);
+            Assert.Equal(TextRole.Hint, line.Spans[0].Role);
         }
 
         [Fact]
@@ -28,16 +28,16 @@ namespace TerminalQuest.Tests.Ui
             Assert.StartsWith("Command ~≈~≈~≈~≈~≈~≈⪢", text);
 
             // Spans verification
-            Assert.Equal(TextRole.Command, line.Spans[0].Role);
+            Assert.Equal(TextRole.Hint, line.Spans[0].Role);
             Assert.Equal("Command", line.Spans[0].Text);
 
             Assert.Equal(TextRole.Normal, line.Spans[1].Role);
             Assert.Equal(" ", line.Spans[1].Text);
 
-            Assert.Equal(TextRole.Place, line.Spans[2].Role);
+            Assert.Equal(TextRole.Hint, line.Spans[2].Role);
             Assert.Equal("~≈~≈~≈~≈~≈~≈", line.Spans[2].Text);
 
-            Assert.Equal(TextRole.Item, line.Spans[3].Role);
+            Assert.Equal(TextRole.Hint, line.Spans[3].Role);
             Assert.Equal("⪢", line.Spans[3].Text);
         }
 
@@ -50,7 +50,7 @@ namespace TerminalQuest.Tests.Ui
 
             // Thinking text is present in the middle
             Assert.Contains("narrator thinking...", text0);
-            Assert.Contains(lineIdleStep0.Spans, s => s.Role == TextRole.Speech && s.Text == "narrator thinking...");
+            Assert.Contains(lineIdleStep0.Spans, s => s.Role == TextRole.System && s.Text == "narrator thinking...");
 
             // At step 26: head is at column 34, obscuring the 'n' of "narrator thinking..."
             var lineStep26 = CommandTitleView.BuildLine(isBusy: true, step: 26, width: 80);
@@ -131,7 +131,7 @@ namespace TerminalQuest.Tests.Ui
             Assert.Equal(50, line.Length);
             var text = string.Concat(line.Spans.Select(s => s.Text));
             Assert.StartsWith("Editing in external editor...", text);
-            Assert.Equal(TextRole.Command, line.Spans[0].Role);
+            Assert.Equal(TextRole.Important, line.Spans[0].Role);
         }
 
         [Theory]
