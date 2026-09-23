@@ -60,6 +60,24 @@ namespace TerminalQuest.Ui
         public static readonly Attribute OptionSelection = new(Color.Black, Color.White);
 
         /// <summary>
+        /// A scheme for a label drawn entirely in one role: a field name, help text, or a
+        /// status line. Only the roles a label ever uses are pinned; the background stays
+        /// the terminal's own, like <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme LabelScheme(TextRole role)
+        {
+            var ink = Attr(role);
+
+            return new Scheme
+            {
+                Normal = ink,
+                Focus = ink,
+                HotNormal = ink,
+                HotFocus = ink,
+            };
+        }
+
+        /// <summary>
         /// The scheme applied to the window and every stock control inside it.
         /// <para>
         /// Every role is pinned explicitly with a <see cref="Color.None"/> background. That matters
