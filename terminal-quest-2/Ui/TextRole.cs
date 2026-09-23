@@ -42,5 +42,29 @@ namespace TerminalQuest.Ui
         /// </para>
         /// </summary>
         Roll,
+
+        /// <summary>
+        /// Dimmed chrome and guidance: placeholders, summaries, separators, key hints, scroll
+        /// chrome. Read last, never first - anything in this role must be safe to skim past.
+        /// </summary>
+        Hint,
+
+        /// <summary>
+        /// Something the player can press or pick: a choice number, the command prompt, a hotkey.
+        /// Distinct from <see cref="Item"/> (gold), which means furniture of the world.
+        /// </summary>
+        Button,
+
+        /// <summary>
+        /// Text the player is editing in the command box. Brighter than <see cref="Normal"/> so
+        /// the line being typed never has to compete with the transcript above it.
+        /// </summary>
+        Input,
+
+        /// <summary>
+        /// A warning that is not yet an error: notices, high-context thresholds, section headers
+        /// the eye should land on. <see cref="Danger"/> stays reserved for things going wrong.
+        /// </summary>
+        Important,
     }
 }

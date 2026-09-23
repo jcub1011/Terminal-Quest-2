@@ -2,11 +2,13 @@ using System.Collections.ObjectModel;
 using System.Data;
 
 using Terminal.Gui.App;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 using TerminalQuest.Agents;
+using TerminalQuest.Saves;
 using TerminalQuest.Settings;
 using TerminalQuest.Tests.Infrastructure;
 using TerminalQuest.Ui;
@@ -65,6 +67,43 @@ namespace TerminalQuest.Tests.Ui
 
             view.MoveSelection(10);
             Assert.Equal(1, view.SelectedItem);
+        }
+
+        [Fact]
+        public void A_settled_suggestion_strip_offers_no_selection()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            Assert.Equal(0, view.SelectedItem);
+
+            // Settled means reminder, not menu: no row may wear the selection block.
+            view.IsChoosing = false;
+
+            Assert.Null(view.SelectedItem);
+            Assert.Null(view.Selected);
+        }
+
+        [Fact]
+        public void A_settled_strip_never_highlights_refills()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            view.IsChoosing = false;
+
+            view.Suggestions = Commands;
+
+            Assert.Null(view.SelectedItem);
+            Assert.Null(view.Selected);
+        }
+
+        [Fact]
+        public void A_reopened_suggestion_strip_offers_its_first_command_again()
+        {
+            using var view = new CommandSuggestionView { Suggestions = Commands };
+            view.IsChoosing = false;
+
+            view.IsChoosing = true;
+
+            Assert.Equal(0, view.SelectedItem);
+            Assert.Equal(Commands[0], view.Selected);
         }
 
         [Fact]
@@ -152,49 +191,61 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_selection_vs_picking_behavior()
+        public void SettingsWindow_highlight_without_enter_does_not_change_provider()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            // Find the provider list view (has 2 options: Claude Code & OpenAI API)
-            var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
+            // Browse to OpenAI API without pressing Enter: the draft is untouched.
+            window.ProviderList.SelectedItem = 1;
 
-            Assert.Equal(0, providerList.SelectedItem);
+            // Save settings via Ctrl+S
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(AgentProvider.ClaudeCode, window.Chosen.Provider);
+        }
 
-            // Move selection down to OpenAI API (1)
-            providerList.SelectedItem = 1;
+        [Fact]
+        public void SettingsWindow_enter_picks_provider()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var window = new SettingsWindow(app, settings);
 
-            // Save settings via Ctrl+S without needing to press Enter on the list item
+            window.ProviderList.SelectedItem = 1;
+            window.ProviderList.NewKeyDownEvent(Key.Enter);
+
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
             Assert.Equal(AgentProvider.OpenAiApi, window.Chosen.Provider);
         }
 
         [Fact]
-        public void SettingsWindow_tab_navigation_claude()
+        public void SettingsWindow_claude_enter_picks_model_and_advances()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            // Switch to Claude Code tab
-            window.SwitchToTab(window.ClaudeTabView);
-            Assert.Equal(window.ClaudeTabView, window.ActiveTab);
+            // Switch to Claude Code section
+            window.SwitchToSection(SettingsSection.ClaudeCode);
+            Assert.Equal(SettingsSection.ClaudeCode, window.ActiveSection);
 
-            // Verify Claude model list is present
-            var claudeList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == ClaudeModels.All.Length);
-            Assert.NotNull(claudeList);
+            window.SetFocus();
+            window.ClaudeModelList.SetFocus();
 
-            // Select Haiku (index 1)
-            claudeList.SelectedItem = 1;
-            claudeList.NewKeyDownEvent(Key.Enter);
+            // Select Haiku (index 1) and press Enter to pick it
+            window.ClaudeModelList.SelectedItem = 1;
+            window.ClaudeModelList.NewKeyDownEvent(Key.Enter);
 
-            var customModelField = FindDescendants<TextField>(window).First(tf => tf.Text == ClaudeModels.All[1].Id);
-            Assert.Equal(ClaudeModels.All[1].Id, customModelField.Text);
+            Assert.Equal(ClaudeModels.All[1].Id, window.ClaudeCustomModelField.Text);
+
+            // Enter advances into the custom model field
+            Assert.Equal(window.ClaudeCustomModelField, window.MostFocused);
 
             // Save settings via Ctrl+S
             window.NewKeyDownEvent(Key.S.WithCtrl);
@@ -203,48 +254,44 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_claude_model_selection_without_enter()
+        public void SettingsWindow_claude_highlight_without_enter_does_not_change_model()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToTab(window.ClaudeTabView);
-            var claudeList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == ClaudeModels.All.Length);
+            window.SwitchToSection(SettingsSection.ClaudeCode);
 
-            // Change selection to Opus without pressing Enter
-            claudeList.SelectedItem = 3;
+            // Browse to Opus without pressing Enter
+            window.ClaudeModelList.SelectedItem = 3;
 
-            // Save via Ctrl+S
+            // Save via Ctrl+S: the browsed row must not leak into the draft
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
-            Assert.Equal(ClaudeModels.All[3].Id, window.Chosen.ClaudeModel);
+            Assert.Equal(ClaudeModels.All[0].Id, window.Chosen.ClaudeModel);
         }
 
         [Fact]
-        public void SettingsWindow_tab_navigation_openai_and_presets()
+        public void SettingsWindow_openai_preset_enter_applies_endpoint()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
 
-            // Switch to OpenAI API tab
-            window.SwitchToTab(window.OpenAiTabView);
-            Assert.Equal(window.OpenAiTabView, window.ActiveTab);
+            // Switch to OpenAI API section
+            window.SwitchToSection(SettingsSection.OpenAiApi);
+            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
 
-            // Find DropDownList and URL text field
-            var dropDown = FindDescendants<DropDownList>(window).Single();
-            var urlField = FindDescendants<TextField>(window).First(tf => tf != dropDown && tf.Text == settings.LmStudioBaseUrl);
+            // Highlight Google and press Enter to apply it
+            window.PresetList.SelectedItem = 0;
+            window.PresetList.NewKeyDownEvent(Key.Enter);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.BaseUrlField.Text);
 
-            // Select Google preset in dropdown
-            dropDown.Text = "Google (https://generativelanguage.googleapis.com/v1beta/openai)";
-            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", urlField.Text);
-
-            // Type custom URL
-            urlField.Text = "http://my-custom-host:8080/v1";
-            Assert.Contains("Custom", dropDown.Text);
+            // Typing a custom URL moves the preset highlight to Custom without saving yet
+            window.BaseUrlField.Text = "http://my-custom-host:8080/v1";
+            Assert.Equal(3, window.PresetList.SelectedItem);
 
             // Find API key label and verify note
             var apiKeyLabel = FindDescendants<Label>(window).First(l => l.Text.Contains("API Key"));
@@ -252,21 +299,20 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_preset_dropdown_selection_by_index_persists_on_save()
+        public void SettingsWindow_preset_pick_persists_on_save()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToTab(window.OpenAiTabView);
-            var dropDown = FindDescendants<DropDownList>(window).Single();
-            var urlField = FindDescendants<TextField>(window).First(tf => tf != dropDown && tf.Text == settings.LmStudioBaseUrl);
+            window.SwitchToSection(SettingsSection.OpenAiApi);
 
-            // Select Google preset
-            dropDown.Text = "Google (https://generativelanguage.googleapis.com/v1beta/openai)";
+            // Pick the Google preset with Enter
+            window.PresetList.SelectedItem = 0;
+            window.PresetList.NewKeyDownEvent(Key.Enter);
 
-            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", urlField.Text);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.BaseUrlField.Text);
 
             // Save via Ctrl+S
             window.NewKeyDownEvent(Key.S.WithCtrl);
@@ -284,13 +330,10 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToTab(window.OpenAiTabView);
+            window.SwitchToSection(SettingsSection.OpenAiApi);
 
-            // Verify probed models list has reactive Dim.Fill height
-            var listViews = FindDescendants<ListView>(window).ToList();
-            // The probed models list is the one initialized with 0 items initially
-            var probedList = listViews.First(lv => lv.Source == null || lv.Source.Count == 0);
-            Assert.NotNull(probedList);
+            // The probed models list starts with no source until a probe runs
+            Assert.True(window.ProbedModelsList.Source == null || window.ProbedModelsList.Source.Count == 0);
 
             // Verify alphabetical sort (case-insensitive)
             var sampleUnsorted = new List<string> { "zebra-3b", "Alpha-7b", "beta-8b", "alpha-13b" };
@@ -299,39 +342,43 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_tabs_structure_and_provider_picking()
+        public void SettingsWindow_sections_structure()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
-            var tabs = FindDescendants<Tabs>(window).Single();
-            Assert.True(tabs.CanFocus);
-            Assert.Equal(5, tabs.TabCollection.Count());
+            Assert.Equal(4, window.SectionsList.Source?.Count);
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
-            var providerList = FindDescendants<ListView>(window).First(lv => lv.Source?.Count == 2);
-            providerList.SelectedItem = 1;
-            providerList.NewKeyDownEvent(Key.Enter);
+            // Each row maps to its section in order.
+            window.SectionsList.SelectedItem = 2;
+            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
+            window.SectionsList.SelectedItem = 0;
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
+
+            window.ProviderList.SelectedItem = 1;
+            window.ProviderList.NewKeyDownEvent(Key.Enter);
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.Equal(AgentProvider.OpenAiApi, window.Chosen!.Provider);
         }
 
         [Fact]
-        public void SettingsWindow_tab_switching_via_value_and_esc_cancel()
+        public void SettingsWindow_section_switching_and_esc_cancel()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
-            Assert.Equal(window.EngineTabView, window.ActiveTab);
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
-            window.SwitchToTab(window.MemoryTabView);
-            Assert.Equal(window.MemoryTabView, window.ActiveTab);
+            window.SwitchToSection(SettingsSection.Preferences);
+            Assert.Equal(SettingsSection.Preferences, window.ActiveSection);
 
-            window.SwitchToTab(window.EditorTabView);
-            Assert.Equal(window.EditorTabView, window.ActiveTab);
+            window.SwitchToSection(SettingsSection.OpenAiApi);
+            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
 
             // Press Esc to cancel without saving
             var cancelledFired = false;
@@ -340,6 +387,334 @@ namespace TerminalQuest.Tests.Ui
 
             Assert.True(cancelledFired);
             Assert.Null(window.Chosen);
+        }
+
+        [Fact]
+        public void SettingsWindow_field_labels_use_accent_and_help_text_recedes()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            var labels = FindDescendants<Label>(window).ToList();
+
+            // Every input label draws the eye in gold...
+            foreach (var prefix in new[]
+            {
+                "Active Narrative Provider",
+                "Preset Claude Models",
+                "Or custom model identifier:",
+                "Server Base URL",
+                "Preset (Up/Down",
+                "API Key",
+                "Model Name / ID",
+                "Transcript Recall Characters:",
+                "External Editor Command",
+            })
+            {
+                var label = labels.First(l => l.Text.StartsWith(prefix));
+                Assert.Equal(Theme.Attr(TextRole.Item), label.GetAttributeForRole(VisualRole.Normal));
+            }
+
+            // ...while help text recedes into grey.
+            foreach (var fragment in new[]
+            {
+                "connects over HTTP",
+                "requires the 'claude' CLI",
+                "Boundaries:",
+            })
+            {
+                var label = labels.First(l => l.Text.Contains(fragment));
+                Assert.Equal(Theme.Attr(TextRole.System), label.GetAttributeForRole(VisualRole.Normal));
+            }
+        }
+
+        [Fact]
+        public void SettingsWindow_summary_marks_active_config_and_standby()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            var labels = FindDescendants<Label>(window).ToList();
+
+            var active = labels.First(l => l.Text.StartsWith("Current Configuration:"));
+            Assert.Equal(Theme.Attr(TextRole.Command), active.GetAttributeForRole(VisualRole.Normal));
+
+            var standby = labels.First(l => l.Text.Contains("standby:"));
+            Assert.Equal(Theme.Attr(TextRole.System), standby.GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Fact]
+        public void SettingsWindow_feedback_uses_severity_colors()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            // A confirmation reads green.
+            window.ProviderList.SelectedItem = 1;
+            window.ProviderList.NewKeyDownEvent(Key.Enter);
+            var confirm = FindDescendants<Label>(window).First(l => l.Text.Contains("Active provider set to"));
+            Assert.Equal(Theme.Attr(TextRole.Place), confirm.GetAttributeForRole(VisualRole.Normal));
+
+            // A validation error reads red and nothing is saved.
+            window.SwitchToSection(SettingsSection.Preferences);
+            window.RecallField.Text = "not-a-number";
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.Null(window.Chosen);
+            var error = FindDescendants<Label>(window).First(l => l.Text.Contains("must be an integer"));
+            Assert.Equal(Theme.Attr(TextRole.Danger), error.GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Fact]
+        public void SettingsWindow_tab_cycles_through_panes()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            window.SetFocus();
+            window.SectionsList.SetFocus();
+            Assert.Equal(window.SectionsList, window.MostFocused);
+
+            // Tab moves into the form instead of walking every field.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.Equal(window.ProviderList, window.MostFocused);
+
+            // Tab jumps straight to the action bar.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.IsType<Button>(window.MostFocused);
+
+            // Tab wraps back to the sections list.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.Equal(window.SectionsList, window.MostFocused);
+
+            // Shift+Tab goes the other way too.
+            window.NewKeyDownEvent(Key.Tab.WithShift);
+            Assert.IsType<Button>(window.MostFocused);
+        }
+
+        [Fact]
+        public void SettingsWindow_footer_arrows_cycle_without_leaking()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            window.SetFocus();
+            window.SectionsList.SetFocus();
+
+            window.NewKeyDownEvent(Key.Tab);
+            window.NewKeyDownEvent(Key.Tab);
+            var first = window.MostFocused;
+            Assert.IsType<Button>(first);
+
+            // Arrows cycle within the footer rather than leaking back to the form.
+            window.NewKeyDownEvent(Key.CursorRight);
+            Assert.IsType<Button>(window.MostFocused);
+            Assert.NotSame(first, window.MostFocused);
+
+            window.NewKeyDownEvent(Key.CursorLeft);
+            Assert.Same(first, window.MostFocused);
+
+            // Wrapping past the first button lands on the last one.
+            window.NewKeyDownEvent(Key.CursorLeft);
+            Assert.IsType<Button>(window.MostFocused);
+            Assert.NotSame(first, window.MostFocused);
+        }
+
+        [Fact]
+        public void SaveMenu_tab_toggles_between_saves_table_and_action_bar()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            Assert.Equal(10, FindDescendants<Button>(window).Count());
+
+            window.SetFocus();
+            table.SetFocus();
+            Assert.Equal(table, window.MostFocused);
+
+            // Tab jumps straight to the action bar instead of walking each button.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.IsType<Button>(window.MostFocused);
+
+            // Arrows cycle within the footer rather than leaking back to the table.
+            var first = window.MostFocused;
+            window.NewKeyDownEvent(Key.CursorRight);
+            Assert.IsType<Button>(window.MostFocused);
+            Assert.NotSame(first, window.MostFocused);
+
+            window.NewKeyDownEvent(Key.CursorLeft);
+            Assert.Same(first, window.MostFocused);
+
+            // Tab returns to the saves table; Shift+Tab goes the other way too.
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.Equal(table, window.MostFocused);
+
+            window.NewKeyDownEvent(Key.Tab.WithShift);
+            Assert.IsType<Button>(window.MostFocused);
+        }
+
+        [Fact]
+        public void SaveMenu_single_key_shortcuts_work_from_the_action_bar()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            window.NewKeyDownEvent(Key.Tab);
+            Assert.IsType<Button>(window.MostFocused);
+
+            // Q quits from anywhere, including with focus in the footer.
+            var cancelledFired = false;
+            window.Cancelled += () => cancelledFired = true;
+            window.NewKeyDownEvent(Key.Q);
+
+            Assert.True(cancelledFired);
+        }
+
+        [Fact]
+        public void SaveMenu_hotkeys_fire_while_the_saves_table_has_focus()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+            Assert.Equal(table, window.MostFocused);
+
+            // Routed through the focused table, the way a live keypress travels: the
+            // table must offer menu hotkeys to the window before its own type-ahead
+            // eats them.
+            var settingsFired = false;
+            window.SettingsRequested += () => settingsFired = true;
+            table.NewKeyDownEvent(Key.S);
+            Assert.True(settingsFired);
+
+            var cancelledFired = false;
+            window.Cancelled += () => cancelledFired = true;
+            table.NewKeyDownEvent(Key.Q);
+            Assert.True(cancelledFired);
+        }
+
+        [Fact]
+        public void SaveMenu_saves_table_keeps_arrow_navigation()
+        {
+            using var root = new SavesRoot();
+            SavePaths.Open("Alpha");
+            SavePaths.Open("Beta");
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            Assert.Equal(0, table.Value?.SelectedCell.Y);
+            Assert.True(table.NewKeyDownEvent(Key.CursorDown));
+            Assert.Equal(1, table.Value?.SelectedCell.Y);
+        }
+
+        [Fact]
+        public void SaveMenu_header_help_and_separators_use_distinct_roles()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var labels = FindDescendants<Label>(window).ToList();
+
+            // Title level reads bright; help text recedes.
+            var header = labels.Single(l => $"{l.Text}".StartsWith("Narrator:", StringComparison.Ordinal));
+            Assert.Equal(Theme.Attr(TextRole.Command), header.GetAttributeForRole(VisualRole.Normal));
+
+            var hints = labels.Single(l => $"{l.Text}".Contains("Tab:", StringComparison.Ordinal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), hints.GetAttributeForRole(VisualRole.Normal));
+
+            // Group dividers stay dim rather than competing with the buttons.
+            var separators = labels.Where(l => $"{l.Text}" == "│").ToList();
+            Assert.Equal(2, separators.Count);
+            foreach (var separator in separators)
+            {
+                Assert.Equal(Theme.Attr(TextRole.Hint), separator.GetAttributeForRole(VisualRole.Normal));
+            }
+        }
+
+        [Fact]
+        public void SaveMenu_destructive_buttons_wear_a_danger_hotkey()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var buttons = FindDescendants<Button>(window).ToList();
+            Assert.Equal(10, buttons.Count);
+
+            Button Named(string text) => buttons.Single(b => $"{b.Text}" == text);
+
+            // Delete/Reset stand apart in red; safe actions keep the standard blue hotkey.
+            Assert.Equal(Theme.Attr(TextRole.Danger), Named("Delete (Del)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Danger), Named("Reset (Ctrl+R)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Button), Named("Load (Enter)").GetAttributeForRole(VisualRole.HotNormal));
+            Assert.Equal(Theme.Attr(TextRole.Button), Named("New (N)").GetAttributeForRole(VisualRole.HotNormal));
+        }
+
+        [Fact]
+        public void SaveMenu_focused_pane_border_and_hints_follow_focus()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var table = FindDescendants<TableView>(window).Single();
+            window.SetFocus();
+            table.SetFocus();
+
+            FrameView Frame(string title) =>
+                FindDescendants<FrameView>(window).Single(f => $"{f.Title}" == title);
+            var hints = FindDescendants<Label>(window).Single(l => $"{l.Text}".Contains("Tab:", StringComparison.Ordinal));
+
+            // Saves focused: blue border there, dimmed actions, saves hints.
+            Assert.Equal("* Saves", $"{Frame("* Saves").Title}");
+            Assert.Equal(Theme.Attr(TextRole.Button), Frame("* Saves").GetAttributeForRole(VisualRole.Normal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), Frame("Actions").GetAttributeForRole(VisualRole.Normal));
+            Assert.Contains("Up/Down: saves", $"{hints.Text}", StringComparison.Ordinal);
+
+            // Tab into the action bar: the border and hints move with focus.
+            window.NewKeyDownEvent(Key.Tab);
+
+            Assert.Equal("* Actions", $"{Frame("* Actions").Title}");
+            Assert.Equal(Theme.Attr(TextRole.Button), Frame("* Actions").GetAttributeForRole(VisualRole.Normal));
+            Assert.Equal(Theme.Attr(TextRole.Hint), Frame("Saves").GetAttributeForRole(VisualRole.Normal));
+            Assert.Contains("Left/Right: actions", $"{hints.Text}", StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void SaveMenu_empty_details_recede_as_guidance()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var window = new SaveMenuWindow(app, "test-narrator");
+
+            var detailsFrame = FindDescendants<FrameView>(window).Single(f => $"{f.Title}" == "Save Details");
+            var details = detailsFrame.SubViews.OfType<Label>().Single();
+
+            Assert.Equal(Theme.Attr(TextRole.Hint), details.GetAttributeForRole(VisualRole.Normal));
         }
     }
 }

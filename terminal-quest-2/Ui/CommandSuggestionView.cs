@@ -46,10 +46,19 @@ namespace TerminalQuest.Ui
             set
             {
                 _source.Items = value;
+
+                // A settled strip is a reminder, not a menu: no row may wear the selection block.
                 this.Highlight(_source.Count, 0);
+                if (!IsChoosing)
+                {
+                    SelectedItem = null;
+                }
+
                 SetNeedsDraw();
             }
         }
+
+        private bool _isChoosing = true;
 
         /// <summary>
         /// Whether the rows are still a question or have become an answer.
@@ -59,7 +68,28 @@ namespace TerminalQuest.Ui
         /// the strip is a reminder rather than a menu, so it draws no cursor and offers nothing to complete.
         /// </para>
         /// </summary>
-        public bool IsChoosing { get; set; } = true;
+        public bool IsChoosing
+        {
+            get => _isChoosing;
+
+            set
+            {
+                _isChoosing = value;
+
+                // Taking the highlight off is what keeps a settled reminder from drawing the
+                // selection block: the list paints the block wherever its highlight sits.
+                if (!value)
+                {
+                    SelectedItem = null;
+                }
+                else if (Suggestions.Count > 0 && SelectedItem is null)
+                {
+                    this.Highlight(Suggestions.Count, 0);
+                }
+
+                SetNeedsDraw();
+            }
+        }
 
         /// <summary>
         /// The suggestion Tab, Right or Enter would complete to, or null when there is nothing to
@@ -81,7 +111,7 @@ namespace TerminalQuest.Ui
         /// <summary>Moves the cursor, clamping at both ends rather than wrapping.</summary>
         public void MoveSelection(int delta)
         {
-            if (Suggestions.Count == 0)
+            if (!IsChoosing || Suggestions.Count == 0)
             {
                 return;
             }
@@ -91,17 +121,16 @@ namespace TerminalQuest.Ui
         }
 
         /// <param name="isCursor">
-        /// Whether this is the row a completing key would take. A settled command is drawn bright
-        /// too - it is the one in play - but without the arrow, which would promise a choice that
-        /// is no longer on offer.
+        /// Unused for colour: the selection block is painted by the list source, so a selected row
+        /// never reaches this formatter's colours. A settled command draws without the arrow, which
+        /// would promise a choice that is no longer on offer.
         /// </param>
         private StyledLine Row(SuggestionItem item, int width, bool isCursor)
         {
             var cursor = isCursor && IsChoosing;
-            var isSelected = cursor || !IsChoosing;
 
             var line = new StyledLine();
-            line.Append(cursor ? "> " : "  ", TextRole.System);
+            line.Append(cursor ? "> " : "  ", TextRole.Hint);
 
             // The summary is dropped rather than crushed against the name it belongs to: which
             // commands are on offer is the one thing this strip cannot do without.
@@ -111,9 +140,9 @@ namespace TerminalQuest.Ui
             // into a description that belongs to the same row and read as one word.
             var nameWidth = hasSummary ? SummaryColumn - MarkerWidth - 1 : width - MarkerWidth;
 
-            line.Append(
-                Fit(item.DisplayText, Math.Max(0, nameWidth)),
-                isSelected ? item.Role : TextRole.Normal);
+            // The type colour shows on every row, not just the cursor's: what kind of thing is
+            // on offer should not require moving to see.
+            line.Append(Fit(item.DisplayText, Math.Max(0, nameWidth)), item.Role);
 
             if (!hasSummary)
             {
@@ -125,7 +154,7 @@ namespace TerminalQuest.Ui
                 line.Append(new string(' ', SummaryColumn - line.Length), TextRole.Normal);
             }
 
-            line.Append(Fit(item.Summary, width - SummaryColumn), TextRole.System);
+            line.Append(Fit(item.Summary, width - SummaryColumn), TextRole.Hint);
 
             return line;
         }

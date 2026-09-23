@@ -405,10 +405,19 @@ namespace TerminalQuest.Ui
             lines.Add(StyledLine.FromText("Anything else is spoken to the world.", TextRole.System));
             lines.Add(StyledLine.FromText("Keys", TextRole.System));
 
-            Describe(lines, "Ctrl+= / Ctrl+-", "your terminal's own text size");
+            Describe(lines, "1-9 / Alt+1-9", "fill a narrator choice into the line");
+            Describe(lines, "Up / Down", "move through narrator choices");
+            Describe(lines, "Enter on a choice", "send the highlighted choice");
+            Describe(lines, "Tab", "move between line, choices, and pack");
+            Describe(lines, "Enter on the pack", "inspect the selected item");
             Describe(lines, "PgUp / PgDn", "scroll the transcript");
+            Describe(lines, "Ctrl+Up / Ctrl+Down", "scroll the transcript a line");
+            Describe(lines, "Ctrl+PgUp / Ctrl+PgDn", "scroll the transcript a page");
+            Describe(lines, "Ctrl+Home / Ctrl+End", "oldest lines / back to the narrator");
+            Describe(lines, "Ctrl+Left / Ctrl+Right", "move by word while editing");
+            Describe(lines, "Ctrl+= / Ctrl+-", "your terminal's own text size");
             Describe(lines, "Ctrl+G", "write this line in an editor");
-            Describe(lines, "Esc", "back to the menu");
+            Describe(lines, "Esc", "choices first, then back to the menu");
         }
 
         private static void Story(List<StyledLine> lines, SaveStore store)
@@ -1087,7 +1096,7 @@ namespace TerminalQuest.Ui
         {
             var line = new StyledLine();
             line.Append($"  {command,-20}", TextRole.Command);
-            line.Append(meaning, TextRole.System);
+            line.Append(meaning, TextRole.Hint);
             lines.Add(line);
         }
     }

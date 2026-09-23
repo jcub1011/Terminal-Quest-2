@@ -93,9 +93,31 @@ namespace TerminalQuest.Ui
 
             listView.Move(col, row);
 
+            // The selected row is one block of inverted colour, the same look as a highlighted
+            // narrator choice or pack row - so the cursor is never a subtle brightening the eye
+            // has to hunt for. Unselected rows keep their own colours.
+            if (selected)
+            {
+                var text = string.Concat(_format(_items[item], width, true).Spans.Select(s => s.Text));
+                if (text.Length > width)
+                {
+                    text = text[..width];
+                }
+
+                listView.SetAttribute(Theme.OptionSelection);
+                listView.AddStr(text);
+
+                if (text.Length < width)
+                {
+                    listView.AddStr(new string(' ', width - text.Length));
+                }
+
+                return;
+            }
+
             var drawn = 0;
 
-            foreach (var span in _format(_items[item], width, selected).Spans)
+            foreach (var span in _format(_items[item], width, false).Spans)
             {
                 if (drawn >= width)
                 {

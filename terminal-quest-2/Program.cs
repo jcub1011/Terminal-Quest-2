@@ -349,7 +349,7 @@ namespace TerminalQuest
 
             window.Narration.AddLine($"Terminal Quest - {store.Name}", TextRole.System);
             window.Narration.AddLine(
-                "Type a command and press Enter. /help lists yours. The wheel and PgUp/PgDn scroll. Esc returns to the menu.",
+                "Type a command and press Enter. /help lists yours. Pick a choice with 1-9 or Up/Down, then Enter. PgUp/PgDn or Ctrl+arrows scroll. Esc returns to the menu.",
                 TextRole.System);
 
             // Its own line rather than folded into the one above, because the players who need it

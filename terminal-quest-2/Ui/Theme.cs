@@ -19,20 +19,24 @@ namespace TerminalQuest.Ui
         internal readonly record struct Ink(Color Foreground, TextStyle Style);
 
         private static readonly Ink NormalInk = new(new Color("#d7d2c4"), TextStyle.None);
-        private static readonly Ink ItemInk = new(new Color("#e0b050"), TextStyle.Bold);
-        private static readonly Ink DangerInk = new(new Color("#d05a4a"), TextStyle.Bold);
-        private static readonly Ink SpeechInk = new(new Color("#7fc3c8"), TextStyle.Italic);
-        private static readonly Ink PlaceInk = new(new Color("#8fb26a"), TextStyle.Bold);
-        private static readonly Ink CharacterInk = new(new Color("#e69875"), TextStyle.Bold);
+        private static readonly Ink ItemInk = new(new Color("#ffb62e"), TextStyle.Bold);
+        private static readonly Ink DangerInk = new(new Color("#ff5147"), TextStyle.Bold);
+        private static readonly Ink SpeechInk = new(new Color("#4fe3e8"), TextStyle.Bold | TextStyle.Italic);
+        private static readonly Ink PlaceInk = new(new Color("#7ddf64"), TextStyle.Bold);
+        private static readonly Ink CharacterInk = new(new Color("#ff9e64"), TextStyle.Bold);
         private static readonly Ink SystemInk = new(new Color("#8a8375"), TextStyle.None);
         private static readonly Ink CommandInk = new(new Color("#f0e6d2"), TextStyle.Bold);
+        private static readonly Ink HintInk = new(new Color("#6f6a5e"), TextStyle.None);
+        private static readonly Ink ButtonInk = new(new Color("#4fc3ff"), TextStyle.Bold);
+        private static readonly Ink InputInk = new(new Color("#f5efdf"), TextStyle.Bold);
+        private static readonly Ink ImportantInk = new(new Color("#ffa02e"), TextStyle.Bold);
 
         /// <summary>
         /// The dice. A violet of its own rather than a borrowed ink: a roll is a third voice in the
         /// transcript, neither narration nor the game's furniture. Grey would bury the one number
         /// the player is looking for among the /help text, and gold already means money and items.
         /// </summary>
-        private static readonly Ink RollInk = new(new Color("#9a8fd0"), TextStyle.Bold);
+        private static readonly Ink RollInk = new(new Color("#b39dff"), TextStyle.Bold);
 
         public static Ink For(TextRole role) => role switch
         {
@@ -44,6 +48,10 @@ namespace TerminalQuest.Ui
             TextRole.System => SystemInk,
             TextRole.Command => CommandInk,
             TextRole.Roll => RollInk,
+            TextRole.Hint => HintInk,
+            TextRole.Button => ButtonInk,
+            TextRole.Input => InputInk,
+            TextRole.Important => ImportantInk,
             _ => NormalInk,
         };
 
@@ -58,6 +66,83 @@ namespace TerminalQuest.Ui
         /// The attribute used to highlight the currently selected choice/option in the transcript.
         /// </summary>
         public static readonly Attribute OptionSelection = new(Color.Black, Color.White);
+
+        /// <summary>
+        /// A scheme for a label drawn entirely in one role: a field name, help text, or a
+        /// status line. Only the roles a label ever uses are pinned; the background stays
+        /// the terminal's own, like <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme LabelScheme(TextRole role)
+        {
+            var ink = Attr(role);
+
+            return new Scheme
+            {
+                Normal = ink,
+                Focus = ink,
+                HotNormal = ink,
+                HotFocus = ink,
+            };
+        }
+
+        /// <summary>
+        /// A scheme for an action button whose hotkey letter wears
+        /// <paramref name="hotRole"/> instead of the default <see cref="TextRole.Button"/> blue.
+        /// The focused-input ink is unchanged, so keyboard focus still reads bright while the
+        /// hotkey carries the severity (e.g. <see cref="TextRole.Danger"/> red for Delete/Reset).
+        /// The background stays the terminal's own, like <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme ButtonScheme(TextRole hotRole)
+        {
+            var normal = Attr(TextRole.Normal);
+            var hot = Attr(hotRole);
+
+            return new Scheme(normal)
+            {
+                Normal = normal,
+                HotNormal = hot,
+                Focus = Attr(TextRole.Input),
+                HotFocus = hot,
+                Active = Attr(TextRole.Input),
+                HotActive = hot,
+                Highlight = hot,
+                Disabled = Attr(TextRole.Hint),
+                Editable = Attr(TextRole.Input),
+                ReadOnly = Attr(TextRole.Hint),
+            };
+        }
+
+        /// <summary>
+        /// A scheme for destructive action buttons (Delete, Reset): the hotkey letter reads
+        /// <see cref="TextRole.Danger"/> red while everything else matches <see cref="CreateScheme"/>.
+        /// </summary>
+        public static Scheme DangerButtonScheme() => ButtonScheme(TextRole.Danger);
+
+        /// <summary>
+        /// A scheme for a frame border and title tinted with
+        /// <paramref name="role"/>. Used to mark the focused pane: the active pane's border
+        /// wears <see cref="TextRole.Button"/> blue, the idle pane recedes into
+        /// <see cref="TextRole.Hint"/> grey. The <c>*</c> title marker is kept, so the focus
+        /// never depends on colour alone. The background stays the terminal's own.
+        /// </summary>
+        public static Scheme FrameScheme(TextRole role)
+        {
+            var ink = Attr(role);
+
+            return new Scheme(ink)
+            {
+                Normal = ink,
+                HotNormal = ink,
+                Focus = ink,
+                HotFocus = ink,
+                Active = Attr(TextRole.Input),
+                HotActive = Attr(TextRole.Button),
+                Highlight = Attr(TextRole.Button),
+                Disabled = Attr(TextRole.Hint),
+                Editable = Attr(TextRole.Input),
+                ReadOnly = Attr(TextRole.Hint),
+            };
+        }
 
         /// <summary>
         /// The scheme applied to the window and every stock control inside it.
@@ -75,15 +160,15 @@ namespace TerminalQuest.Ui
             return new Scheme(normal)
             {
                 Normal = normal,
-                HotNormal = Attr(TextRole.Item),
-                Focus = Attr(TextRole.Command),
-                HotFocus = Attr(TextRole.Item),
-                Active = Attr(TextRole.Command),
-                HotActive = Attr(TextRole.Item),
-                Highlight = Attr(TextRole.Item),
-                Disabled = Attr(TextRole.System),
-                Editable = Attr(TextRole.Command),
-                ReadOnly = Attr(TextRole.System),
+                HotNormal = Attr(TextRole.Button),
+                Focus = Attr(TextRole.Input),
+                HotFocus = Attr(TextRole.Button),
+                Active = Attr(TextRole.Input),
+                HotActive = Attr(TextRole.Button),
+                Highlight = Attr(TextRole.Button),
+                Disabled = Attr(TextRole.Hint),
+                Editable = Attr(TextRole.Input),
+                ReadOnly = Attr(TextRole.Hint),
             };
         }
     }

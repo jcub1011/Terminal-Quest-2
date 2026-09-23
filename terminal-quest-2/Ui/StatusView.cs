@@ -16,19 +16,23 @@ namespace TerminalQuest.Ui
         private readonly GameState _state;
 
         private readonly FrameView _vitalsFrame;
-        private readonly Label _hpLabel;
+        private readonly Label _hpCaption;
+        private readonly Label _hpValue;
         private readonly ProgressBar _hpBar;
-        private readonly Label _turnLabel;
+        private readonly Label _turnCaption;
+        private readonly Label _turnValue;
 
         private readonly FrameView _attributesFrame;
         private readonly Label _attributesLabel;
 
         private readonly FrameView _inventoryFrame;
-        private readonly Label _moneyLabel;
+        private readonly Label _moneyCaption;
+        private readonly Label _moneyValue;
         private readonly InventoryView _inventoryView;
 
         private readonly FrameView _sessionFrame;
-        private readonly Label _contextLabel;
+        private readonly Label _contextCaption;
+        private readonly Label _contextValue;
         private readonly ProgressBar _contextBar;
         private readonly Label _metricsLabel;
 
@@ -36,6 +40,16 @@ namespace TerminalQuest.Ui
         /// Raised when the player clicks on an inventory entity in the Pack & Purse panel.
         /// </summary>
         public event Action<string>? EntityClicked;
+
+        /// <summary>
+        /// Raised when the player presses Esc while the pack has focus. Forwarded from the
+        /// inventory view so the host can return focus to the input line.
+        /// </summary>
+        public event Action? InventoryExitRequested
+        {
+            add => _inventoryView.ExitRequested += value;
+            remove => _inventoryView.ExitRequested -= value;
+        }
 
         public StatusView(GameState state)
         {
@@ -55,8 +69,11 @@ namespace TerminalQuest.Ui
             };
             _vitalsFrame.SetScheme(Theme.CreateScheme());
 
-            _hpLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "HP: -" };
-            _hpLabel.SetScheme(Theme.CreateScheme());
+            _hpCaption = new Label { X = 1, Y = 0, Width = 3, Text = "HP:" };
+            _hpCaption.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
+            _hpValue = new Label { X = 5, Y = 0, Width = Dim.Fill() - 6, Text = "-" };
+            _hpValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
 
             _hpBar = new ProgressBar
             {
@@ -68,10 +85,13 @@ namespace TerminalQuest.Ui
             };
             _hpBar.SetScheme(Theme.CreateScheme());
 
-            _turnLabel = new Label { X = 1, Y = 2, Width = Dim.Fill() - 2, Text = "Turn: 0" };
-            _turnLabel.SetScheme(Theme.CreateScheme());
+            _turnCaption = new Label { X = 1, Y = 2, Width = 5, Text = "Turn:" };
+            _turnCaption.SetScheme(Theme.LabelScheme(TextRole.Hint));
 
-            _vitalsFrame.Add(_hpLabel, _hpBar, _turnLabel);
+            _turnValue = new Label { X = 7, Y = 2, Width = Dim.Fill() - 8, Text = "0" };
+            _turnValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
+
+            _vitalsFrame.Add(_hpCaption, _hpValue, _hpBar, _turnCaption, _turnValue);
 
             // 2. Attributes Frame
             _attributesFrame = new FrameView
@@ -93,7 +113,7 @@ namespace TerminalQuest.Ui
                 Height = 3,
                 Text = string.Empty,
             };
-            _attributesLabel.SetScheme(Theme.CreateScheme());
+            _attributesLabel.SetScheme(Theme.LabelScheme(TextRole.Normal));
             _attributesFrame.Add(_attributesLabel);
 
             // 3. Inventory Frame
@@ -108,8 +128,11 @@ namespace TerminalQuest.Ui
             };
             _inventoryFrame.SetScheme(Theme.CreateScheme());
 
-            _moneyLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "Gold: 0" };
-            _moneyLabel.SetScheme(Theme.CreateScheme());
+            _moneyCaption = new Label { X = 1, Y = 0, Width = 5, Text = "Gold:" };
+            _moneyCaption.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
+            _moneyValue = new Label { X = 7, Y = 0, Width = Dim.Fill() - 8, Text = "0 gp" };
+            _moneyValue.SetScheme(Theme.LabelScheme(TextRole.Item));
 
             _inventoryView = new InventoryView
             {
@@ -121,7 +144,7 @@ namespace TerminalQuest.Ui
             _inventoryView.SetScheme(Theme.CreateScheme());
             _inventoryView.EntityClicked += entityId => EntityClicked?.Invoke(entityId);
 
-            _inventoryFrame.Add(_moneyLabel, _inventoryView);
+            _inventoryFrame.Add(_moneyCaption, _moneyValue, _inventoryView);
 
             // 4. Session & Context Frame
             _sessionFrame = new FrameView
@@ -135,8 +158,11 @@ namespace TerminalQuest.Ui
             };
             _sessionFrame.SetScheme(Theme.CreateScheme());
 
-            _contextLabel = new Label { X = 1, Y = 0, Width = Dim.Fill() - 2, Text = "Context: 0" };
-            _contextLabel.SetScheme(Theme.CreateScheme());
+            _contextCaption = new Label { X = 1, Y = 0, Width = 8, Text = "Context:" };
+            _contextCaption.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
+            _contextValue = new Label { X = 10, Y = 0, Width = Dim.Fill() - 11, Text = "-" };
+            _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
 
             _contextBar = new ProgressBar
             {
@@ -149,9 +175,9 @@ namespace TerminalQuest.Ui
             _contextBar.SetScheme(Theme.CreateScheme());
 
             _metricsLabel = new Label { X = 1, Y = 3, Width = Dim.Fill() - 2, Text = "$0.0000 | 0ms" };
-            _metricsLabel.SetScheme(Theme.CreateScheme());
+            _metricsLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
 
-            _sessionFrame.Add(_contextLabel, _contextBar, _metricsLabel);
+            _sessionFrame.Add(_contextCaption, _contextValue, _contextBar, _metricsLabel);
 
             Add(_vitalsFrame, _attributesFrame, _inventoryFrame, _sessionFrame);
 
@@ -166,12 +192,15 @@ namespace TerminalQuest.Ui
                 : $"Vitals - {_state.PlayerName}";
 
             var hasPlayer = _state.MaxHealth > 0;
-            _hpLabel.Text = hasPlayer ? $"HP: {_state.Health} / {_state.MaxHealth}" : "HP: -";
+            var isHurt = hasPlayer && _state.Health * 4 <= _state.MaxHealth;
+            _hpValue.Text = hasPlayer ? $"{_state.Health} / {_state.MaxHealth}" : "-";
+            _hpValue.SetScheme(Theme.LabelScheme(isHurt ? TextRole.Danger : TextRole.Normal));
             if (hasPlayer)
             {
                 _hpBar.Fraction = Math.Clamp((float)_state.Health / _state.MaxHealth, 0f, 1f);
+                _hpBar.SetScheme(isHurt ? Theme.LabelScheme(TextRole.Danger) : Theme.CreateScheme());
             }
-            _turnLabel.Text = $"Turn: {_state.Turn}";
+            _turnValue.Text = $"{_state.Turn}";
 
             // Update Attributes (2 columns)
             if (_state.Attributes.Count > 0)
@@ -193,14 +222,16 @@ namespace TerminalQuest.Ui
                     }
                 }
                 _attributesLabel.Text = string.Join("\n", lines);
+                _attributesLabel.SetScheme(Theme.LabelScheme(TextRole.Normal));
             }
             else
             {
                 _attributesLabel.Text = "(No attributes)";
+                _attributesLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
             }
 
             // Update Inventory
-            _moneyLabel.Text = $"Gold: {_state.Money} gp";
+            _moneyValue.Text = $"{_state.Money} gp";
             _inventoryView.SetItems(_state.Inventory);
 
             // Update Session & Context
@@ -209,19 +240,26 @@ namespace TerminalQuest.Ui
                 if (_state.ContextWindowTokens > 0)
                 {
                     var pct = (int)Math.Clamp(_state.ContextTokens * 100L / _state.ContextWindowTokens, 0, 100);
-                    _contextLabel.Text = $"Context: {FormatTokens(_state.ContextTokens)} ({pct}%)";
+                    _contextValue.Text = $"{FormatTokens(_state.ContextTokens)} ({pct}%)";
                     _contextBar.Fraction = Math.Clamp((float)_state.ContextTokens / _state.ContextWindowTokens, 0f, 1f);
+                    var alert = pct >= 95 ? TextRole.Danger : pct >= 80 ? TextRole.Important : TextRole.Normal;
+                    _contextValue.SetScheme(Theme.LabelScheme(alert));
+                    _contextBar.SetScheme(alert == TextRole.Normal ? Theme.CreateScheme() : Theme.LabelScheme(alert));
                 }
                 else
                 {
-                    _contextLabel.Text = $"Context: {FormatTokens(_state.ContextTokens)}";
+                    _contextValue.Text = FormatTokens(_state.ContextTokens);
+                    _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
                     _contextBar.Fraction = 0f;
+                    _contextBar.SetScheme(Theme.CreateScheme());
                 }
             }
             else
             {
-                _contextLabel.Text = "Context: -";
+                _contextValue.Text = "-";
+                _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
                 _contextBar.Fraction = 0f;
+                _contextBar.SetScheme(Theme.CreateScheme());
             }
 
             var costStr = $"${_state.CostUsd:F4}";

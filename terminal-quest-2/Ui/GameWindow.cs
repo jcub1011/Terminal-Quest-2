@@ -33,7 +33,7 @@ namespace TerminalQuest.Ui
         private const int MaxSuggestionRows = 8;
 
         private readonly Label _promptLabel;
-        private readonly TextField _input;
+        private readonly CommandInputField _input;
         private readonly CommandTitleView _commandTitle;
         private readonly CommandSuggestionView _suggestions;
 
@@ -109,14 +109,14 @@ namespace TerminalQuest.Ui
             };
             var promptScheme = new Scheme
             {
-                Normal = Theme.Attr(TextRole.Item),
-                Focus = Theme.Attr(TextRole.Item),
-                HotNormal = Theme.Attr(TextRole.Item),
-                HotFocus = Theme.Attr(TextRole.Item),
+                Normal = Theme.Attr(TextRole.Button),
+                Focus = Theme.Attr(TextRole.Button),
+                HotNormal = Theme.Attr(TextRole.Button),
+                HotFocus = Theme.Attr(TextRole.Button),
             };
             _promptLabel.SetScheme(promptScheme);
 
-            _input = new TextField
+            _input = new CommandInputField
             {
                 X = 2,
                 Y = Pos.AnchorEnd(1),
@@ -124,6 +124,11 @@ namespace TerminalQuest.Ui
                 Height = 1,
             };
             _input.SetScheme(Theme.CreateScheme());
+
+            // The input field offers scroll keys to the transcript itself, before its own caret
+            // moves see them - see CommandInputField. This subscription is the other end: the
+            // same forwarding the window does below for keys that arrive here directly.
+            _input.ScrollRequested += key => Narration.NewKeyDownEvent(key);
 
             // Sized and placed only when there is something to show, since both depend on how many
             // commands the half-typed word still matches.
@@ -155,7 +160,23 @@ namespace TerminalQuest.Ui
                 _input.InsertionPoint = _input.Text.Length;
                 SyncOptionHighlight();
                 SubmitInput();
+
+                // The list is gone (or the line was refused and is waiting in the input): either
+                // way the next keystroke belongs to the command box, not to a hidden list.
+                _input.SetFocus();
             };
+
+            // Keyboard moves inside the list fill the line but leave focus where it is - the
+            // player is still arrowing. Esc hands focus back outright.
+            Options.OptionHighlighted += opt =>
+            {
+                _input.Text = opt.Text;
+                _input.InsertionPoint = _input.Text.Length;
+                SyncOptionHighlight();
+            };
+
+            Options.ExitRequested += () => _input.SetFocus();
+            Status.InventoryExitRequested += () => _input.SetFocus();
 
             Narration.EntityClicked += OnEntityClicked;
             Status.EntityClicked += OnEntityClicked;
@@ -385,8 +406,9 @@ namespace TerminalQuest.Ui
                     return true;
                 }
 
-                // Tab is claimed before it can move the focus. Nothing else here is focusable, so
-                // the only thing it could otherwise do is nothing at all.
+                // Tab is claimed before it can move the focus, but only while there is a
+                // completion to take. Otherwise it advances focus normally - to the choices, the
+                // pack, and back - now that those are all real Tab stops.
                 //
                 // Right only ever arrives here with the caret at the end of the line - a text
                 // field handles the key itself anywhere else, and stops handling it once there is
@@ -396,6 +418,17 @@ namespace TerminalQuest.Ui
                 if ((key == Key.Tab || key == Key.CursorRight) && _suggestions.Selected is { } completion)
                 {
                     Complete(completion);
+                    return true;
+                }
+            }
+
+            // Alt+1-9 picks a narrator choice from anywhere on this screen. Plain digits cannot
+            // be claimed here - the input field eats them as text before this runs, which is why
+            // typing a number only highlights - but Alt+digit is not text and arrives intact.
+            if (!IsBusy && Options.Visible && OptionNumberFromAlt(key) is { } altNumber)
+            {
+                if (SelectOption(altNumber))
+                {
                     return true;
                 }
             }
@@ -417,11 +450,18 @@ namespace TerminalQuest.Ui
             }
 
             // PgUp/PgDn scroll the transcript even though focus lives in the input field, and
-            // Shift+PgDn returns to the narrator from wherever the player has read back to. All
-            // three only arrive because a single-line TextField implements no paging command of its
-            // own; End and Ctrl+End, which would be the obvious spelling of that last one, are the
-            // field's caret keys and never get this far.
-            if (key == Key.PageUp || key == Key.PageDown || key == Key.PageDown.WithShift)
+            // Shift+PgDn returns to the narrator from wherever the player has read back to. The
+            // plain three only arrive because a single-line TextField implements no paging command
+            // of its own; the Ctrl set never arrives here from the input at all - the field binds
+            // the arrows and Home/End to its caret, so CommandInputField intercepts the whole set
+            // up front and forwards it the same way. Both roads meet below.
+            //
+            // Ctrl+Left/Right are the exception in both places: sideways has no transcript
+            // meaning, so they stay word jumps wherever focus is.
+            if (key == Key.PageUp || key == Key.PageDown || key == Key.PageDown.WithShift
+                || key == Key.CursorUp.WithCtrl || key == Key.CursorDown.WithCtrl
+                || key == Key.Home.WithCtrl || key == Key.End.WithCtrl
+                || key == Key.PageUp.WithCtrl || key == Key.PageDown.WithCtrl)
             {
                 return Narration.NewKeyDownEvent(key);
             }
@@ -482,6 +522,11 @@ namespace TerminalQuest.Ui
             {
                 return;
             }
+
+            // A bare choice number sends that choice's words, not the digit. Typing "2" already
+            // highlights choice 2, so Enter honouring the highlight is the only outcome that is
+            // not a betrayal: without this the player would watch 2 light up and then send "2".
+            text = ExpandOptionNumber(text);
 
             // Enter is the field's before it is the window's, so the suggestions have to take
             // their turn at it here. A half-typed command or incomplete argument is completed
@@ -694,6 +739,63 @@ namespace TerminalQuest.Ui
         public IReadOnlyList<NarrationOption> GetActiveOptions() => Options.Options;
 
         /// <summary>
+        /// Fills the input line with the numbered choice's words and highlights it. The shared
+        /// implementation behind Alt+digit, arrow navigation and the mouse single click.
+        /// </summary>
+        /// <returns>False when there is no such choice, so the key can keep bubbling.</returns>
+        private bool SelectOption(int number)
+        {
+            var selected = Options.Options.FirstOrDefault(o => o.Number == number);
+            if (selected is null)
+            {
+                return false;
+            }
+
+            _input.Text = selected.Text;
+            _input.InsertionPoint = _input.Text.Length;
+            Options.HighlightedOption = selected.Number;
+            return true;
+        }
+
+        /// <summary>
+        /// The choice number for an Alt+digit key, or null for anything else.
+        /// </summary>
+        internal static int? OptionNumberFromAlt(Key key)
+        {
+            if (key == Key.D1.WithAlt) return 1;
+            if (key == Key.D2.WithAlt) return 2;
+            if (key == Key.D3.WithAlt) return 3;
+            if (key == Key.D4.WithAlt) return 4;
+            if (key == Key.D5.WithAlt) return 5;
+            if (key == Key.D6.WithAlt) return 6;
+            if (key == Key.D7.WithAlt) return 7;
+            if (key == Key.D8.WithAlt) return 8;
+            if (key == Key.D9.WithAlt) return 9;
+            return null;
+        }
+
+        /// <summary>
+        /// Replaces a bare choice number with that choice's words. Only while choices are on
+        /// screen and the number names one; anything else - including a number typed mid-turn
+        /// when the old choices are already cleared - passes through untouched.
+        /// </summary>
+        private string ExpandOptionNumber(string text)
+        {
+            if (Options.Options.Count > 0
+                && int.TryParse(text, out var number))
+            {
+                var match = Options.Options.FirstOrDefault(o => o.Number == number);
+                if (match is not null)
+                {
+                    Options.HighlightedOption = match.Number;
+                    return match.Text;
+                }
+            }
+
+            return text;
+        }
+
+        /// <summary>
         /// Moves the selection through the choices currently offered by the narrator,
         /// populating the input field with the chosen option text and highlighting it in the options pane.
         /// </summary>
@@ -708,11 +810,19 @@ namespace TerminalQuest.Ui
             var text = _input.Text?.Trim() ?? string.Empty;
             var currentIndex = -1;
 
-            if (Options.HighlightedOption is { } highlighted && highlighted >= 1 && highlighted <= options.Count)
+            if (Options.HighlightedOption is { } highlighted)
             {
-                currentIndex = highlighted - 1;
+                for (var i = 0; i < options.Count; i++)
+                {
+                    if (options[i].Number == highlighted)
+                    {
+                        currentIndex = i;
+                        break;
+                    }
+                }
             }
-            else
+
+            if (currentIndex < 0)
             {
                 for (var i = 0; i < options.Count; i++)
                 {
@@ -736,10 +846,7 @@ namespace TerminalQuest.Ui
             }
 
             var selected = options[nextIndex];
-            _input.Text = selected.Text;
-            _input.InsertionPoint = _input.Text.Length;
-            Options.HighlightedOption = selected.Number;
-            return true;
+            return SelectOption(selected.Number);
         }
 
         /// <summary>

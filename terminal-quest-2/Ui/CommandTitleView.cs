@@ -155,7 +155,7 @@ namespace TerminalQuest.Ui
             if (notice is { Length: > 0 })
             {
                 var text = width >= notice.Length ? notice : notice[..width];
-                line.Append(text, TextRole.Command);
+                line.Append(text, TextRole.Important);
                 if (width > text.Length)
                 {
                     line.Append(new string(' ', width - text.Length), TextRole.Normal);
@@ -167,7 +167,7 @@ namespace TerminalQuest.Ui
             if (!isBusy)
             {
                 var text = width >= IdleTitle.Length ? IdleTitle : IdleTitle[..width];
-                line.Append(text, TextRole.Command);
+                line.Append(text, TextRole.Hint);
                 if (width > text.Length)
                 {
                     line.Append(new string(' ', width - text.Length), TextRole.Normal);
@@ -179,7 +179,7 @@ namespace TerminalQuest.Ui
             if (width <= Prefix.Length)
             {
                 var text = width >= IdleTitle.Length ? IdleTitle : IdleTitle[..width];
-                line.Append(text, TextRole.Command);
+                line.Append(text, TextRole.Hint);
                 if (width > text.Length)
                 {
                     line.Append(new string(' ', width - text.Length), TextRole.Normal);
@@ -188,7 +188,7 @@ namespace TerminalQuest.Ui
                 return line;
             }
 
-            line.Append(IdleTitle, TextRole.Command);
+            line.Append(IdleTitle, TextRole.Hint);
             line.Append(" ", TextRole.Normal);
 
             var laneWidth = width - Prefix.Length;
@@ -208,20 +208,23 @@ namespace TerminalQuest.Ui
 
             TextRole GetRole(int relCol, int absCol)
             {
+                // The serpent is decoration, not an entity: dim chrome, never the item or place
+                // colours, which would promise something takeable or visitable.
                 if (relCol == headCol)
                 {
-                    return TextRole.Item;
+                    return TextRole.Hint;
                 }
 
                 var dist = (headCol - relCol + laneWidth) % laneWidth;
                 if (dist >= 1 && dist <= serpentBodyLen)
                 {
-                    return TextRole.Place;
+                    return TextRole.Hint;
                 }
 
+                // Game status, not dialogue: the system voice, never speech cyan.
                 if (absCol >= textStart && absCol < textEnd)
                 {
-                    return TextRole.Speech;
+                    return TextRole.System;
                 }
 
                 return TextRole.Normal;

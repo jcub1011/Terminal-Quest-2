@@ -91,7 +91,10 @@ namespace TerminalQuest.Ui
 
             dialog.Add(contentView, closeButton);
 
-            dialog.Initialized += (_, _) => closeButton.SetFocus();
+            // The reading pane takes focus, not the Close button: its Up/Down/PgUp/Home/End
+            // keys would otherwise do nothing until the player Tabbed off Close. Enter still
+            // closes via IsDefault, and Esc via the dialog handler, so nothing is lost.
+            dialog.Initialized += (_, _) => contentView.SetFocus();
 
             return dialog;
         }
@@ -509,7 +512,7 @@ namespace TerminalQuest.Ui
                         var text = line.Length > textWidth ? line[..textWidth] : line;
                         if (text.StartsWith("---") || text.StartsWith("===") || text.StartsWith("───"))
                         {
-                            SetRole(TextRole.System);
+                            SetRole(TextRole.Hint);
                         }
                         else if (text.StartsWith("[Turn") || text.StartsWith("Health:") || text.StartsWith("Location / Possession:") || text.StartsWith("Items here:"))
                         {

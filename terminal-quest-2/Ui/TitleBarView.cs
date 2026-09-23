@@ -10,8 +10,11 @@ namespace TerminalQuest.Ui
     /// </summary>
     internal sealed class TitleBarView : View
     {
+        private const string GameTitle = "Terminal Quest";
+
         private readonly GameState _state;
-        private readonly Label _titleLabel;
+        private readonly Label _titlePrefixLabel;
+        private readonly Label _saveNameLabel;
         private readonly Label _locationLabel;
 
         public TitleBarView(GameState state)
@@ -21,15 +24,25 @@ namespace TerminalQuest.Ui
             Height = 1;
             SetScheme(Theme.CreateScheme());
 
-            _titleLabel = new Label
+            _titlePrefixLabel = new Label
             {
                 X = 0,
                 Y = 0,
-                Width = Dim.Percent(50),
+                Width = GameTitle.Length,
                 Height = 1,
-                Text = "Terminal Quest",
+                Text = GameTitle,
             };
-            _titleLabel.SetScheme(Theme.CreateScheme());
+            _titlePrefixLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
+            _saveNameLabel = new Label
+            {
+                X = GameTitle.Length,
+                Y = 0,
+                Width = Dim.Percent(50) - GameTitle.Length,
+                Height = 1,
+                Text = string.Empty,
+            };
+            _saveNameLabel.SetScheme(Theme.LabelScheme(TextRole.Command));
 
             _locationLabel = new Label
             {
@@ -49,15 +62,15 @@ namespace TerminalQuest.Ui
             };
             _locationLabel.SetScheme(locationScheme);
 
-            Add(_titleLabel, _locationLabel);
+            Add(_titlePrefixLabel, _saveNameLabel, _locationLabel);
             Refresh();
         }
 
         public void Refresh()
         {
-            _titleLabel.Text = _state.SaveName.Length > 0
-                ? $"Terminal Quest - {_state.SaveName}"
-                : "Terminal Quest";
+            _saveNameLabel.Text = _state.SaveName.Length > 0
+                ? $" - {_state.SaveName}"
+                : string.Empty;
 
             _locationLabel.Text = _state.Location.Length > 0
                 ? _state.Location
