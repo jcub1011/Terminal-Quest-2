@@ -113,13 +113,23 @@ namespace TerminalQuest.Tests.Ui
             Assert.True(exited);
         }
 
+        private static void FillScrollableTranscript(GameWindow window)
+        {
+            window.Narration.Viewport = new Rectangle(0, 0, 40, 10);
+            for (var i = 1; i <= 50; i++)
+            {
+                window.Narration.AddLine($"Line {i}", TextRole.Normal);
+            }
+        }
+
         [Fact]
         public void Ctrl_arrows_reach_transcript_from_window()
         {
             using var window = WindowWithOptions("Explore the ruins");
+            FillScrollableTranscript(window);
 
-            Assert.True(window.NewKeyDownEvent(Key.CursorDown.WithCtrl));
             Assert.True(window.NewKeyDownEvent(Key.CursorUp.WithCtrl));
+            Assert.True(window.NewKeyDownEvent(Key.CursorDown.WithCtrl));
             Assert.True(window.NewKeyDownEvent(Key.Home.WithCtrl));
             Assert.True(window.NewKeyDownEvent(Key.End.WithCtrl));
             Assert.True(window.NewKeyDownEvent(Key.PageUp.WithCtrl));
@@ -130,15 +140,32 @@ namespace TerminalQuest.Tests.Ui
         public void Ctrl_Up_Down_scroll_without_moving_caret_while_editing()
         {
             using var window = WindowWithOptions("Explore the ruins");
+            FillScrollableTranscript(window);
             var input = InputOf(window);
             input.Text = "hello world foo bar";
             input.InsertionPoint = 5;
 
-            Assert.True(input.NewKeyDownEvent(Key.CursorDown.WithCtrl));
+            Assert.True(input.NewKeyDownEvent(Key.CursorUp.WithCtrl));
 
             // The key scrolled instead of editing: the caret never moved.
             Assert.Equal(5, input.InsertionPoint);
             Assert.Equal("hello world foo bar", input.Text);
+
+            Assert.True(input.NewKeyDownEvent(Key.CursorDown.WithCtrl));
+            Assert.Equal(5, input.InsertionPoint);
+        }
+
+        [Fact]
+        public void Ctrl_scroll_with_nowhere_to_scroll_falls_through_to_field()
+        {
+            using var window = WindowWithOptions("Explore the ruins");
+            var input = InputOf(window);
+            input.Text = "hello world foo bar";
+            input.InsertionPoint = 5;
+
+            // Empty transcript: nothing to scroll, so the key keeps its editing meaning.
+            Assert.False(window.Narration.NewKeyDownEvent(Key.CursorUp.WithCtrl));
+            Assert.False(window.Narration.NewKeyDownEvent(Key.Home.WithCtrl));
         }
 
         [Fact]

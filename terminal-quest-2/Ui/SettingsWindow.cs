@@ -873,10 +873,12 @@ namespace TerminalQuest.Ui
 
         /// <summary>
         /// The focusable controls of the visible section, in top-to-bottom order.
-        /// Hidden controls (like the probe results before probing) are skipped.
+        /// Hidden controls (like the probe results before probing) and disabled controls
+        /// (like the probe button while probing) are skipped.
         /// </summary>
-        private List<View> ActiveFormControls() =>
-            _activeSection switch
+        private List<View> ActiveFormControls()
+        {
+            List<View> controls = _activeSection switch
             {
                 SettingsSection.Provider => [_providerList],
                 SettingsSection.ClaudeCode => [_claudeModelList, _claudeCustomModel],
@@ -885,6 +887,9 @@ namespace TerminalQuest.Ui
                     : [_lmStudioBaseUrl, _presetList, _lmStudioApiKey, _lmStudioModel, _probeButton]),
                 _ => [_recallChars, _editorCommand, _testEditorButton, _openConfigFolderButton],
             };
+
+            return controls.Where(c => c.Visible && c.Enabled).ToList();
+        }
 
         private IEnumerable<View> AllFormControls() =>
         [
@@ -931,7 +936,7 @@ namespace TerminalQuest.Ui
         private void FocusForm()
         {
             var controls = ActiveFormControls();
-            if (_lastFormFocus is { } last && controls.Contains(last) && last.Visible)
+            if (_lastFormFocus is { } last && controls.Contains(last) && last.Visible && last.Enabled)
             {
                 last.SetFocus();
             }
@@ -1340,6 +1345,12 @@ namespace TerminalQuest.Ui
             _probe = new CancellationTokenSource(ProbeTimeout);
 
             _probeButton.Enabled = false;
+            if (MostFocused == _probeButton)
+            {
+                _lmStudioModel.SetFocus();
+                UpdatePaneChrome();
+            }
+
             Say(_probeStatus, "Connecting to API endpoint...");
 
             try

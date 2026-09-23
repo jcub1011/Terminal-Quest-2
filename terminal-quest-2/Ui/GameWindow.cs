@@ -176,6 +176,7 @@ namespace TerminalQuest.Ui
             };
 
             Options.ExitRequested += () => _input.SetFocus();
+            Status.InventoryExitRequested += () => _input.SetFocus();
 
             Narration.EntityClicked += OnEntityClicked;
             Status.EntityClicked += OnEntityClicked;
@@ -809,11 +810,19 @@ namespace TerminalQuest.Ui
             var text = _input.Text?.Trim() ?? string.Empty;
             var currentIndex = -1;
 
-            if (Options.HighlightedOption is { } highlighted && highlighted >= 1 && highlighted <= options.Count)
+            if (Options.HighlightedOption is { } highlighted)
             {
-                currentIndex = highlighted - 1;
+                for (var i = 0; i < options.Count; i++)
+                {
+                    if (options[i].Number == highlighted)
+                    {
+                        currentIndex = i;
+                        break;
+                    }
+                }
             }
-            else
+
+            if (currentIndex < 0)
             {
                 for (var i = 0; i < options.Count; i++)
                 {

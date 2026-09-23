@@ -41,6 +41,16 @@ namespace TerminalQuest.Ui
         /// </summary>
         public event Action<string>? EntityClicked;
 
+        /// <summary>
+        /// Raised when the player presses Esc while the pack has focus. Forwarded from the
+        /// inventory view so the host can return focus to the input line.
+        /// </summary>
+        public event Action? InventoryExitRequested
+        {
+            add => _inventoryView.ExitRequested += value;
+            remove => _inventoryView.ExitRequested -= value;
+        }
+
         public StatusView(GameState state)
         {
             _state = state;

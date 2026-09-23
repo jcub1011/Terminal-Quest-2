@@ -25,6 +25,13 @@ namespace TerminalQuest.Ui
 
         public event Action<string>? EntityClicked;
 
+        /// <summary>
+        /// Raised when the player presses Esc while this view has focus. The host returns focus
+        /// to the input line. Handled here rather than left to bubble: the window treats Esc as
+        /// leaving the save.
+        /// </summary>
+        public event Action? ExitRequested;
+
         public InventoryView()
         {
             // Focusable on purpose: Tab reaches the pack from the command box. The keys below
@@ -155,7 +162,15 @@ namespace TerminalQuest.Ui
 
         protected override bool OnKeyDown(Key key)
         {
-            if (_lines.Count == 0)
+            // Esc returns to the command box. Claimed here so one press cannot both leave this
+            // list and walk out of the save underneath it.
+            if (key == Key.Esc)
+            {
+                ExitRequested?.Invoke();
+                return true;
+            }
+
+            if (_lines.Count == 0 || _items.Count == 0)
             {
                 return false;
             }
