@@ -224,6 +224,70 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
+        public void SettingsWindow_click_picks_provider_without_enter()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = string.Empty };
+            var window = new SettingsWindow(app, settings);
+
+            // Browse to Google, then click the row: the draft updates without Enter.
+            window.ProviderCombo.Value = window.ProviderNames[1];
+            window.SimulateListClick(window.ProviderCombo);
+
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(AgentProvider.Google, window.Chosen.Provider);
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.Contains(labels, l => $"{l.Text}".Contains("Active provider set to: Google"));
+        }
+
+        [Fact]
+        public void SettingsWindow_click_picks_claude_model_without_enter()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = "my-saved-model" };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+
+            // Browse to the Default row, then click it: the draft takes the empty id
+            // without Enter.
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[0];
+            window.SimulateListClick(window.ClaudeModelCombo);
+
+            Assert.Equal(string.Empty, window.ClaudeModelField.Text);
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal(string.Empty, window.Chosen.ClaudeModel);
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.Contains(labels, l => $"{l.Text}".Contains("Picked model:"));
+        }
+
+        [Fact]
+        public void SettingsWindow_click_confirms_endpoint_model_without_enter()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+
+            // Highlight a row id, then click it: the id box takes it without Enter.
+            window.ModelField.Text = "gemini-2-0-test";
+            window.SimulateListClick(window.ModelField);
+
+            Assert.Equal("gemini-2-0-test", window.EndpointModelField.Text);
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.Contains(labels, l => $"{l.Text}".StartsWith("Picked: gemini-2-0-test"));
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal("gemini-2-0-test", window.Chosen.Google.Model);
+        }
+
+        [Fact]
         public void SettingsWindow_provider_list_offers_every_provider()
         {
             using var root = new SavesRoot();
@@ -256,7 +320,7 @@ namespace TerminalQuest.Tests.Ui
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = "my-saved-model" };
             var window = new SettingsWindow(app, settings);
 
             // Switch to Provider Settings with Claude Code picked
@@ -266,12 +330,12 @@ namespace TerminalQuest.Tests.Ui
             window.SetFocus();
             window.ClaudeModelCombo.SetFocus();
 
-            // Select Haiku (index 1) and press Enter to pick it: the box shows the row
-            // label while the draft takes the id.
-            window.ClaudeModelCombo.Value = window.ClaudeLabels[1];
+            // Select the Default row and press Enter to pick it: the box shows the row
+            // label while the draft takes the empty id (defer to the CLI).
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[0];
             window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
 
-            Assert.Equal(window.ClaudeLabels[1], window.ClaudeModelCombo.Text);
+            Assert.Equal(window.ClaudeLabels[0], window.ClaudeModelCombo.Text);
 
             // Enter advances to the next field, wrapping to the provider picker
             Assert.Equal(window.ProviderCombo, window.MostFocused);
@@ -279,7 +343,7 @@ namespace TerminalQuest.Tests.Ui
             // Save settings via Ctrl+S
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
-            Assert.Equal(ClaudeModels.All[1].Id, window.Chosen.ClaudeModel);
+            Assert.Equal(string.Empty, window.Chosen.ClaudeModel);
         }
 
         [Fact]
@@ -287,18 +351,18 @@ namespace TerminalQuest.Tests.Ui
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = "my-saved-model" };
             var window = new SettingsWindow(app, settings);
 
             window.SwitchToSection(SettingsSection.Provider);
 
-            // Browse to Opus without pressing Enter
-            window.ClaudeModelCombo.Value = window.ClaudeLabels[3];
+            // Browse to the Default row without pressing Enter
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[0];
 
             // Save via Ctrl+S: the browsed row must not leak into the draft
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
-            Assert.Equal(ClaudeModels.All[0].Id, window.Chosen.ClaudeModel);
+            Assert.Equal("my-saved-model", window.Chosen.ClaudeModel);
         }
 
         [Fact]
@@ -306,17 +370,35 @@ namespace TerminalQuest.Tests.Ui
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = string.Empty };
             var window = new SettingsWindow(app, settings);
 
             window.SwitchToSection(SettingsSection.Provider);
 
-            // Typing is explicit: a hand-typed id reaches the draft without Enter.
-            window.ClaudeModelCombo.Text = "my-custom-model";
+            // Typing in the id box is explicit: a hand-typed id reaches the draft without Enter.
+            window.ClaudeModelField.Text = "my-custom-model";
 
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
             Assert.Equal("my-custom-model", window.Chosen.ClaudeModel);
+        }
+
+        [Fact]
+        public void SettingsWindow_endpoint_typing_custom_id_saves_without_enter()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+
+            // Typing in the id box is explicit: a hand-typed id reaches the draft without Enter.
+            window.EndpointModelField.Text = "gemini-2-0-test";
+
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal("gemini-2-0-test", window.Chosen.Google.Model);
         }
 
         [Fact]
@@ -381,9 +463,12 @@ namespace TerminalQuest.Tests.Ui
             window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
             Assert.Equal(window.ClaudeModelCombo, window.MostFocused);
 
-            // Dirty (typed): Enter still accepts and advances.
-            window.ClaudeModelCombo.Text = "my-custom-model";
+            // Dirty (a highlighted row the field does not hold): Enter writes it into the
+            // id box and advances past the picker.
+            window.ClaudeModelField.Text = "my-custom-model";
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[0];
             window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
+            Assert.Equal(string.Empty, window.ClaudeModelField.Text);
             Assert.Equal(window.ProviderCombo, window.MostFocused);
         }
 
@@ -399,15 +484,17 @@ namespace TerminalQuest.Tests.Ui
             window.SetFocus();
             window.ModelField.SetFocus();
 
-            // Clean (matches the loaded slot): Enter opens rather than confirming.
+            // Clean (no row highlighted): Enter opens rather than confirming.
             window.ModelField.NewKeyDownEvent(Key.Enter);
             Assert.Equal(window.ModelField, window.MostFocused);
             var labels = FindDescendants<Label>(window).ToList();
             Assert.DoesNotContain(labels, l => $"{l.Text}".StartsWith("Picked:"));
 
-            // Dirty (typed): Enter confirms and advances.
-            window.ModelField.Text = "gemini-2-0-test";
+            // Dirty (a highlighted row the id box does not hold): Enter writes it into the
+            // id box and advances past the picker.
+            window.ModelField.Value = "gemini-2-0-test";
             window.ModelField.NewKeyDownEvent(Key.Enter);
+            Assert.Equal("gemini-2-0-test", window.EndpointModelField.Text);
             Assert.Contains(labels, l => $"{l.Text}".StartsWith("Picked: gemini-2-0-test"));
             Assert.Equal(window.ProviderCombo, window.MostFocused);
         }
@@ -449,7 +536,7 @@ namespace TerminalQuest.Tests.Ui
             window.SwitchToSection(SettingsSection.Provider);
 
             // Type a Google model, then switch to Custom: the fields rebind to Custom's slot.
-            window.ModelField.Text = "gemini-2-0-test";
+            window.EndpointModelField.Text = "gemini-2-0-test";
             window.SwitchToSection(SettingsSection.Provider);
             window.ProviderCombo.Value = window.ProviderNames[4];
             window.ProviderCombo.NewKeyDownEvent(Key.Enter);
@@ -557,9 +644,9 @@ namespace TerminalQuest.Tests.Ui
 
             // A vertical scrollbar that only appears when the content overflows, and a
             // content height that actually covers the settings below the picker:
-            // endpoint box at Y=4, fourteen rows tall.
+            // endpoint box at Y=4, fifteen rows tall.
             Assert.True(window.ProviderScroll.ViewportSettings.HasFlag(ViewportSettingsFlags.HasVerticalScrollBar));
-            Assert.Equal(4 + 14 + 1, window.ProviderScroll.GetContentHeight());
+            Assert.Equal(4 + 15 + 1, window.ProviderScroll.GetContentHeight());
 
             // A control buried deep in the settings still takes focus through the nesting.
             window.SwitchToSection(SettingsSection.Provider);
@@ -632,7 +719,7 @@ namespace TerminalQuest.Tests.Ui
             foreach (var prefix in new[]
             {
                 "Narrative Provider",
-                "Preset Claude Models",
+                "Claude Model",
                 "Server Base URL",
                 "API Key",
                 "Model Name / ID",

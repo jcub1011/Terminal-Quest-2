@@ -44,20 +44,23 @@ namespace TerminalQuest.Tests.Agents
         {
             var merged = ClaudeModels.WithLiveIds(["claude-opus-6", "  ", "claude-haiku-4-5"]);
 
-            // Curated entries first, in order; only the genuinely new id joins, blanks skipped.
-            Assert.Equal(ClaudeModels.All.Length + 1, merged.Length);
+            // Only the Default row ships, so both named ids are genuinely new and join in
+            // order; blanks are skipped.
+            Assert.Equal(ClaudeModels.All.Length + 2, merged.Length);
             Assert.Equal(ClaudeModels.All, merged[..ClaudeModels.All.Length]);
-            var added = merged[^1];
-            Assert.Equal("claude-opus-6", added.Id);
-            Assert.Equal("claude-opus-6", added.Name);
+            Assert.Equal("claude-opus-6", merged[^2].Id);
+            Assert.Equal("claude-opus-6", merged[^2].Name);
+            Assert.Equal("claude-haiku-4-5", merged[^1].Id);
+            Assert.Equal("claude-haiku-4-5", merged[^1].Name);
         }
 
         [Fact]
         public void Live_ids_matching_known_ones_are_not_offered_twice()
         {
-            var merged = ClaudeModels.WithLiveIds(["CLAUDE-HAIKU-4-5", "claude-sonnet-5"]);
+            var merged = ClaudeModels.WithLiveIds(["Claude-Opus-6", "claude-opus-6", "claude-sonnet-6"]);
 
-            Assert.Equal(ClaudeModels.All.Length, merged.Length);
+            // Case-insensitive: the repeat joins only once.
+            Assert.Equal(ClaudeModels.All.Length + 2, merged.Length);
         }
     }
 }

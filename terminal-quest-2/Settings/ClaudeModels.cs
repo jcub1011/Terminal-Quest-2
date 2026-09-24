@@ -1,12 +1,15 @@
 namespace TerminalQuest.Settings
 {
     /// <summary>
-    /// The Claude models the settings screen offers, and the mapping between the id stored in
+    /// The Claude model row the settings screen offers, and the mapping between the id stored in
     /// <see cref="AppSettings.ClaudeModel"/> and a name a player recognises.
     /// <para>
-    /// Lives beside the settings rather than beside the screen that draws them because the save
-    /// menu's one-line summary needs the same mapping, and two tables that have to agree are
-    /// better off being one table.
+    /// Only the Default row ships: the CLI exposes no model list and model ids churn, so a
+    /// curated list would silently date every install. Anything beyond "whatever the CLI is
+    /// set to" is either typed freehand or merged live from the Anthropic Models API when a
+    /// key is available (see <see cref="WithLiveIds"/>). Lives beside the settings rather
+    /// than beside the screen that draws them because the save menu's one-line summary needs
+    /// the same mapping, and two tables that have to agree are better off being one table.
     /// </para>
     /// </summary>
     internal static class ClaudeModels
@@ -17,20 +20,16 @@ namespace TerminalQuest.Settings
         /// </param>
         /// <param name="Name">What the player picks from.</param>
         /// <param name="Detail">
-        /// The trade being made. Worth showing: this model answers every turn, so the gap between
-        /// the cheapest and the dearest is the difference between a game that costs pennies and
-        /// one that does not.
+        /// What the row costs the player. Worth showing: this model answers every turn, so the
+        /// choice of model is the difference between a game that costs pennies and one that
+        /// does not.
         /// </param>
         internal readonly record struct Entry(string Id, string Name, string Detail);
 
-        /// <summary>The offered models, in the order they are listed.</summary>
+        /// <summary>The shipped row: defer to whatever the CLI is configured for.</summary>
         public static readonly Entry[] All =
         [
             new(string.Empty, "Default", "whatever the CLI is set to"),
-            new("claude-haiku-4-5", "Haiku", "fastest and cheapest"),
-            new("claude-sonnet-5", "Sonnet", "balanced"),
-            new("claude-opus-5", "Opus", "most capable"),
-            new("claude-fable-5", "Fable", "deepest reasoning, slowest and dearest"),
         ];
 
         /// <summary>

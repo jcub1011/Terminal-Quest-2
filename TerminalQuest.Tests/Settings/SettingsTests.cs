@@ -269,22 +269,21 @@ namespace TerminalQuest.Tests.Settings
             Assert.True(ClaudeModels.IndexOf(AppSettings.DefaultClaudeModel) >= 0);
         }
 
-        [Theory]
-        [InlineData("claude-haiku-4-5", 1)]
-        [InlineData("  claude-opus-5  ", 3)]
-        [InlineData("", 0)]
-        public void A_known_id_is_found(string id, int expected)
+        [Fact]
+        public void The_default_entry_is_found()
         {
-            Assert.Equal(expected, ClaudeModels.IndexOf(id));
+            Assert.Equal(0, ClaudeModels.IndexOf(""));
         }
 
         [Theory]
+        [InlineData("claude-haiku-4-5")]
+        [InlineData("claude-opus-5")]
         [InlineData("CLAUDE-HAIKU-4-5")]
         [InlineData("claude-something-else")]
         public void An_id_this_build_does_not_know_is_a_miss_rather_than_a_fault(string id)
         {
-            // Settings written by an older build hold a dated id, and a player may hand-edit the
-            // file to something newer than this list.
+            // Only the Default row ships: named ids are typed freehand or merged live from
+            // the API, never known to the build. A miss is still not a fault.
             Assert.Equal(-1, ClaudeModels.IndexOf(id));
         }
 
@@ -295,18 +294,18 @@ namespace TerminalQuest.Tests.Settings
             Assert.Equal("Default", ClaudeModels.Describe(null!));
         }
 
-        [Theory]
-        [InlineData("claude-haiku-4-5", "Haiku")]
-        [InlineData("", "Default")]
-        public void A_known_id_is_described_by_name(string id, string expected)
+        [Fact]
+        public void The_default_is_described_by_name()
         {
-            Assert.Equal(expected, ClaudeModels.Describe(id));
+            Assert.Equal("Default", ClaudeModels.Describe(""));
         }
 
-        [Fact]
-        public void An_unknown_id_is_still_named_something_truthful()
+        [Theory]
+        [InlineData("claude-haiku-4-5")]
+        [InlineData("claude-from-the-future")]
+        public void An_unknown_id_is_still_named_something_truthful(string id)
         {
-            Assert.Equal("claude-from-the-future", ClaudeModels.Describe("  claude-from-the-future  "));
+            Assert.Equal(id, ClaudeModels.Describe($"  {id}  "));
         }
 
         // ---- The document on disk -------------------------------------------------------------------

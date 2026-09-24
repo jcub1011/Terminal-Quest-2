@@ -51,7 +51,7 @@ namespace TerminalQuest.Ui
         /// <summary>Fixed heights: inside a scrolling view, Fill would resolve to the viewport
         /// and there would be nothing to scroll to.</summary>
         private const int ClaudeBoxHeight = 5;
-        private const int EndpointBoxHeight = 14;
+        private const int EndpointBoxHeight = 15;
 
         private readonly IApplication _app;
         private readonly AppSettings _original;
@@ -74,6 +74,8 @@ namespace TerminalQuest.Ui
         /// A dropdown that offers keys to the window before its own handling, so pane
         /// switching (Tab) and field movement (Left/Right) never get trapped inside.
         /// Up/Down, Space, F4 and Enter stay native: browsing, opening and picking.
+        /// A mouse click on an open row picks instantly via <see cref="ListClicked"/>;
+        /// keyboard browsing still needs Enter.
         /// </summary>
         private sealed class NavDropDownList : DropDownList
         {
@@ -87,6 +89,25 @@ namespace TerminalQuest.Ui
             /// the draft does not hold yet. A clean box opens its list on Enter.
             /// </summary>
             public Func<bool>? HasUncommitted { get; set; }
+
+            /// <summary>
+            /// Raised when a row is picked with the mouse from the open list. The framework
+            /// reports a list click as an activation sourced from the list (which sets the
+            /// box text and closes the popover) rather than as an accept, so without this
+            /// a click would only browse and still need Enter. Keyboard input travels
+            /// through <see cref="OnKeyDown"/> instead and never raises this.
+            /// </summary>
+            public event Action? ListClicked;
+
+            protected override void OnActivated(ICommandContext? ctx)
+            {
+                var listWasOpen = IsPopoverOpen?.Invoke() == true;
+                base.OnActivated(ctx);
+                if (listWasOpen)
+                {
+                    ListClicked?.Invoke();
+                }
+            }
 
             protected override bool OnKeyDown(Key key)
             {
@@ -144,28 +165,28 @@ namespace TerminalQuest.Ui
         private View _endpointBox = null!;
         private View _providerScroll = null!;
 
-        // Claude settings controls: one editable dropdown merging the preset list and a
-        // custom id. The parallel entries map each row back to the id stored in the draft.
+        // Claude settings controls: an editable id field plus a readonly row picker that
+        // writes the picked row's id into the field. The parallel entries map each row
+        // back to its id.
         private NavDropDownList _claudeCombo = null!;
+        private NavTextField _claudeField = null!;
         private readonly ObservableCollection<string> _claudeItems = [];
         private List<ClaudeModels.Entry> _claudeEntries = [];
         private bool _claudeRefreshed;
         private bool _isLoadingClaude;
-        private bool _claudeTextTyped;
-        private string? _pendingClaudeId;
 
-        // Endpoint settings controls (one set of fields, rebound to each provider's slot).
-        // The model control is a single editable dropdown: typing sets the id, opening it
-        // probes the server and offers what answers.
+        // Endpoint settings controls: an editable id field plus a readonly picker over the
+        // last probe. Picking a row writes its id into the field; typing in the field is
+        // explicit and needs no confirmation.
         private Label _builtinUrlLabel = null!;
         private NavTextField _endpointBaseUrl = null!;
         private Label _endpointMatchHint = null!;
         private Label _endpointVendorHint = null!;
         private Label _apiKeyLabel = null!;
         private NavTextField _endpointApiKey = null!;
+        private NavTextField _endpointModelField = null!;
         private NavDropDownList _endpointModelCombo = null!;
         private readonly ObservableCollection<string> _endpointModelItems = [];
-        private string _endpointAcceptedText = string.Empty;
         private Label _probeStatus = null!;
         private readonly List<string> _probedModels = [];
         private string? _lastProbeKey;
@@ -361,12 +382,18 @@ namespace TerminalQuest.Ui
 
         public DropDownList ClaudeModelCombo => _claudeCombo;
 
+        /// <summary>The Claude model id box: what typing sets and picking writes into.</summary>
+        public TextField ClaudeModelField => _claudeField;
+
         internal IReadOnlyList<string> ClaudeLabels => _claudeItems;
 
         /// <summary>
-        /// The endpoint model field: an editable dropdown whose list is the last probe.
+        /// The endpoint model picker: a readonly dropdown over the last probe.
         /// </summary>
         public DropDownList ModelField => _endpointModelCombo;
+
+        /// <summary>The endpoint model id box: what typing sets and picking writes into.</summary>
+        public TextField EndpointModelField => _endpointModelField;
 
         /// <summary>The ids the last probe returned, in the order they are offered.</summary>
         public IReadOnlyList<string> ProbedModels => _probedModels;
@@ -400,6 +427,27 @@ namespace TerminalQuest.Ui
             ShowSection(section);
         }
 
+        /// <summary>
+        /// Test seam: runs the same commit a mouse click on an open row performs (wired to
+        /// <c>ListClicked</c>), without needing an open popover, which headless tests cannot
+        /// raise. Keyboard-browse tests set <c>Value</c> directly and never call this.
+        /// </summary>
+        internal void SimulateListClick(DropDownList combo)
+        {
+            if (combo == _providerCombo)
+            {
+                PickProviderFromCombo();
+            }
+            else if (combo == _claudeCombo)
+            {
+                PickClaudeRow(advance: false);
+            }
+            else if (combo == _endpointModelCombo)
+            {
+                PickEndpointModelRow(advance: false);
+            }
+        }
+
         private static string ProviderDisplayName(AgentProvider provider) => provider switch
         {
             AgentProvider.ClaudeCode => "Claude Code (local CLI - Anthropic)",
@@ -424,7 +472,7 @@ namespace TerminalQuest.Ui
 
             var providerLabel = new Label
             {
-                Text = "Narrative Provider (Up/Down: browse, Enter: open/pick, Esc: close):",
+                Text = "Narrative Provider (Click: pick | Up/Down: browse, Enter: open/pick, Esc: close):",
                 X = 1,
                 Y = 0,
                 Width = Dim.Fill() - 2,
@@ -433,7 +481,8 @@ namespace TerminalQuest.Ui
             providerLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
             // A collapsed dropdown: one row however long the provider list grows. Browsing
-            // (ValueChanged) only moves the cursor; Enter (Accepting) picks into the draft.
+            // (ValueChanged) only moves the cursor; Enter (Accepting) or a mouse click
+            // (ListClicked) picks into the draft.
             _providerCombo = new NavDropDownList
             {
                 X = 1,
@@ -459,6 +508,8 @@ namespace TerminalQuest.Ui
             _providerCombo.Accepting += (_, _) => PickProviderFromCombo();
             // A pick made inside the open list commits the same way; it never advances.
             _providerCombo.Accepted += (_, _) => PickProviderFromCombo();
+            // A row clicked with the mouse commits instantly; keyboard browsing still needs Enter.
+            _providerCombo.ListClicked += PickProviderFromCombo;
             _providerCombo.HasFocusChanged += (_, _) =>
             {
                 // Abandoning a browsed-but-unpicked row restores the picked provider's name,
@@ -643,7 +694,7 @@ namespace TerminalQuest.Ui
 
             var claudeModelLabel = new Label
             {
-                Text = "Preset Claude Models (Up/Down: browse, Enter: open/pick, Esc: close):",
+                Text = "Claude Model (type an id below, or pick a row — Click/Enter: pick, Esc: close):",
                 X = 1,
                 Y = 0,
                 Width = Dim.Fill() - 2,
@@ -651,32 +702,42 @@ namespace TerminalQuest.Ui
             };
             claudeModelLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            // One editable dropdown merges the preset list and the custom id: picking a row
-            // offers its id, typing sets one freehand. Live ids merge in on first focus.
+            // The id itself lives in an editable field: typing is explicit and reaches the
+            // draft at once. The dropdown beneath is a readonly picker: browsing it changes
+            // nothing, picking a row writes its id into the field. Live ids merge in on
+            // first focus.
             _claudeEntries = [.. ClaudeModels.All];
-            _claudeCombo = new NavDropDownList
+            _claudeField = new NavTextField
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill() - 2,
+            };
+            _claudeField.SetScheme(Theme.CreateScheme());
+            _claudeField.BeforeKey = FormFieldKey;
+            _claudeCombo = new NavDropDownList
+            {
+                X = 1,
+                Y = 2,
+                Width = Dim.Fill() - 2,
                 Height = 1,
+                ReadOnly = true,
             };
             _claudeCombo.SetScheme(Theme.CreateScheme());
             _claudeCombo.Source = new ListWrapper<string>(_claudeItems);
             RefreshClaudeItems();
             _claudeCombo.BeforeKey = FormListKey;
             _claudeCombo.IsPopoverOpen = IsSelecting;
-            // Dirty means typed text or a browsed row the draft does not hold yet.
+            // Dirty means the highlighted row is not what the field holds: Enter picks it
+            // into the field. Clean means Enter opens the list instead.
             _claudeCombo.HasUncommitted = () =>
-                _claudeTextTyped
-                || (_pendingClaudeId is { } pending
-                    && !string.Equals(pending, _draft.ClaudeModel?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+                ClaudeEntryIndexForValue(_claudeCombo.Value) is >= 0 and var selected
+                && !string.Equals(_claudeEntries[selected].Id, _claudeField.Text?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
             _isLoadingClaude = true;
             try
             {
-                // Show the stored id as its row label where known, raw otherwise.
-                _claudeCombo.Text = ClaudeDisplayForId(_draft.ClaudeModel);
+                _claudeField.Text = _draft.ClaudeModel ?? string.Empty;
                 SyncClaudeSelection();
             }
             finally
@@ -684,47 +745,27 @@ namespace TerminalQuest.Ui
                 _isLoadingClaude = false;
             }
 
-            // Value and Text are coupled: picking a row shows its label, typing shows free
-            // text. Neither writes the draft here. A row pick arms the pending id for Enter;
-            // free text updates the draft live; selection echoes are recognised and ignored.
-            _claudeCombo.TextChanged += (_, _) =>
+            // Typing sets the id outright and re-highlights the matching row where there is
+            // one. Picking a row writes its id into the field like typing would.
+            _claudeField.TextChanged += (_, _) =>
             {
                 if (_isLoadingClaude)
                 {
                     return;
                 }
 
-                var typed = _claudeCombo.Text?.Trim() ?? string.Empty;
-                var known = ClaudeEntryIndexForText(typed);
-                if (known >= 0)
-                {
-                    _pendingClaudeId = _claudeEntries[known].Id;
-                    _claudeTextTyped = false;
-                }
-                else
-                {
-                    _draft.ClaudeModel = typed;
-                    _pendingClaudeId = null;
-                    _claudeTextTyped = true;
-                    UpdateSummary();
-                }
+                _draft.ClaudeModel = _claudeField.Text?.Trim() ?? string.Empty;
+                SyncClaudeSelection();
+                UpdateSummary();
             };
-            _claudeCombo.ValueChanged += (_, _) =>
-            {
-                if (_isLoadingClaude)
-                {
-                    return;
-                }
-
-                var selected = ClaudeEntryIndexForValue(_claudeCombo.Value);
-                _pendingClaudeId = selected >= 0 ? _claudeEntries[selected].Id : null;
-                _claudeTextTyped = false;
-                _claudeCombo.SetNeedsDraw();
-            };
-            _claudeCombo.Accepting += (_, _) => CommitClaudePick(advance: true);
-            // A pick made inside the open list commits the same way but stays put: the
+            _claudeField.Accepting += (_, _) => MoveFormFocus(1);
+            _claudeCombo.ValueChanged += (_, _) => _claudeCombo.SetNeedsDraw();
+            _claudeCombo.Accepting += (_, _) => PickClaudeRow(advance: true);
+            // A pick made inside the open list writes the same way but stays put: the
             // list just closed onto this box, so advancing would yank focus away.
-            _claudeCombo.Accepted += (_, _) => CommitClaudePick(advance: false);
+            _claudeCombo.Accepted += (_, _) => PickClaudeRow(advance: false);
+            // A row clicked with the mouse writes instantly; keyboard browsing still needs Enter.
+            _claudeCombo.ListClicked += () => PickClaudeRow(advance: false);
             _claudeCombo.HasFocusChanged += (_, _) =>
             {
                 if (_claudeCombo.HasFocus)
@@ -743,27 +784,12 @@ namespace TerminalQuest.Ui
             };
             claudeNote.SetScheme(Theme.LabelScheme(TextRole.System));
 
-            box.Add(claudeModelLabel, _claudeCombo, claudeNote);
+            box.Add(claudeModelLabel, _claudeField, _claudeCombo, claudeNote);
             return box;
         }
 
         private static string ClaudeLabel(ClaudeModels.Entry entry) =>
             string.IsNullOrEmpty(entry.Id) ? $"{entry.Name} ({entry.Detail})" : $"{entry.Name} - {entry.Id} ({entry.Detail})";
-
-        /// <summary>The row label for a stored id, or the id itself when no row owns it.</summary>
-        private string ClaudeDisplayForId(string? id)
-        {
-            var wanted = id?.Trim() ?? string.Empty;
-            foreach (var entry in _claudeEntries)
-            {
-                if (string.Equals(entry.Id, wanted, StringComparison.OrdinalIgnoreCase))
-                {
-                    return ClaudeLabel(entry);
-                }
-            }
-
-            return wanted;
-        }
 
         /// <summary>Rebuilds the Claude dropdown rows from the current entries.</summary>
         private void RefreshClaudeItems()
@@ -775,21 +801,19 @@ namespace TerminalQuest.Ui
             }
         }
 
-        /// <summary>Moves the row highlight to the stored id where it is a known row.</summary>
+        /// <summary>
+        /// Moves the row highlight to the id the field holds, where it is a known row.
+        /// An id no row owns leaves the highlight where it is: the field is the truth,
+        /// the picker only echoes it.
+        /// </summary>
         private void SyncClaudeSelection()
         {
-            var wanted = _draft.ClaudeModel?.Trim() ?? string.Empty;
-            for (var i = 0; i < _claudeEntries.Count; i++)
+            if (ClaudeEntryIndexForId(_claudeField.Text) is >= 0 and var index)
             {
-                if (string.Equals(_claudeEntries[i].Id, wanted, StringComparison.OrdinalIgnoreCase))
+                var label = ClaudeLabel(_claudeEntries[index]);
+                if (!string.Equals(_claudeCombo.Value, label, StringComparison.Ordinal))
                 {
-                    var label = ClaudeLabel(_claudeEntries[i]);
-                    if (!string.Equals(_claudeCombo.Value, label, StringComparison.Ordinal))
-                    {
-                        _claudeCombo.Value = label;
-                    }
-
-                    return;
+                    _claudeCombo.Value = label;
                 }
             }
         }
@@ -826,12 +850,13 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Maps dropdown text back to an entry: the text may be a row label (from a pick)
-        /// or a raw id (restored or typed text). -1 when it matches neither.
+        /// Maps a raw id back to an entry, for echoing the field's contents in the picker.
+        /// -1 when no row owns it.
         /// </summary>
-        private int ClaudeEntryIndexForText(string? text)
+        private int ClaudeEntryIndexForId(string? id)
         {
-            if (string.IsNullOrEmpty(text))
+            var wanted = id?.Trim() ?? string.Empty;
+            if (wanted.Length == 0)
             {
                 for (var i = 0; i < _claudeEntries.Count; i++)
                 {
@@ -846,8 +871,7 @@ namespace TerminalQuest.Ui
 
             for (var i = 0; i < _claudeEntries.Count; i++)
             {
-                if (string.Equals(_claudeEntries[i].Id, text, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(ClaudeLabel(_claudeEntries[i]), text, StringComparison.Ordinal))
+                if (string.Equals(_claudeEntries[i].Id, wanted, StringComparison.OrdinalIgnoreCase))
                 {
                     return i;
                 }
@@ -856,42 +880,31 @@ namespace TerminalQuest.Ui
             return -1;
         }
 
-        /// <summary>Commits the box on Enter: the picked row's id, or the typed text
-        /// resolved to a known row where it names one, or raw for a custom id. The box keeps
-        /// showing the row label so it agrees with the list.</summary>
-        private void CommitClaudePick(bool advance)
+        /// <summary>
+        /// Writes the highlighted row's id into the field on Enter or click, like typing it
+        /// would. The field's own handler carries it into the draft from there.
+        /// </summary>
+        private void PickClaudeRow(bool advance)
         {
-            var typed = _claudeCombo.Text?.Trim() ?? string.Empty;
-            string id;
-            if (!_claudeTextTyped && _pendingClaudeId is { } pending)
+            if (ClaudeEntryIndexForValue(_claudeCombo.Value) is >= 0 and var selected)
             {
-                id = pending;
-            }
-            else if (ClaudeEntryIndexForText(typed) is { } known && known >= 0)
-            {
-                id = _claudeEntries[known].Id;
-            }
-            else
-            {
-                id = typed;
-            }
+                _isLoadingClaude = true;
+                try
+                {
+                    _claudeField.Text = _claudeEntries[selected].Id;
+                }
+                finally
+                {
+                    _isLoadingClaude = false;
+                }
 
-            _pendingClaudeId = null;
-            _claudeTextTyped = false;
-            _draft.ClaudeModel = id;
-            _isLoadingClaude = true;
-            try
-            {
-                _claudeCombo.Text = ClaudeDisplayForId(id);
+                _draft.ClaudeModel = _claudeEntries[selected].Id;
                 SyncClaudeSelection();
-            }
-            finally
-            {
-                _isLoadingClaude = false;
+                UpdateSummary();
+                var id = _claudeEntries[selected].Id;
+                Say(_messageLabel, $"Picked model: {(string.IsNullOrEmpty(id) ? "CLI Default" : ClaudeModels.Describe(id))}", TextRole.Place);
             }
 
-            UpdateSummary();
-            Say(_messageLabel, $"Picked model: {(string.IsNullOrEmpty(id) ? "CLI Default" : ClaudeModels.Describe(id))}", TextRole.Place);
             if (advance)
             {
                 MoveFormFocus(1);
@@ -899,7 +912,7 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Merges ids newer than this build into the Claude dropdown, once per window. Runs
+        /// Merges the API's live ids into the Claude dropdown, once per window. Runs
         /// only when a key is available and never blanks the curated list on failure.
         /// </summary>
         private async Task EnsureClaudeFreshAsync()
@@ -935,18 +948,13 @@ namespace TerminalQuest.Ui
 
             _app.Invoke(() =>
             {
-                var currentId = _pendingClaudeId
-                    ?? (ClaudeEntryIndexForText(_claudeCombo.Text?.Trim() ?? string.Empty) is { } known && known >= 0
-                        ? _claudeEntries[known].Id
-                        : _claudeCombo.Text?.Trim() ?? string.Empty);
+                // The field is the truth and is never rewritten here: only the rows and the
+                // highlight follow the fresh ids.
                 _claudeEntries = [.. ClaudeModels.WithLiveIds(live)];
                 RefreshClaudeItems();
                 _isLoadingClaude = true;
                 try
                 {
-                    _claudeCombo.Text = ClaudeDisplayForId(currentId);
-                    _pendingClaudeId = null;
-                    _claudeTextTyped = false;
                     SyncClaudeSelection();
                 }
                 finally
@@ -1036,7 +1044,7 @@ namespace TerminalQuest.Ui
 
             var modelLabel = new Label
             {
-                Text = "Model Name / ID (type, Enter: pick / open probed list, Esc: close):",
+                Text = "Model Name / ID (type an id below, or pick a probed row — Click/Enter: pick, Esc: close):",
                 X = 1,
                 Y = 9,
                 Width = Dim.Fill() - 2,
@@ -1044,23 +1052,36 @@ namespace TerminalQuest.Ui
             };
             modelLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            // One editable dropdown is the whole model picker: typing sets the id, opening
-            // it probes the server and offers what answers. The list holds raw ids, so the
-            // box text is always the id itself.
-            _endpointModelCombo = new NavDropDownList
+            // The id itself lives in an editable field: typing is explicit and reaches the
+            // draft at once. The dropdown beneath is a readonly picker over the last probe:
+            // browsing it changes nothing, picking a row writes its id into the field.
+            _endpointModelField = new NavTextField
             {
                 X = 1,
                 Y = 10,
                 Width = Dim.Fill() - 2,
+            };
+            _endpointModelField.SetScheme(Theme.CreateScheme());
+            _endpointModelField.BeforeKey = FormFieldKey;
+            _endpointModelCombo = new NavDropDownList
+            {
+                X = 1,
+                Y = 11,
+                Width = Dim.Fill() - 2,
                 Height = 1,
+                ReadOnly = true,
             };
             _endpointModelCombo.SetScheme(Theme.CreateScheme());
             _endpointModelCombo.Source = new ListWrapper<string>(_endpointModelItems);
             _endpointModelCombo.IsPopoverOpen = IsSelecting;
-            // Dirty means the box no longer shows the last confirmed id: Enter confirms
-            // it. Clean means Enter opens the probed list instead.
+            // Dirty means the highlighted row is not what the field holds: Enter picks it
+            // into the field. Clean means Enter opens the probed list instead.
             _endpointModelCombo.HasUncommitted = () =>
-                !string.Equals(_endpointModelCombo.Text?.Trim() ?? string.Empty, _endpointAcceptedText, StringComparison.Ordinal);
+            {
+                var row = _endpointModelCombo.Value?.Trim() ?? string.Empty;
+                return row.Length > 0
+                    && !string.Equals(row, _endpointModelField.Text?.Trim() ?? string.Empty, StringComparison.Ordinal);
+            };
             _endpointModelCombo.BeforeKey = key =>
             {
                 // Opening the list probes first so it never opens onto stale results.
@@ -1075,7 +1096,7 @@ namespace TerminalQuest.Ui
             var apiNote = new Label
             {
                 X = 1,
-                Y = 11,
+                Y = 12,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
                 Text = "Note: these providers support only OpenAI-compatible chat APIs (/v1).",
@@ -1085,7 +1106,7 @@ namespace TerminalQuest.Ui
             _probeStatus = new Label
             {
                 X = 1,
-                Y = 12,
+                Y = 13,
                 Width = Dim.Fill() - 2,
                 Height = 2,
                 CanFocus = false,
@@ -1119,36 +1140,24 @@ namespace TerminalQuest.Ui
                 _lastProbeKey = null;
             };
             _endpointApiKey.Accepting += (_, _) => MoveFormFocus(1);
-            _endpointModelCombo.TextChanged += (_, _) =>
+            _endpointModelField.TextChanged += (_, _) =>
             {
                 if (_isLoadingEndpoint)
                 {
                     return;
                 }
 
-                _draft.EndpointFor(_draft.Provider).Model = _endpointModelCombo.Text?.Trim() ?? string.Empty;
+                _draft.EndpointFor(_draft.Provider).Model = _endpointModelField.Text?.Trim() ?? string.Empty;
+                SyncEndpointModelSelection();
                 UpdateSummary();
             };
-            _endpointModelCombo.ValueChanged += (_, _) =>
-            {
-                if (_isLoadingEndpoint)
-                {
-                    return;
-                }
-
-                // Picking a probed row writes its id like typing would; Enter confirms it.
-                var picked = _endpointModelCombo.Value?.Trim() ?? string.Empty;
-                if (picked.Length > 0)
-                {
-                    _draft.EndpointFor(_draft.Provider).Model = picked;
-                    UpdateSummary();
-                }
-
-                _endpointModelCombo.SetNeedsDraw();
-            };
-            _endpointModelCombo.Accepting += (_, _) => AcceptEndpointModel(advance: true);
-            // A pick made inside the open list confirms the same way but stays put.
-            _endpointModelCombo.Accepted += (_, _) => AcceptEndpointModel(advance: false);
+            _endpointModelField.Accepting += (_, _) => MoveFormFocus(1);
+            _endpointModelCombo.ValueChanged += (_, _) => _endpointModelCombo.SetNeedsDraw();
+            _endpointModelCombo.Accepting += (_, _) => PickEndpointModelRow(advance: true);
+            // A pick made inside the open list writes the same way but stays put.
+            _endpointModelCombo.Accepted += (_, _) => PickEndpointModelRow(advance: false);
+            // A row clicked with the mouse writes instantly; keyboard browsing still needs Enter.
+            _endpointModelCombo.ListClicked += () => PickEndpointModelRow(advance: false);
             _endpointModelCombo.HasFocusChanged += (_, _) =>
             {
                 // Opening the field probes the server, so the list is fresh when asked for.
@@ -1167,6 +1176,7 @@ namespace TerminalQuest.Ui
                 _apiKeyLabel,
                 _endpointApiKey,
                 modelLabel,
+                _endpointModelField,
                 _endpointModelCombo,
                 apiNote,
                 _probeStatus);
@@ -1325,8 +1335,7 @@ namespace TerminalQuest.Ui
                 _builtinUrlLabel.Text = $"Built-in endpoint: {preset.BaseUrl}";
                 _endpointBaseUrl.Text = slot.BaseUrl;
                 _endpointApiKey.Text = slot.ResolveApiKey();
-                _endpointModelCombo.Text = slot.Model;
-                _endpointAcceptedText = slot.Model?.Trim() ?? string.Empty;
+                _endpointModelField.Text = slot.Model ?? string.Empty;
                 _apiKeyLabel.Text = $"API Key (sealed on this machine; {EnvVarName(provider)} wins when set):";
                 _endpointVendorHint.Text = preset.Description;
                 _probedModels.Clear();
@@ -1363,7 +1372,7 @@ namespace TerminalQuest.Ui
 
             var slot = _draft.EndpointFor(_draft.Provider);
             slot.BaseUrl = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
-            slot.Model = _endpointModelCombo.Text?.Trim() ?? string.Empty;
+            slot.Model = _endpointModelField.Text?.Trim() ?? string.Empty;
             slot.SetApiKey(_endpointApiKey.Text);
         }
 
@@ -1379,8 +1388,8 @@ namespace TerminalQuest.Ui
             List<View> controls = _activeSection switch
             {
                 SettingsSection.Provider => _claudeBox.Visible
-                    ? [_providerCombo, _claudeCombo]
-                    : [_providerCombo, _endpointBaseUrl, _endpointApiKey, _endpointModelCombo],
+                    ? [_providerCombo, _claudeField, _claudeCombo]
+                    : [_providerCombo, _endpointBaseUrl, _endpointApiKey, _endpointModelField, _endpointModelCombo],
                 _ => [_recallChars, _editorCommand, _testEditorButton, _openConfigFolderButton],
             };
 
@@ -1391,8 +1400,8 @@ namespace TerminalQuest.Ui
         [
             _providerScroll,
             _providerCombo,
-            _claudeCombo,
-            _endpointBaseUrl, _endpointApiKey, _endpointModelCombo,
+            _claudeField, _claudeCombo,
+            _endpointBaseUrl, _endpointApiKey, _endpointModelField, _endpointModelCombo,
             _recallChars, _editorCommand, _testEditorButton, _openConfigFolderButton,
         ];
 
@@ -1546,7 +1555,7 @@ namespace TerminalQuest.Ui
             _hintLabel.Text = (inNav, inForm, inFooter) switch
             {
                 (true, _, _) => "Up/Down: section | Enter: edit section | Tab: next pane | Ctrl+S: save | Esc: cancel",
-                (_, true, _) => "Up/Down: fields (browse in dropdowns) | Left/Right: fields | Enter: open/pick | Esc: close list | Tab: next pane | Ctrl+S: save",
+                (_, true, _) => "Up/Down: fields (browse in dropdowns) | Click: pick | Left/Right: fields | Enter: open/pick | Esc: close list | Tab: next pane | Ctrl+S: save",
                 (_, _, true) => "Left/Right: choose action | Enter: run | Tab: next pane | Ctrl+S: save | Esc: cancel",
                 _ => "Tab: switch pane | Up/Down: move | Enter: pick | Ctrl+S: save | Esc: cancel",
             };
@@ -1805,18 +1814,44 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// Confirms the model box on Enter: typed text or the picked row's id. The open
-        /// list stays on this box afterwards; a closed box advances like other fields.
+        /// Moves the row highlight to the id the field holds, where the last probe offered
+        /// it. The field is the truth; the picker only echoes it.
         /// </summary>
-        private void AcceptEndpointModel(bool advance)
+        private void SyncEndpointModelSelection()
         {
-            var modelName = _endpointModelCombo.Text?.Trim() ?? string.Empty;
-            if (modelName.Length > 0)
+            var wanted = _endpointModelField.Text?.Trim() ?? string.Empty;
+            if (wanted.Length > 0 && _endpointModelItems.Contains(wanted))
             {
-                _draft.EndpointFor(_draft.Provider).Model = modelName;
-                _endpointAcceptedText = modelName;
-                Say(_probeStatus, $"Picked: {modelName}", TextRole.Place);
+                if (!string.Equals(_endpointModelCombo.Value, wanted, StringComparison.Ordinal))
+                {
+                    _endpointModelCombo.Value = wanted;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Writes the highlighted row's id into the field on Enter or click, like typing it
+        /// would. The field's own handler carries it into the draft from there.
+        /// </summary>
+        private void PickEndpointModelRow(bool advance)
+        {
+            var row = _endpointModelCombo.Value?.Trim() ?? string.Empty;
+            if (row.Length > 0)
+            {
+                _isLoadingEndpoint = true;
+                try
+                {
+                    _endpointModelField.Text = row;
+                }
+                finally
+                {
+                    _isLoadingEndpoint = false;
+                }
+
+                _draft.EndpointFor(_draft.Provider).Model = row;
+                SyncEndpointModelSelection();
                 UpdateSummary();
+                Say(_probeStatus, $"Picked: {row}", TextRole.Place);
             }
 
             if (advance)
@@ -1901,8 +1936,7 @@ namespace TerminalQuest.Ui
                     else
                     {
                         var sortedModels = models.OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
-                        Say(_probeStatus, $"Found {sortedModels.Count} model(s). Open the list, Up/Down to browse, Enter to pick:");
-                        var currentText = _endpointModelCombo.Text;
+                        Say(_probeStatus, $"Found {sortedModels.Count} model(s). Click a row to use it, Up/Down to browse, Enter to pick:");
                         _isLoadingEndpoint = true;
                         try
                         {
@@ -1914,8 +1948,9 @@ namespace TerminalQuest.Ui
                                 _endpointModelItems.Add(model);
                             }
 
-                            // The box text is the id: keep what was typed, not the first hit.
-                            _endpointModelCombo.Text = currentText;
+                            // The field is the truth and keeps what was typed; the picker
+                            // only re-highlights it where offered.
+                            SyncEndpointModelSelection();
                         }
                         finally
                         {
@@ -1950,9 +1985,8 @@ namespace TerminalQuest.Ui
             _isLoadingClaude = true;
             try
             {
-                _claudeCombo.Text = ClaudeDisplayForId(defaults.ClaudeModel);
-                _pendingClaudeId = null;
-                _claudeTextTyped = false;
+                _claudeField.Text = defaults.ClaudeModel ?? string.Empty;
+                SyncClaudeSelection();
             }
             finally
             {

@@ -63,13 +63,13 @@ namespace TerminalQuest.Settings
         /// </remarks>
         public int TranscriptRecallCharacters { get; set; } = Saves.TranscriptRecall.DefaultCharacters;
 
-        /// <summary>Small and fast, which is what a turn of narration wants.</summary>
+        /// <summary>Empty, so a fresh install defers to whatever the CLI is configured for.</summary>
         /// <remarks>
-        /// The undated alias rather than a pinned snapshot, so the settings screen can offer it as
-        /// one of a short list of names and a file written today still matches a build shipped
-        /// after the next snapshot lands.
+        /// Empty rather than a named id: model ids churn and the CLI exposes no list, so a
+        /// pinned id would silently date every install. A player who wants a lane alias
+        /// (like <c>opus</c>) or a dated snapshot types it in settings.
         /// </remarks>
-        public const string DefaultClaudeModel = "claude-haiku-4-5";
+        public const string DefaultClaudeModel = "";
 
         /// <summary>Where a manual server listens unless configured otherwise (defaults to LM Studio).</summary>
         public const string DefaultCustomBaseUrl = "http://localhost:1234/v1";

@@ -362,7 +362,7 @@ Rolling summary, not full transcript. Rev. 4 gave two reasons — cost, and that
 
 Cheapest implementation: have the Narrator emit a short scene summary at scene boundaries, since it already has the material. The Director additionally reads the relevant slice of the revealed ledger before authoring or ratifying any fact (§9).
 
-**Cost.** Two long-lived sessions means two prompt caches, and the Narrator's default model is `claude-haiku-4-5` (`Settings/AppSettings.cs:53`). The Director should get its own model setting alongside it in `Settings/ClaudeModels.cs`, defaulting no dearer than the Narrator's; `GameState.CostUsd` already accumulates the bill and the status pane already shows it, so the effect of getting this wrong will be visible immediately rather than at the end of the month.
+**Cost.** Two long-lived sessions means two prompt caches, and the Narrator's default model defers to whatever the CLI is configured for (`Settings/AppSettings.cs:DefaultClaudeModel`). The Director should get its own model setting alongside it in `Settings/ClaudeModels.cs`, defaulting no dearer than the Narrator's; `GameState.CostUsd` already accumulates the bill and the status pane already shows it, so the effect of getting this wrong will be visible immediately rather than at the end of the month.
 
 ## 8. Directive Format
 
