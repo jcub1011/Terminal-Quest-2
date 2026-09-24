@@ -3,10 +3,6 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version_tag:
-        description: 'Version tag (e.g. v1.0.0)'
-        required: true
-        type: string
       release_title:
         description: 'Release title (optional, defaults to version tag)'
         required: false
@@ -26,6 +22,11 @@ on:
         required: false
         type: boolean
         default: true
+      overwrite_existing_tag:
+        description: 'Delete and recreate the tag/release if it already exists'
+        required: false
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -49,21 +50,67 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Determine Version Tag and Title
+      - name: Derive Version From Project
         shell: pwsh
         run: |
-          $tag = "${{ inputs.version_tag }}"
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-              $tag = "${{ github.ref_name }}"
+          $versionNode = Select-Xml -Path 'terminal-quest-2/TerminalQuest.csproj' -XPath '/Project/PropertyGroup/Version' |
+            Select-Object -First 1 -ExpandProperty Node
+          $version = $versionNode?.InnerText?.Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+              throw "Could not find <Version> in terminal-quest-2/TerminalQuest.csproj. The product version is the source of truth for releases."
           }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.\-]+)?(\+[0-9A-Za-z.\-]+)?$') {
+              throw "Project version '$version' is not a valid version number."
+          }
+          $tag = "v$version"
+          Write-Host "Project version: $version"
+          Write-Host "Release tag: $tag"
+          "PROJECT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+
           $title = "${{ inputs.release_title }}"
           if ([string]::IsNullOrWhiteSpace($title)) {
               $title = $tag
           }
-          Write-Host "Target tag: $tag"
-          Write-Host "Target title: $title"
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Release title: $title"
           "RELEASE_TITLE=$title" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Validate Pushed Tag Matches Project
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_name }}" -ne "$env:RELEASE_TAG") {
+              throw "Pushed tag '${{ github.ref_name }}' does not match the project version '$env:RELEASE_TAG' (from <Version>). Update <Version> in TerminalQuest.csproj instead of pushing a mismatched tag."
+          }
+
+      - name: Fail If Tag Already Exists
+        # The pushed tag itself always exists at this point, so this guard only
+        # applies to manual dispatches, which create the tag during the release.
+        if: github.ref_type != 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "$env:RELEASE_TAG"
+          $tagRef = git rev-parse -q --verify "refs/tags/$tag"
+          if ([string]::IsNullOrWhiteSpace($tagRef)) {
+              Write-Host "Tag $tag does not exist yet. Proceeding."
+              exit 0
+          }
+          if ("${{ inputs.overwrite_existing_tag }}" -ne 'true') {
+              throw "Tag $tag already exists and 'overwrite_existing_tag' is disabled. Bump <Version> in TerminalQuest.csproj or re-run with overwrite enabled."
+          }
+          Write-Host "Tag $tag exists and overwrite is enabled. Removing prior tag/release ..."
+          $releaseExists = $true
+          gh release view $tag --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -ne 0) { $releaseExists = $false }
+          if ($releaseExists) {
+              gh release delete $tag --yes --cleanup-tag --repo "${{ github.repository }}"
+          } else {
+              git tag -d $tag
+              git push --delete origin $tag
+          }
+          git fetch origin --tags --force
 
       - name: Run Tests
         run: dotnet test --configuration Release

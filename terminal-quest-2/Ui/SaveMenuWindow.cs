@@ -50,6 +50,7 @@ namespace TerminalQuest.Ui
         private readonly Label _messageLabel;
         private readonly FrameView _actionsFrame;
         private readonly Label _hintLabel;
+        private readonly Label _versionLabel;
 
         private readonly Button _loadButton;
         private readonly Button _newSaveButton;
@@ -268,12 +269,28 @@ namespace TerminalQuest.Ui
                 _settingsButton,
                 _quitButton);
 
+            // Product version pinned to the bottom-right corner of the start menu.
+            // The v prefix matches the git tag form (v1.1.0).
+            var versionText = AppVersion.Display;
+            _versionLabel = new Label
+            {
+                X = Pos.AnchorEnd(versionText.Length),
+                Y = Pos.Bottom(_actionsFrame),
+                Width = versionText.Length,
+                Height = 1,
+                CanFocus = false,
+                Text = versionText,
+                TextAlignment = Alignment.End,
+            };
+            _versionLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
             // Static hints: never overwritten by feedback, which has its own line above.
+            // Width stops short of the version label so the two never overlap.
             _hintLabel = new Label
             {
                 X = 1,
                 Y = Pos.Bottom(_actionsFrame),
-                Width = Dim.Fill() - 2,
+                Width = Dim.Fill() - 2 - versionText.Length - 1,
                 Height = 1,
                 CanFocus = false,
                 Text = "Up/Down: saves | Enter: load | N: new | Tab: actions | S: settings | Q: quit",
@@ -287,7 +304,8 @@ namespace TerminalQuest.Ui
                 _detailsFrame,
                 _messageLabel,
                 _actionsFrame,
-                _hintLabel);
+                _hintLabel,
+                _versionLabel);
 
             // A mouse click lands focus directly, bypassing the Tab toggle, so the pane
             // titles follow the actual focus rather than only the toggle path.
