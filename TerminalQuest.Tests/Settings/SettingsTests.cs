@@ -55,11 +55,14 @@ namespace TerminalQuest.Tests.Settings
 
             Assert.Equal(AgentProvider.ClaudeCode, settings.Provider);
             Assert.Equal(AppSettings.DefaultClaudeModel, settings.ClaudeModel);
-            Assert.Equal(OpenAiPresets.Custom.Name, settings.OpenAiPreset);
-            Assert.Equal(AppSettings.DefaultLmStudioBaseUrl, settings.LmStudioBaseUrl);
-            Assert.Equal(AppSettings.DefaultLmStudioApiKey, settings.LmStudioApiKey);
+            Assert.Equal(OpenAiPresets.Google.BaseUrl, settings.Google.BaseUrl);
+            Assert.Equal(OpenAiPresets.Google.DefaultModel, settings.Google.Model);
+            Assert.Equal(OpenAiPresets.OpenAI.BaseUrl, settings.OpenAI.BaseUrl);
+            Assert.Equal(OpenAiPresets.Anthropic.BaseUrl, settings.Anthropic.BaseUrl);
+            Assert.Equal(AppSettings.DefaultCustomBaseUrl, settings.Custom.BaseUrl);
+            Assert.Equal(string.Empty, settings.Custom.Model);
+            Assert.Equal(string.Empty, settings.Custom.ResolveApiKey());
             Assert.Equal(AppSettings.DefaultEditorCommand, settings.EditorCommand);
-            Assert.Equal(string.Empty, settings.LmStudioModel);
         }
 
         [Fact]
@@ -71,7 +74,7 @@ namespace TerminalQuest.Tests.Settings
         [Fact]
         public void The_default_address_is_one_the_game_would_accept()
         {
-            Assert.True(AppSettings.IsAddress(AppSettings.DefaultLmStudioBaseUrl));
+            Assert.True(AppSettings.IsAddress(AppSettings.DefaultCustomBaseUrl));
         }
 
         // ---- Addresses -------------------------------------------------------------------------
@@ -115,6 +118,16 @@ namespace TerminalQuest.Tests.Settings
             Assert.Equal("Custom", OpenAiPresets.Custom.Name);
             Assert.True(OpenAiPresets.Custom.IsCustom);
             Assert.False(OpenAiPresets.Google.IsCustom);
+            Assert.Equal(AgentProvider.Google, OpenAiPresets.Google.Provider);
+            Assert.Equal(AgentProvider.OpenAI, OpenAiPresets.OpenAI.Provider);
+            Assert.Equal(AgentProvider.Anthropic, OpenAiPresets.Anthropic.Provider);
+            Assert.Equal(AgentProvider.Custom, OpenAiPresets.Custom.Provider);
+            Assert.Same(OpenAiPresets.Google, OpenAiPresets.ForProvider(AgentProvider.Google));
+            Assert.Same(OpenAiPresets.OpenAI, OpenAiPresets.ForProvider(AgentProvider.OpenAI));
+            Assert.Same(OpenAiPresets.Anthropic, OpenAiPresets.ForProvider(AgentProvider.Anthropic));
+            Assert.Same(OpenAiPresets.Custom, OpenAiPresets.ForProvider(AgentProvider.Custom));
+            Assert.Equal(AgentProvider.Google, OpenAiPresets.ProviderForPreset("Google"));
+            Assert.Equal(AgentProvider.Custom, OpenAiPresets.ProviderForPreset("NoSuchPreset"));
         }
 
         [Theory]
@@ -137,9 +150,9 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Theory]
-        [InlineData(null, AppSettings.DefaultLmStudioBaseUrl)]
-        [InlineData("", AppSettings.DefaultLmStudioBaseUrl)]
-        [InlineData("   ", AppSettings.DefaultLmStudioBaseUrl)]
+        [InlineData(null, AppSettings.DefaultCustomBaseUrl)]
+        [InlineData("", AppSettings.DefaultCustomBaseUrl)]
+        [InlineData("   ", AppSettings.DefaultCustomBaseUrl)]
         [InlineData("http://localhost:1234", "http://localhost:1234/v1")]
         [InlineData("http://localhost:1234/", "http://localhost:1234/v1")]
         [InlineData("http://127.0.0.1:1234", "http://127.0.0.1:1234/v1")]
@@ -164,14 +177,37 @@ namespace TerminalQuest.Tests.Settings
             // a copy block nobody remembered to update — which is the stated reason CopyFrom exists.
             var source = new AppSettings
             {
-                Provider = AgentProvider.OpenAiApi,
+                Provider = AgentProvider.Google,
                 ClaudeModel = "claude-opus-5",
                 DirectorClaudeModel = "claude-director-3",
-                OpenAiPreset = "Google",
-                LmStudioBaseUrl = "https://example.test/v1",
-                LmStudioModel = "some-model",
-                DirectorLmStudioModel = "director-model",
-                LmStudioApiKey = "secret",
+                Google = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "https://google.test/v1",
+                    Model = "google-model",
+                    DirectorModel = "google-director",
+                    ApiKey = "google-key",
+                },
+                OpenAI = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "https://openai.test/v1",
+                    Model = "openai-model",
+                    DirectorModel = "openai-director",
+                    ApiKey = "openai-key",
+                },
+                Anthropic = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "https://anthropic.test/v1",
+                    Model = "anthropic-model",
+                    DirectorModel = "anthropic-director",
+                    ApiKey = "anthropic-key",
+                },
+                Custom = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "https://example.test/v1",
+                    Model = "some-model",
+                    DirectorModel = "director-model",
+                    ApiKey = "secret",
+                },
                 EditorCommand = "code -w",
                 TranscriptRecallCharacters = 1234,
             };
@@ -281,25 +317,123 @@ namespace TerminalQuest.Tests.Settings
             using var temp = new TempSettings();
             var written = new AppSettings
             {
-                Provider = AgentProvider.LmStudio,
+                Provider = AgentProvider.Custom,
                 ClaudeModel = "claude-opus-5",
-                LmStudioBaseUrl = "https://example.test/v1",
-                LmStudioModel = "some-model",
-                LmStudioApiKey = "secret",
+                Custom = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "https://example.test/v1",
+                    Model = "some-model",
+                    DirectorModel = "director-model",
+                },
                 EditorCommand = "code -w",
                 TranscriptRecallCharacters = 1234,
             };
+            written.Custom.SetApiKey("secret");
 
             SettingsStore.Write(written, temp.Path_);
             var read = SettingsStore.Read(temp.Path_);
 
-            Assert.Equal(AgentProvider.LmStudio, read.Provider);
+            Assert.Equal(AgentProvider.Custom, read.Provider);
             Assert.Equal("claude-opus-5", read.ClaudeModel);
-            Assert.Equal("https://example.test/v1", read.LmStudioBaseUrl);
-            Assert.Equal("some-model", read.LmStudioModel);
-            Assert.Equal("secret", read.LmStudioApiKey);
+            Assert.Equal("https://example.test/v1", read.Custom.BaseUrl);
+            Assert.Equal("some-model", read.Custom.Model);
+            Assert.Equal("director-model", read.Custom.DirectorModel);
+            Assert.Equal("secret", read.Custom.ResolveApiKey());
             Assert.Equal("code -w", read.EditorCommand);
             Assert.Equal(1234, read.TranscriptRecallCharacters);
+        }
+
+        [Fact]
+        public void Each_provider_keeps_its_own_values_through_a_file()
+        {
+            using var temp = new TempSettings();
+            var written = new AppSettings { Provider = AgentProvider.Google };
+            written.Google.Model = "google-model";
+            written.Google.SetApiKey("google-key");
+            written.Custom.Model = "custom-model";
+            written.Custom.SetApiKey("custom-key");
+
+            SettingsStore.Write(written, temp.Path_);
+            var read = SettingsStore.Read(temp.Path_);
+
+            Assert.Equal(AgentProvider.Google, read.Provider);
+            Assert.Equal("google-model", read.Google.Model);
+            Assert.Equal("google-key", read.Google.ResolveApiKey());
+            Assert.Equal("custom-model", read.Custom.Model);
+            Assert.Equal("custom-key", read.Custom.ResolveApiKey());
+            Assert.Equal(OpenAiPresets.OpenAI.DefaultModel, read.OpenAI.Model);
+        }
+
+        [Fact]
+        public void The_stored_key_is_never_plaintext()
+        {
+            using var temp = new TempSettings();
+            var written = new AppSettings();
+            written.Google.SetApiKey("super-secret-key");
+
+            SettingsStore.Write(written, temp.Path_);
+
+            Assert.DoesNotContain("\"super-secret-key\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+            Assert.Equal("super-secret-key", SettingsStore.Read(temp.Path_).Google.ResolveApiKey());
+        }
+
+        [Fact]
+        public void Sealing_round_trips_a_key()
+        {
+            const string key = "sk-test-123";
+            var stored = ApiKeyProtection.Protect(key);
+
+            Assert.NotEqual(key, stored);
+            Assert.Equal(key, ApiKeyProtection.Unprotect(stored));
+        }
+
+        [Fact]
+        public void A_legacy_plaintext_key_reads_and_is_sealed_on_save()
+        {
+            // Hand-edited or pre-protection: raw text keeps working, then seals itself.
+            Assert.Equal("raw-key", ApiKeyProtection.Unprotect("raw-key"));
+
+            using var temp = new TempSettings();
+            temp.Write("""{"provider":"Custom","custom":{"baseUrl":"http://localhost:1234/v1","apiKey":"raw-key"}}""");
+
+            var read = SettingsStore.Read(temp.Path_);
+            Assert.Equal("raw-key", read.Custom.ResolveApiKey());
+
+            SettingsStore.Write(read, temp.Path_);
+            Assert.DoesNotContain("\"raw-key\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void An_environment_key_wins_without_being_stored()
+        {
+            const string variable = "TQ2_GOOGLE_API_KEY";
+            var previous = Environment.GetEnvironmentVariable(variable);
+            try
+            {
+                Environment.SetEnvironmentVariable(variable, "env-key");
+                var settings = new AppSettings { Provider = AgentProvider.Google };
+                settings.Google.SetApiKey("stored-key");
+
+                Assert.Equal("env-key", settings.ActiveApiKey);
+
+                using var temp = new TempSettings();
+                SettingsStore.Write(settings, temp.Path_);
+                Assert.DoesNotContain("env-key", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(variable, previous);
+            }
+        }
+
+        [Fact]
+        public void EffectiveProvider_resolves_legacy_and_unknown_values()
+        {
+            Assert.Equal(AgentProvider.Custom, AppSettings.EffectiveProvider((AgentProvider)1));
+            Assert.Equal(AgentProvider.ClaudeCode, AppSettings.EffectiveProvider((AgentProvider)99));
+            Assert.Equal(AgentProvider.Google, AppSettings.EffectiveProvider(AgentProvider.Google));
+            Assert.True(AppSettings.IsOpenAiProvider(AgentProvider.Anthropic));
+            Assert.False(AppSettings.IsOpenAiProvider(AgentProvider.ClaudeCode));
         }
 
         [Fact]
@@ -321,18 +455,18 @@ namespace TerminalQuest.Tests.Settings
             // So a hand-edited file reads as something a person can understand, and so reordering
             // the enum cannot silently change what a stored file means.
             using var temp = new TempSettings();
-            SettingsStore.Write(new AppSettings { Provider = AgentProvider.OpenAiApi }, temp.Path_);
+            SettingsStore.Write(new AppSettings { Provider = AgentProvider.Anthropic }, temp.Path_);
 
-            Assert.Contains("\"OpenAiApi\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
+            Assert.Contains("\"Anthropic\"", File.ReadAllText(temp.Path_), StringComparison.Ordinal);
         }
 
         [Fact]
-        public void Legacy_provider_name_lm_studio_reads_as_openai_api()
+        public void Legacy_provider_names_migrate_to_their_provider()
         {
             using var temp = new TempSettings();
             temp.Write("""{"provider":"LmStudio"}""");
 
-            Assert.Equal(AgentProvider.OpenAiApi, SettingsStore.Read(temp.Path_).Provider);
+            Assert.Equal(AgentProvider.Custom, SettingsStore.Read(temp.Path_).Provider);
         }
 
         [Fact]
@@ -344,7 +478,10 @@ namespace TerminalQuest.Tests.Settings
             var json = File.ReadAllText(temp.Path_);
 
             Assert.Contains("\"claudeModel\"", json, StringComparison.Ordinal);
-            Assert.Contains("\"lmStudioBaseUrl\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"google\"", json, StringComparison.Ordinal);
+            Assert.Contains("\"custom\"", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("lmStudioBaseUrl", json, StringComparison.Ordinal);
+            Assert.DoesNotContain("openAiPreset", json, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -410,24 +547,36 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Theory]
-        [InlineData("openai", AgentProvider.OpenAiApi)]
-        [InlineData("OpenAI", AgentProvider.OpenAiApi)]
-        [InlineData("OpenAiApi", AgentProvider.OpenAiApi)]
-        [InlineData("openAiApi", AgentProvider.OpenAiApi)]
-        [InlineData("lm-studio", AgentProvider.OpenAiApi)]
-        [InlineData("LmStudio", AgentProvider.OpenAiApi)]
-        [InlineData("google", AgentProvider.OpenAiApi)]
-        [InlineData("gemini", AgentProvider.OpenAiApi)]
+        [InlineData("openai", AgentProvider.OpenAI)]
+        [InlineData("OpenAI", AgentProvider.OpenAI)]
+        [InlineData("google", AgentProvider.Google)]
+        [InlineData("gemini", AgentProvider.Google)]
+        [InlineData("Google", AgentProvider.Google)]
+        [InlineData("anthropic", AgentProvider.Anthropic)]
+        [InlineData("Anthropic", AgentProvider.Anthropic)]
+        [InlineData("custom", AgentProvider.Custom)]
+        [InlineData("Custom", AgentProvider.Custom)]
         [InlineData("claude", AgentProvider.ClaudeCode)]
         [InlineData("claude-code", AgentProvider.ClaudeCode)]
         [InlineData("ClaudeCode", AgentProvider.ClaudeCode)]
         [InlineData("claudeCode", AgentProvider.ClaudeCode)]
         [InlineData("0", AgentProvider.ClaudeCode)]
-        [InlineData("1", AgentProvider.OpenAiApi)]
+        [InlineData("2", AgentProvider.Google)]
+        [InlineData("3", AgentProvider.OpenAI)]
+        [InlineData("4", AgentProvider.Anthropic)]
+        [InlineData("5", AgentProvider.Custom)]
+        // Legacy aggregates resolve to Custom once normalized: the old preset beside them
+        // decides the real provider during migration (covered below).
+        [InlineData("OpenAiApi", AgentProvider.Custom)]
+        [InlineData("openAiApi", AgentProvider.Custom)]
+        [InlineData("lm-studio", AgentProvider.Custom)]
+        [InlineData("LmStudio", AgentProvider.Custom)]
+        [InlineData("api", AgentProvider.Custom)]
+        [InlineData("1", AgentProvider.Custom)]
         internal void Provider_deserializes_various_formats_resiliently(string providerJson, AgentProvider expected)
         {
             using var temp = new TempSettings();
-            var json = providerJson is "0" or "1"
+            var json = int.TryParse(providerJson, out _)
                 ? $$"""{"provider": {{providerJson}}, "editorCommand": "code -w"}"""
                 : $$"""{"provider": "{{providerJson}}", "editorCommand": "code -w"}""";
             temp.Write(json);
@@ -529,7 +678,7 @@ namespace TerminalQuest.Tests.Settings
         }
 
         [Fact]
-        public void User_configured_settings_file_loads_accurately()
+        public void A_legacy_settings_file_migrates_to_its_preset_provider()
         {
             using var temp = new TempSettings();
             temp.Write("""
@@ -545,42 +694,83 @@ namespace TerminalQuest.Tests.Settings
             }
             """);
             var read = SettingsStore.Read(temp.Path_);
-            Assert.Equal(AgentProvider.OpenAiApi, read.Provider);
-            Assert.Equal("Google", read.OpenAiPreset);
-            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", read.LmStudioBaseUrl);
-            Assert.Equal("gemini-flash-lite-latest", read.LmStudioModel);
-            Assert.Equal("placeholder-api-key", read.LmStudioApiKey);
+            Assert.Equal(AgentProvider.Google, read.Provider);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", read.Google.BaseUrl);
+            Assert.Equal("gemini-flash-lite-latest", read.Google.Model);
+            Assert.Equal("placeholder-api-key", read.Google.ResolveApiKey());
             Assert.Equal("notepad.exe", read.EditorCommand);
             Assert.Equal(4000, read.TranscriptRecallCharacters);
         }
 
         [Fact]
-        public void A_blank_api_key_is_preserved_instead_of_defaulting_to_lm_studio()
+        public void A_legacy_custom_file_migrates_its_address_and_key()
+        {
+            using var temp = new TempSettings();
+            temp.Write("""
+            {
+              "provider": "LmStudio",
+              "openAiPreset": "Custom",
+              "lmStudioBaseUrl": "http://my-host:8080/v1",
+              "lmStudioModel": "my-model",
+              "directorLmStudioModel": "my-director",
+              "lmStudioApiKey": "my-key"
+            }
+            """);
+            var read = SettingsStore.Read(temp.Path_);
+            Assert.Equal(AgentProvider.Custom, read.Provider);
+            Assert.Equal("http://my-host:8080/v1", read.Custom.BaseUrl);
+            Assert.Equal("my-model", read.Custom.Model);
+            Assert.Equal("my-director", read.Custom.DirectorModel);
+            Assert.Equal("my-key", read.Custom.ResolveApiKey());
+        }
+
+        [Fact]
+        public void A_legacy_standby_config_survives_beside_claude()
+        {
+            using var temp = new TempSettings();
+            temp.Write("""
+            {
+              "provider": "ClaudeCode",
+              "openAiPreset": "OpenAI",
+              "lmStudioBaseUrl": "https://api.openai.com/v1",
+              "lmStudioModel": "gpt-4o",
+              "lmStudioApiKey": "standby-key"
+            }
+            """);
+            var read = SettingsStore.Read(temp.Path_);
+            Assert.Equal(AgentProvider.ClaudeCode, read.Provider);
+            Assert.Equal("gpt-4o", read.OpenAI.Model);
+            Assert.Equal("standby-key", read.OpenAI.ResolveApiKey());
+        }
+
+        [Fact]
+        public void A_blank_api_key_is_preserved()
         {
             using var temp = new TempSettings();
             var settings = new AppSettings
             {
-                Provider = AgentProvider.OpenAiApi,
-                LmStudioApiKey = string.Empty,
+                Provider = AgentProvider.Google,
             };
+            settings.Google.SetApiKey(string.Empty);
 
             SettingsStore.Write(settings, temp.Path_);
             var read = SettingsStore.Read(temp.Path_);
 
-            Assert.Equal(string.Empty, read.LmStudioApiKey);
+            Assert.Equal(string.Empty, read.Google.ResolveApiKey());
         }
 
         [Fact]
         public void Atomic_settings_write_replaces_target_and_leaves_no_tmp_behind()
         {
             using var temp = new TempSettings();
-            var settings = new AppSettings { LmStudioModel = "test-model" };
+            var settings = new AppSettings();
+            settings.Custom.Model = "test-model";
 
             SettingsStore.Write(settings, temp.Path_);
 
             Assert.True(File.Exists(temp.Path_));
             Assert.False(File.Exists($"{temp.Path_}.tmp"));
-            Assert.Equal("test-model", SettingsStore.Read(temp.Path_).LmStudioModel);
+            Assert.Equal("test-model", SettingsStore.Read(temp.Path_).Custom.Model);
         }
 
         [Fact]

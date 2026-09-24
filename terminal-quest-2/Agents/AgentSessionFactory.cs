@@ -18,7 +18,8 @@ namespace TerminalQuest.Agents
     {
         /// <param name="store">
         /// The save being played. Claude Code reaches it through the MCP server, which is launched
-        /// pointed at its folder; LM Studio is handed the store itself and calls the tools here.
+        /// pointed at its folder; an OpenAI-compatible provider is handed the store itself and
+        /// calls the tools here.
         /// </param>
         /// <summary>Creates the Narrator session with Narrator-scoped tools.</summary>
         public static IAgentSession CreateNarrator(AppSettings settings, SaveStore store, string systemPrompt)
@@ -26,7 +27,7 @@ namespace TerminalQuest.Agents
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(store);
 
-            return Create(settings, store, systemPrompt, ToolRole.Narrator, settings.ClaudeModel, settings.LmStudioModel);
+            return Create(settings, store, systemPrompt, ToolRole.Narrator, settings.ClaudeModel, settings.ActiveModel);
         }
 
         /// <summary>Creates the Director session with Director-scoped tools.</summary>
@@ -36,8 +37,8 @@ namespace TerminalQuest.Agents
             ArgumentNullException.ThrowIfNull(store);
 
             var claudeModel = Or(settings.DirectorClaudeModel, settings.ClaudeModel);
-            var lmStudioModel = Or(settings.DirectorLmStudioModel, settings.LmStudioModel);
-            return Create(settings, store, directorPrompt, ToolRole.Director, claudeModel, lmStudioModel);
+            var endpointModel = Or(settings.ActiveDirectorModel, settings.ActiveModel);
+            return Create(settings, store, directorPrompt, ToolRole.Director, claudeModel, endpointModel);
         }
 
         public static IAgentSession Create(AppSettings settings, SaveStore store, string systemPrompt) =>
@@ -54,27 +55,29 @@ namespace TerminalQuest.Agents
             ArgumentNullException.ThrowIfNull(settings);
             ArgumentNullException.ThrowIfNull(store);
 
-            return settings.Provider switch
+            // Unknown values fall through to Claude Code: a session that narrates with the
+            // default is better than one that cannot be constructed at all.
+            if (!AppSettings.IsOpenAiProvider(settings.Provider))
             {
-                AgentProvider.LmStudio => new LmStudioSession(
-                    new LmStudioSessionOptions
-                    {
-                        BaseUrl = AppSettings.NormalizeBaseUrl(Or(settings.LmStudioBaseUrl, AppSettings.DefaultLmStudioBaseUrl)),
-                        Model = Trimmed(lmStudioModel),
-                        SystemPrompt = systemPrompt,
-                        ApiKey = settings.LmStudioApiKey?.Trim() ?? string.Empty,
-                        Role = role,
-                    },
-                    store),
-
-                _ => new ClaudeSession(new ClaudeSessionOptions
+                return new ClaudeSession(new ClaudeSessionOptions
                 {
                     Model = Trimmed(claudeModel),
                     SystemPrompt = systemPrompt,
                     McpConfigJson = QuestServerConfig.Build(store.Directory),
                     AllowedTools = QuestTools.AllowedTools(role),
-                }),
-            };
+                });
+            }
+
+            return new LmStudioSession(
+                new LmStudioSessionOptions
+                {
+                    BaseUrl = settings.ActiveBaseUrl,
+                    Model = Trimmed(lmStudioModel),
+                    SystemPrompt = systemPrompt,
+                    ApiKey = settings.ActiveApiKey,
+                    Role = role,
+                },
+                store);
         }
 
         /// <summary>A blank field means "you decide", which for both providers is null.</summary>

@@ -5,8 +5,8 @@ namespace TerminalQuest.Settings
     /// </summary>
     /// <remarks>
     /// Every provider's fields are kept, not just the selected one's, so switching back and forth
-    /// does not cost the player the model name and address they already typed. A plain class with
-    /// settable properties for the same reason as the save documents: it is what the source
+    /// does not cost the player the model name, address, and key they already typed. A plain class
+    /// with settable properties for the same reason as the save documents: it is what the source
     /// generator serializes without reflection.
     /// </remarks>
     internal sealed class AppSettings
@@ -23,22 +23,17 @@ namespace TerminalQuest.Settings
         /// <summary>The Claude model for the Director. Empty uses whatever is configured for the narrator.</summary>
         public string DirectorClaudeModel { get; set; } = string.Empty;
 
-        /// <summary>The selected preset for OpenAI API (Google, OpenAI, Anthropic, Custom).</summary>
-        public string OpenAiPreset { get; set; } = OpenAiPresets.Custom.Name;
+        /// <summary>Google (Gemini) endpoint, model, and credential.</summary>
+        public OpenAiEndpointConfig Google { get; set; } = OpenAiEndpointConfig.ForPreset(OpenAiPresets.Google);
 
-        /// <summary>Root of the OpenAI-compatible API, endpoint paths excluded.</summary>
-        public string LmStudioBaseUrl { get; set; } = DefaultLmStudioBaseUrl;
+        /// <summary>OpenAI endpoint, model, and credential.</summary>
+        public OpenAiEndpointConfig OpenAI { get; set; } = OpenAiEndpointConfig.ForPreset(OpenAiPresets.OpenAI);
 
-        /// <summary>The model id, exactly as the server lists it. Empty means whatever is loaded.</summary>
-        public string LmStudioModel { get; set; } = string.Empty;
+        /// <summary>Anthropic (Claude via compatibility gateway) endpoint, model, and credential.</summary>
+        public OpenAiEndpointConfig Anthropic { get; set; } = OpenAiEndpointConfig.ForPreset(OpenAiPresets.Anthropic);
 
-        /// <summary>The model id for the Director. Empty uses whatever is configured for the narrator.</summary>
-        public string DirectorLmStudioModel { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Bearer token. Only needed once the endpoint requires authentication (e.g. Google, OpenAI, Anthropic, or configured LM Studio).
-        /// </summary>
-        public string LmStudioApiKey { get; set; } = DefaultLmStudioApiKey;
+        /// <summary>Manually configured endpoint, model, and credential (LM Studio, Ollama, vLLM, Jan, etc.).</summary>
+        public OpenAiEndpointConfig Custom { get; set; } = OpenAiEndpointConfig.ForPreset(OpenAiPresets.Custom);
 
         /// <summary>
         /// The program Ctrl+G hands a text field's contents to. May carry fixed arguments, as in
@@ -76,20 +71,8 @@ namespace TerminalQuest.Settings
         /// </remarks>
         public const string DefaultClaudeModel = "claude-haiku-4-5";
 
-        /// <summary>Where the OpenAI-compatible server listens unless configured otherwise (defaults to LM Studio).</summary>
-        public const string DefaultOpenAiBaseUrl = DefaultLmStudioBaseUrl;
-
-        /// <summary>The default API key placeholder.</summary>
-        public const string DefaultOpenAiApiKey = DefaultLmStudioApiKey;
-
-        /// <summary>Where LM Studio's server listens unless it has been told otherwise.</summary>
-        public const string DefaultLmStudioBaseUrl = "http://localhost:1234/v1";
-
-        /// <summary>
-        /// The placeholder LM Studio's own examples use, which is right for a server that has not
-        /// been told to check. One that has needs the real token pasted in.
-        /// </summary>
-        public const string DefaultLmStudioApiKey = "lm-studio";
+        /// <summary>Where a manual server listens unless configured otherwise (defaults to LM Studio).</summary>
+        public const string DefaultCustomBaseUrl = "http://localhost:1234/v1";
 
         /// <summary>
         /// Present on every Windows install, so Ctrl+G works without anyone having to configure
@@ -97,6 +80,81 @@ namespace TerminalQuest.Settings
         /// game's own screen alone.
         /// </summary>
         public const string DefaultEditorCommand = "notepad.exe";
+
+        /// <summary>Whether the provider is reached over an OpenAI-compatible HTTP API.</summary>
+        public static bool IsOpenAiProvider(AgentProvider provider) => provider switch
+        {
+            AgentProvider.Google => true,
+            AgentProvider.OpenAI => true,
+            AgentProvider.Anthropic => true,
+            AgentProvider.Custom => true,
+            _ => false,
+        };
+
+        /// <summary>
+        /// The provider with the legacy aggregate resolved: old files that said "OpenAI API" name a
+        /// preset beside it, and the preset decides. Without any context it behaves as Custom.
+        /// </summary>
+        public static AgentProvider EffectiveProvider(AgentProvider provider) => provider switch
+        {
+#pragma warning disable CS0612, CS0618 // Intentional: legacy value support.
+            AgentProvider.OpenAiApi => AgentProvider.Custom,
+#pragma warning restore CS0612, CS0618
+            AgentProvider.Google => provider,
+            AgentProvider.OpenAI => provider,
+            AgentProvider.Anthropic => provider,
+            AgentProvider.Custom => provider,
+            _ => AgentProvider.ClaudeCode,
+        };
+
+        /// <summary>The endpoint slot for a provider. Claude Code has no endpoint; it reads Custom.</summary>
+        public OpenAiEndpointConfig EndpointFor(AgentProvider provider) => EffectiveProvider(provider) switch
+        {
+            AgentProvider.Google => Google,
+            AgentProvider.OpenAI => OpenAI,
+            AgentProvider.Anthropic => Anthropic,
+            _ => Custom,
+        };
+
+        /// <summary>Root of the active OpenAI-compatible API, endpoint paths excluded.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ActiveBaseUrl => AppSettings.NormalizeBaseUrl(EndpointFor(Provider).BaseUrl);
+
+        /// <summary>The active model id, exactly as the server lists it.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ActiveModel => EndpointFor(Provider).Model?.Trim() ?? string.Empty;
+
+        /// <summary>The active Director model id, falling back to the narrator's.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ActiveDirectorModel
+        {
+            get
+            {
+                var endpoint = EndpointFor(Provider);
+                return string.IsNullOrWhiteSpace(endpoint.DirectorModel) ? ActiveModel : endpoint.DirectorModel.Trim();
+            }
+        }
+
+        /// <summary>
+        /// The active credential in usable form. A <c>TQ2_*</c> environment variable wins when set
+        /// and is never written anywhere; otherwise the stored key.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ActiveApiKey => GetEnvironmentApiKey(Provider) ?? EndpointFor(Provider).ResolveApiKey();
+
+        /// <summary>A key from the environment when the player keeps it out of the file. Never persisted.</summary>
+        public static string? GetEnvironmentApiKey(AgentProvider provider)
+        {
+            var name = EffectiveProvider(provider) switch
+            {
+                AgentProvider.Google => "TQ2_GOOGLE_API_KEY",
+                AgentProvider.OpenAI => "TQ2_OPENAI_API_KEY",
+                AgentProvider.Anthropic => "TQ2_ANTHROPIC_API_KEY",
+                _ => "TQ2_CUSTOM_API_KEY",
+            };
+
+            return Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : null;
+        }
 
         /// <summary>
         /// Whether a string is somewhere the game could actually send a request.
@@ -119,7 +177,7 @@ namespace TerminalQuest.Settings
         {
             if (string.IsNullOrWhiteSpace(url))
             {
-                return DefaultLmStudioBaseUrl;
+                return DefaultCustomBaseUrl;
             }
 
             var trimmed = url.Trim().TrimEnd('/');
@@ -148,11 +206,10 @@ namespace TerminalQuest.Settings
             Provider = other.Provider;
             ClaudeModel = other.ClaudeModel;
             DirectorClaudeModel = other.DirectorClaudeModel;
-            OpenAiPreset = other.OpenAiPreset;
-            LmStudioBaseUrl = other.LmStudioBaseUrl;
-            LmStudioModel = other.LmStudioModel;
-            DirectorLmStudioModel = other.DirectorLmStudioModel;
-            LmStudioApiKey = other.LmStudioApiKey;
+            Google = other.Google with { };
+            OpenAI = other.OpenAI with { };
+            Anthropic = other.Anthropic with { };
+            Custom = other.Custom with { };
             EditorCommand = other.EditorCommand;
             TranscriptRecallCharacters = other.TranscriptRecallCharacters;
         }
@@ -160,18 +217,76 @@ namespace TerminalQuest.Settings
         /// <summary>Ensures string properties and bounds are valid and never null.</summary>
         public void Normalize()
         {
+#pragma warning disable CS0612, CS0618 // Intentional: legacy value support.
+            if (Provider == AgentProvider.OpenAiApi)
+            {
+                Provider = AgentProvider.Custom;
+            }
+#pragma warning restore CS0612, CS0618
+            if (!Enum.IsDefined(Provider))
+            {
+                Provider = AgentProvider.ClaudeCode;
+            }
+
             ClaudeModel ??= string.Empty;
             DirectorClaudeModel ??= string.Empty;
-            OpenAiPreset = string.IsNullOrWhiteSpace(OpenAiPreset) ? OpenAiPresets.Custom.Name : OpenAiPreset.Trim();
-            LmStudioBaseUrl = NormalizeBaseUrl(LmStudioBaseUrl);
-            LmStudioModel ??= string.Empty;
-            DirectorLmStudioModel ??= string.Empty;
-            LmStudioApiKey = LmStudioApiKey?.Trim() ?? string.Empty;
+            Google ??= OpenAiEndpointConfig.ForPreset(OpenAiPresets.Google);
+            OpenAI ??= OpenAiEndpointConfig.ForPreset(OpenAiPresets.OpenAI);
+            Anthropic ??= OpenAiEndpointConfig.ForPreset(OpenAiPresets.Anthropic);
+            Custom ??= OpenAiEndpointConfig.ForPreset(OpenAiPresets.Custom);
+            Google.Normalize();
+            OpenAI.Normalize();
+            Anthropic.Normalize();
+            Custom.Normalize();
             EditorCommand = string.IsNullOrWhiteSpace(EditorCommand) ? DefaultEditorCommand : EditorCommand.Trim();
             if (TranscriptRecallCharacters < Saves.TranscriptRecall.MinCharacters || TranscriptRecallCharacters > Saves.TranscriptRecall.MaxCharacters)
             {
                 TranscriptRecallCharacters = Saves.TranscriptRecall.DefaultCharacters;
             }
+        }
+
+        /// <summary>
+        /// Migrates a file written before providers were split: the old preset name decides the
+        /// provider, and the old shared address, model, and key move into that provider's slot.
+        /// New-shape values always win; this only fills what the new shape left default.
+        /// </summary>
+        internal void MigrateLegacy(LegacyAppSettings legacy)
+        {
+            if (legacy is null)
+            {
+                return;
+            }
+
+            var target = OpenAiPresets.ProviderForPreset(legacy.OpenAiPreset);
+            var slot = EndpointFor(target);
+            var pristine = OpenAiEndpointConfig.ForPreset(OpenAiPresets.ForProvider(target));
+
+            if (legacy.LmStudioBaseUrl is { Length: > 0 } url && slot.BaseUrl == pristine.BaseUrl)
+            {
+                slot.BaseUrl = NormalizeBaseUrl(url);
+            }
+
+            if (legacy.LmStudioModel is not null && slot.Model == pristine.Model)
+            {
+                slot.Model = legacy.LmStudioModel.Trim();
+            }
+
+            if (legacy.DirectorLmStudioModel is not null && string.IsNullOrEmpty(slot.DirectorModel))
+            {
+                slot.DirectorModel = legacy.DirectorLmStudioModel.Trim();
+            }
+
+            if (legacy.LmStudioApiKey is { Length: > 0 } key && string.IsNullOrEmpty(slot.ApiKey))
+            {
+                slot.SetApiKey(key);
+            }
+
+#pragma warning disable CS0612, CS0618 // Intentional: legacy value support.
+            if (Provider == AgentProvider.OpenAiApi)
+            {
+                Provider = target;
+            }
+#pragma warning restore CS0612, CS0618
         }
     }
 }

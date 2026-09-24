@@ -140,9 +140,12 @@ namespace TerminalQuest.Tests.Agents
             var handler = new MockHttpMessageHandler(mockResponseJson);
             var settings = new AppSettings
             {
-                Provider = AgentProvider.OpenAiApi,
-                LmStudioBaseUrl = "http://localhost:1234/v1",
-                LmStudioModel = "test-model",
+                Provider = AgentProvider.Custom,
+                Custom = new OpenAiEndpointConfig
+                {
+                    BaseUrl = "http://localhost:1234/v1",
+                    Model = "test-model",
+                },
             };
 
             var items = await LlmItemGenerator.GenerateAsync(

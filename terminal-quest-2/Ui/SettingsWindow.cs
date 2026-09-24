@@ -7,6 +7,7 @@ using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 using TerminalQuest.Agents;
+using TerminalQuest.Agents.Anthropic;
 using TerminalQuest.Agents.LmStudio;
 using TerminalQuest.Saves;
 using TerminalQuest.Settings;
@@ -21,8 +22,6 @@ namespace TerminalQuest.Ui
     internal enum SettingsSection
     {
         Provider,
-        ClaudeCode,
-        OpenAiApi,
         Preferences,
     }
 
@@ -37,12 +36,22 @@ namespace TerminalQuest.Ui
     {
         private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
 
-        private static readonly Attribute PickedAndSelectedAttr = new(new Color("#1b5e20"), Color.White);
-        private static readonly Attribute PickedAttr = new(new Color("#8fb26a"), Color.None);
-        private static readonly Attribute SelectedAttr = new(Color.Black, Color.White);
-        private static readonly Attribute NormalAttr = new(new Color("#d7d2c4"), Color.None);
+        private static readonly string[] SectionNames = ["Provider", "Preferences"];
 
-        private static readonly string[] SectionNames = ["Provider", "Claude Code", "OpenAI API", "Preferences"];
+        /// <summary>The providers in provider-list order.</summary>
+        private static readonly AgentProvider[] ProviderOrder =
+        [
+            AgentProvider.ClaudeCode,
+            AgentProvider.Google,
+            AgentProvider.OpenAI,
+            AgentProvider.Anthropic,
+            AgentProvider.Custom,
+        ];
+
+        /// <summary>Fixed heights: inside a scrolling view, Fill would resolve to the viewport
+        /// and there would be nothing to scroll to.</summary>
+        private const int ClaudeBoxHeight = 5;
+        private const int EndpointBoxHeight = 14;
 
         private readonly IApplication _app;
         private readonly AppSettings _original;
@@ -59,6 +68,39 @@ namespace TerminalQuest.Ui
 
             protected override bool OnKeyDown(Key key) =>
                 (BeforeKey?.Invoke(key) ?? false) || base.OnKeyDown(key);
+        }
+
+        /// <summary>
+        /// A dropdown that offers keys to the window before its own handling, so pane
+        /// switching (Tab) and field movement (Left/Right) never get trapped inside.
+        /// Up/Down, Space, F4 and Enter stay native: browsing, opening and picking.
+        /// </summary>
+        private sealed class NavDropDownList : DropDownList
+        {
+            public Func<Key, bool>? BeforeKey { get; set; }
+
+            /// <summary>Whether the dropdown list is currently open above the form.</summary>
+            public Func<bool>? IsPopoverOpen { get; set; }
+
+            /// <summary>
+            /// Whether Enter should accept instead of opening: typed text or a browsed row
+            /// the draft does not hold yet. A clean box opens its list on Enter.
+            /// </summary>
+            public Func<bool>? HasUncommitted { get; set; }
+
+            protected override bool OnKeyDown(Key key)
+            {
+                // Enter begins selecting: open the list when there is nothing new to accept.
+                // F4 toggles natively (Space might type in an editable box); the window's
+                // Esc guard guarantees the opened list can always be cancelled.
+                if (key == Key.Enter && IsPopoverOpen?.Invoke() == false && HasUncommitted?.Invoke() != true)
+                {
+                    base.OnKeyDown(Key.F4);
+                    return true;
+                }
+
+                return (BeforeKey?.Invoke(key) ?? false) || base.OnKeyDown(key);
+            }
         }
 
         /// <summary>
@@ -84,33 +126,52 @@ namespace TerminalQuest.Ui
         private readonly FrameView _actionsFrame;
         private readonly Label _hintLabel;
 
-        // Section forms (only one visible at a time)
+        // Section forms (only one visible at a time). The provider section carries two
+        // panels at once: the picker on top, the picked provider's settings beneath it.
         private readonly View _providerSection;
-        private readonly View _claudeSection;
-        private readonly View _openAiSection;
         private readonly View _prefsSection;
         private SettingsSection _activeSection = SettingsSection.Provider;
         private View? _lastFormFocus;
 
-        // Provider section controls
-        private NavListView _providerList = null!;
+        // Provider section controls. The picker is a collapsed dropdown (one row) so
+        // the provider list can grow without pushing the settings off the screen.
+        private NavDropDownList _providerCombo = null!;
+        private readonly ObservableCollection<string> _providerItems = [];
 
-        // Claude section controls
-        private NavListView _claudeModelList = null!;
-        private NavTextField _claudeCustomModel = null!;
+        // Provider settings: one box per provider kind, toggled by the picked provider.
+        // Not readonly: built inside BuildProviderSection rather than the constructor body.
+        private View _claudeBox = null!;
+        private View _endpointBox = null!;
+        private View _providerScroll = null!;
 
-        // OpenAI API section controls
-        private NavTextField _lmStudioBaseUrl = null!;
-        private NavListView _presetList = null!;
-        private Label _presetDetails = null!;
-        private NavTextField _lmStudioApiKey = null!;
-        private NavTextField _lmStudioModel = null!;
-        private NavListView _lmStudioModelsList = null!;
-        private Button _probeButton = null!;
+        // Claude settings controls: one editable dropdown merging the preset list and a
+        // custom id. The parallel entries map each row back to the id stored in the draft.
+        private NavDropDownList _claudeCombo = null!;
+        private readonly ObservableCollection<string> _claudeItems = [];
+        private List<ClaudeModels.Entry> _claudeEntries = [];
+        private bool _claudeRefreshed;
+        private bool _isLoadingClaude;
+        private bool _claudeTextTyped;
+        private string? _pendingClaudeId;
+
+        // Endpoint settings controls (one set of fields, rebound to each provider's slot).
+        // The model control is a single editable dropdown: typing sets the id, opening it
+        // probes the server and offers what answers.
+        private Label _builtinUrlLabel = null!;
+        private NavTextField _endpointBaseUrl = null!;
+        private Label _endpointMatchHint = null!;
+        private Label _endpointVendorHint = null!;
+        private Label _apiKeyLabel = null!;
+        private NavTextField _endpointApiKey = null!;
+        private NavDropDownList _endpointModelCombo = null!;
+        private readonly ObservableCollection<string> _endpointModelItems = [];
+        private string _endpointAcceptedText = string.Empty;
         private Label _probeStatus = null!;
         private readonly List<string> _probedModels = [];
+        private string? _lastProbeKey;
+        private bool _isProbing;
         private CancellationTokenSource? _probe;
-        private bool _isApplyingPreset;
+        private bool _isLoadingEndpoint;
 
         // Preferences section controls
         private NavTextField _recallChars = null!;
@@ -148,7 +209,7 @@ namespace TerminalQuest.Ui
             SetScheme(Theme.CreateScheme());
 
             // Header: always-visible summary of the pending configuration. The active
-            // provider stands out bright; the standby one recedes into help grey.
+            // provider stands out bright; the endpoint detail beneath recedes into help grey.
             _summaryActiveLabel = new Label
             {
                 X = 1,
@@ -208,10 +269,8 @@ namespace TerminalQuest.Ui
             _formFrame.SetScheme(Theme.CreateScheme());
 
             _providerSection = BuildProviderSection();
-            _claudeSection = BuildClaudeSection();
-            _openAiSection = BuildOpenAiSection();
             _prefsSection = BuildPrefsSection();
-            _formFrame.Add(_providerSection, _claudeSection, _openAiSection, _prefsSection);
+            _formFrame.Add(_providerSection, _prefsSection);
 
             // Feedback line: errors and confirmations only, so they never wipe the hints.
             _messageLabel = new Label
@@ -268,13 +327,18 @@ namespace TerminalQuest.Ui
             _sectionsList.HasFocusChanged += (_, _) => UpdatePaneChrome();
             foreach (var control in AllFormControls())
             {
-                control.HasFocusChanged += (_, _) => UpdatePaneChrome();
+                control.HasFocusChanged += (_, _) =>
+                {
+                    UpdatePaneChrome();
+                    EnsureControlVisible(control);
+                };
             }
             foreach (var button in _actionButtons)
             {
                 button.HasFocusChanged += (_, _) => UpdatePaneChrome();
             }
 
+            RefreshProviderSettings();
             ShowSection(SettingsSection.Provider);
             UpdateSummary();
 
@@ -291,21 +355,40 @@ namespace TerminalQuest.Ui
 
         public ListView SectionsList => _sectionsList;
 
-        public ListView ProviderList => _providerList;
+        public DropDownList ProviderCombo => _providerCombo;
 
-        public ListView ClaudeModelList => _claudeModelList;
+        internal IReadOnlyList<string> ProviderNames => _providerItems;
 
-        public ListView PresetList => _presetList;
+        public DropDownList ClaudeModelCombo => _claudeCombo;
 
-        public ListView ProbedModelsList => _lmStudioModelsList;
+        internal IReadOnlyList<string> ClaudeLabels => _claudeItems;
 
-        public TextField ClaudeCustomModelField => _claudeCustomModel;
+        /// <summary>
+        /// The endpoint model field: an editable dropdown whose list is the last probe.
+        /// </summary>
+        public DropDownList ModelField => _endpointModelCombo;
 
-        public TextField BaseUrlField => _lmStudioBaseUrl;
+        /// <summary>The ids the last probe returned, in the order they are offered.</summary>
+        public IReadOnlyList<string> ProbedModels => _probedModels;
+
+        public TextField BaseUrlField => _endpointBaseUrl;
+
+        public TextField ApiKeyField => _endpointApiKey;
+
+        public Label BuiltinUrlLabel => _builtinUrlLabel;
 
         public TextField RecallField => _recallChars;
 
         public SettingsSection ActiveSection => _activeSection;
+
+        /// <summary>Whether the Claude model controls are the ones showing in Provider Settings.</summary>
+        public bool IsClaudeSettingsVisible => _claudeBox.Visible;
+
+        /// <summary>Whether the endpoint controls are the ones showing in Provider Settings.</summary>
+        public bool IsEndpointSettingsVisible => _endpointBox.Visible;
+
+        /// <summary>The continuous scrolling provider page: picker above, settings below.</summary>
+        public View ProviderScroll => _providerScroll;
 
         public event Action? Done;
 
@@ -316,6 +399,15 @@ namespace TerminalQuest.Ui
             _sectionsList.SelectedItem = (int)section;
             ShowSection(section);
         }
+
+        private static string ProviderDisplayName(AgentProvider provider) => provider switch
+        {
+            AgentProvider.ClaudeCode => "Claude Code (local CLI - Anthropic)",
+            AgentProvider.Google => "Google (Gemini - OpenAI-compatible API)",
+            AgentProvider.OpenAI => "OpenAI (GPT - API)",
+            AgentProvider.Anthropic => "Anthropic (Claude - OpenAI-compatible API)",
+            _ => "Custom (manual endpoint - OpenAI-compatible API only)",
+        };
 
         private View BuildProviderSection()
         {
@@ -332,7 +424,7 @@ namespace TerminalQuest.Ui
 
             var providerLabel = new Label
             {
-                Text = "Active Narrative Provider (Up/Down: highlight, Enter: pick):",
+                Text = "Narrative Provider (Up/Down: browse, Enter: open/pick, Esc: close):",
                 X = 1,
                 Y = 0,
                 Width = Dim.Fill() - 2,
@@ -340,73 +432,218 @@ namespace TerminalQuest.Ui
             };
             providerLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            _providerList = new NavListView
+            // A collapsed dropdown: one row however long the provider list grows. Browsing
+            // (ValueChanged) only moves the cursor; Enter (Accepting) picks into the draft.
+            _providerCombo = new NavDropDownList
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill() - 2,
-                Height = 2,
+                Height = 1,
+                ReadOnly = true,
             };
-            _providerList.SetScheme(Theme.CreateScheme());
-            _providerList.SetSource(new ObservableCollection<string>(["Claude Code (Anthropic CLI)", "OpenAI API (Google, OpenAI, Anthropic, LM Studio, etc.)"]));
-            _providerList.SelectedItem = _draft.Provider == AgentProvider.ClaudeCode ? 0 : 1;
-            _providerList.BeforeKey = FormListKey;
-
-            // Highlighting only moves the cursor; Enter picks into the draft.
-            _providerList.RowRender += (_, e) =>
+            _providerCombo.SetScheme(Theme.CreateScheme());
+            foreach (var name in ProviderOrder.Select(ProviderDisplayName))
             {
-                var isPicked = (e.Row == 0 && _draft.Provider == AgentProvider.ClaudeCode)
-                            || (e.Row == 1 && _draft.Provider == AgentProvider.OpenAiApi);
-                var isSelected = e.Row == _providerList.SelectedItem;
-
-                e.RowAttribute = (isSelected, isPicked) switch
+                _providerItems.Add(name);
+            }
+            _providerCombo.Source = new ListWrapper<string>(_providerItems);
+            _providerCombo.BeforeKey = FormListKey;
+            _providerCombo.IsPopoverOpen = IsSelecting;
+            // Dirty means browsed-but-unpicked: Enter picks it. Clean means Enter opens.
+            _providerCombo.HasUncommitted = () =>
+                _providerItems.IndexOf(_providerCombo.Value ?? string.Empty)
+                    != Array.IndexOf(ProviderOrder, AppSettings.EffectiveProvider(_draft.Provider));
+            SyncProviderComboToDraft();
+            _providerCombo.ValueChanged += (_, _) => _providerCombo.SetNeedsDraw();
+            _providerCombo.Accepting += (_, _) => PickProviderFromCombo();
+            // A pick made inside the open list commits the same way; it never advances.
+            _providerCombo.Accepted += (_, _) => PickProviderFromCombo();
+            _providerCombo.HasFocusChanged += (_, _) =>
+            {
+                // Abandoning a browsed-but-unpicked row restores the picked provider's name,
+                // so the box never disagrees with the panels beneath it.
+                if (!_providerCombo.HasFocus)
                 {
-                    (true, true) => PickedAndSelectedAttr,
-                    (true, false) => SelectedAttr,
-                    (false, true) => PickedAttr,
-                    _ => NormalAttr,
-                };
-            };
-            _providerList.ValueChanged += (_, _) => _providerList.SetNeedsDraw();
-            _providerList.Accepting += (_, _) =>
-            {
-                var selected = _providerList.SelectedItem ?? 0;
-                _draft.Provider = selected == 0 ? AgentProvider.ClaudeCode : AgentProvider.OpenAiApi;
-                _providerList.SetNeedsDraw();
-                UpdateSummary();
-                Say(_messageLabel, $"Active provider set to: {(_draft.Provider == AgentProvider.ClaudeCode ? "Claude Code" : "OpenAI API")}", TextRole.Place);
+                    SyncProviderComboToDraft();
+                }
             };
 
-            var providerDesc = new Label
+            // One continuous scrollable page: the picker on top, the picked provider's
+            // settings below it, with a blank row and a header between them. No sub-panels:
+            // everything scrolls together when the window is too short to fit it all.
+            var settingsHeader = new Label
             {
+                Text = "Provider Settings",
                 X = 1,
-                Y = 4,
+                Y = 3,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
-                Text = "• Claude Code runs the 'claude' CLI locally on your PATH.\n• OpenAI API connects over HTTP to Google AI Studio, OpenAI, Anthropic, LM Studio, Ollama, etc.",
             };
-            providerDesc.SetScheme(Theme.LabelScheme(TextRole.System));
+            settingsHeader.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            section.Add(providerLabel, _providerList, providerDesc);
+            _providerScroll = MakeScrollable();
+            _claudeBox = BuildClaudeBox();
+            _endpointBox = BuildEndpointBox();
+            _providerScroll.Add(providerLabel, _providerCombo, settingsHeader, _claudeBox, _endpointBox);
+            UpdateProviderScrollHeight();
+
+            section.Add(_providerScroll);
             return section;
         }
 
-        private View BuildClaudeSection()
+        /// <summary>
+        /// Whether a dropdown list is currently open above the form. Defensive about a
+        /// non-running host: headless tests never open popovers and read this as closed.
+        /// </summary>
+        private bool IsSelecting() =>
+            _app.Popovers is { } popovers && popovers.GetActivePopover() is not null;
+
+        /// <summary>
+        /// Shows the picked provider's name in the dropdown without touching the draft.
+        /// Browsing is display-only; only <see cref="PickProvider"/> writes the draft.
+        /// </summary>
+        private void SyncProviderComboToDraft()
         {
-            var section = new View
+            var name = ProviderDisplayName(AppSettings.EffectiveProvider(_draft.Provider));
+            if (!string.Equals(_providerCombo.Value, name, StringComparison.Ordinal))
+            {
+                _providerCombo.Value = name;
+            }
+        }
+
+        /// <summary>Maps the dropdown's picked display name back to its provider.</summary>
+        private void PickProviderFromCombo() =>
+            PickProvider(_providerItems.IndexOf(_providerCombo.Value ?? string.Empty));
+
+        /// <summary>
+        /// Picks the highlighted provider into the draft on Enter, then shows its settings.
+        /// </summary>
+        private void PickProvider(int selected)
+        {
+            if (selected < 0 || selected >= ProviderOrder.Length)
+            {
+                return;
+            }
+
+            // The fields belong to the old provider until now: flush them into its slot
+            // before the rebind, or a half-typed URL would follow the player across.
+            FlushEndpointControls();
+            _draft.Provider = ProviderOrder[selected];
+            SyncProviderComboToDraft();
+            RefreshProviderSettings();
+            UpdateSummary();
+            var pickedName = _draft.Provider == AgentProvider.ClaudeCode
+                ? "Claude Code"
+                : OpenAiPresets.ForProvider(AppSettings.EffectiveProvider(_draft.Provider)).Name;
+            Say(_messageLabel, $"Active provider set to: {pickedName}", TextRole.Place);
+        }
+
+        /// <summary>
+        /// A plain view whose content scrolls vertically once it outgrows the space.
+        /// Focusable so the fields inside can take focus: a non-focusable container
+        /// swallows SetFocus for its whole subtree. Pane movement stays key-driven,
+        /// so this never changes which pane Tab walks.
+        /// </summary>
+        private static View MakeScrollable()
+        {
+            var scroll = new View
             {
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
                 Height = Dim.Fill(),
                 CanFocus = true,
+            };
+            scroll.SetScheme(Theme.CreateScheme());
+
+            // Both are needed: the flag draws the bar, Auto shows it only on overflow,
+            // and the content height below is what makes overflow detectable at all.
+            // Without SetContentHeight the viewport always "fits" and nothing scrolls.
+            scroll.ViewportSettings |= ViewportSettingsFlags.HasVerticalScrollBar;
+            scroll.VerticalScrollBar.VisibilityMode = ScrollBarVisibilityMode.Auto;
+            return scroll;
+        }
+
+        /// <summary>
+        /// Tells the provider page how tall its content is, so the scrollbar appears exactly
+        /// when the window is too short. Called whenever the visible box changes: the boxes
+        /// have fixed heights, so this is arithmetic, not layout.
+        /// </summary>
+        private void UpdateProviderScrollHeight()
+        {
+            if (_providerScroll is null || _claudeBox is null || _endpointBox is null)
+            {
+                return;
+            }
+
+            var boxHeight = _claudeBox.Visible ? _claudeBox.Frame.Height : _endpointBox.Frame.Height;
+            if (boxHeight <= 0)
+            {
+                boxHeight = _claudeBox.Visible ? ClaudeBoxHeight : EndpointBoxHeight;
+            }
+
+            // Boxes sit at Y=4 inside the scroll view; one spare row beneath.
+            _providerScroll.SetContentHeight(4 + boxHeight + 1);
+        }
+
+        /// <summary>
+        /// Scrolls a panel just far enough to show the newly focused control. Wired to
+        /// focus changes because panel content is taller than the panel.
+        /// </summary>
+        private static void EnsureVisible(View scroll, View control)
+        {
+            var y = 0;
+            for (var current = control; current is not null && current != scroll; current = current.SuperView)
+            {
+                y += current.Frame.Y;
+            }
+
+            var top = scroll.Viewport.Y;
+            var visibleHeight = Math.Max(1, scroll.Viewport.Height);
+            if (y < top)
+            {
+                scroll.ScrollVertical(y - top);
+            }
+            else if (y + 1 > top + visibleHeight)
+            {
+                scroll.ScrollVertical(y + 1 - (top + visibleHeight));
+            }
+        }
+
+        private void EnsureControlVisible(View control)
+        {
+            if (!control.HasFocus)
+            {
+                return;
+            }
+
+            for (var current = (View?)control; current is not null; current = current.SuperView)
+            {
+                if (current == _providerScroll)
+                {
+                    EnsureVisible(current, control);
+                    return;
+                }
+            }
+        }
+
+        private View BuildClaudeBox()
+        {
+            var box = new View
+            {
+                X = 1,
+                Y = 4,
+                Width = Dim.Fill() - 2,
+                Height = ClaudeBoxHeight,
+                CanFocus = true,
                 Visible = false,
             };
-            section.SetScheme(Theme.CreateScheme());
+            box.SetScheme(Theme.CreateScheme());
 
             var claudeModelLabel = new Label
             {
-                Text = "Preset Claude Models (Up/Down: highlight, Enter: pick):",
+                Text = "Preset Claude Models (Up/Down: browse, Enter: open/pick, Esc: close):",
                 X = 1,
                 Y = 0,
                 Width = Dim.Fill() - 2,
@@ -414,342 +651,526 @@ namespace TerminalQuest.Ui
             };
             claudeModelLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            var modelListLabels = ClaudeModels.All
-                .Select(m => string.IsNullOrEmpty(m.Id) ? $"{m.Name} ({m.Detail})" : $"{m.Name} - {m.Id} ({m.Detail})")
-                .ToList();
-
-            _claudeModelList = new NavListView
+            // One editable dropdown merges the preset list and the custom id: picking a row
+            // offers its id, typing sets one freehand. Live ids merge in on first focus.
+            _claudeEntries = [.. ClaudeModels.All];
+            _claudeCombo = new NavDropDownList
             {
                 X = 1,
                 Y = 1,
                 Width = Dim.Fill() - 2,
-                Height = ClaudeModels.All.Length,
+                Height = 1,
             };
-            _claudeModelList.SetScheme(Theme.CreateScheme());
-            _claudeModelList.SetSource(new ObservableCollection<string>(modelListLabels));
-            _claudeModelList.BeforeKey = FormListKey;
+            _claudeCombo.SetScheme(Theme.CreateScheme());
+            _claudeCombo.Source = new ListWrapper<string>(_claudeItems);
+            RefreshClaudeItems();
+            _claudeCombo.BeforeKey = FormListKey;
+            _claudeCombo.IsPopoverOpen = IsSelecting;
+            // Dirty means typed text or a browsed row the draft does not hold yet.
+            _claudeCombo.HasUncommitted = () =>
+                _claudeTextTyped
+                || (_pendingClaudeId is { } pending
+                    && !string.Equals(pending, _draft.ClaudeModel?.Trim() ?? string.Empty, StringComparison.OrdinalIgnoreCase));
 
-            var currentModelIndex = ClaudeModels.IndexOf(_draft.ClaudeModel);
-            if (currentModelIndex >= 0)
+            _isLoadingClaude = true;
+            try
             {
-                _claudeModelList.SelectedItem = currentModelIndex;
+                // Show the stored id as its row label where known, raw otherwise.
+                _claudeCombo.Text = ClaudeDisplayForId(_draft.ClaudeModel);
+                SyncClaudeSelection();
+            }
+            finally
+            {
+                _isLoadingClaude = false;
             }
 
-            var customModelLabel = new Label
+            // Value and Text are coupled: picking a row shows its label, typing shows free
+            // text. Neither writes the draft here. A row pick arms the pending id for Enter;
+            // free text updates the draft live; selection echoes are recognised and ignored.
+            _claudeCombo.TextChanged += (_, _) =>
             {
-                Text = "Or custom model identifier:",
-                X = 1,
-                Y = 7,
-                Width = Dim.Fill() - 2,
-                CanFocus = false,
-            };
-            customModelLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
-
-            _claudeCustomModel = new NavTextField
-            {
-                X = 1,
-                Y = 8,
-                Width = Dim.Fill() - 2,
-                Text = _draft.ClaudeModel,
-            };
-            _claudeCustomModel.SetScheme(Theme.CreateScheme());
-            _claudeCustomModel.BeforeKey = FormFieldKey;
-
-            // Typing is explicit, so it updates the draft; the list highlight follows.
-            _claudeCustomModel.TextChanged += (_, _) =>
-            {
-                _draft.ClaudeModel = _claudeCustomModel.Text?.Trim() ?? string.Empty;
-                var idx = ClaudeModels.IndexOf(_draft.ClaudeModel);
-                if (idx >= 0)
+                if (_isLoadingClaude)
                 {
-                    _claudeModelList.SelectedItem = idx;
+                    return;
                 }
-                _claudeModelList.SetNeedsDraw();
-                UpdateSummary();
-            };
-            _claudeCustomModel.Accepting += (_, _) => MoveFormFocus(1);
 
-            _claudeModelList.RowRender += (_, e) =>
-            {
-                var isPicked = e.Row >= 0 && e.Row < ClaudeModels.All.Length
-                    && string.Equals(ClaudeModels.All[e.Row].Id, _draft.ClaudeModel, StringComparison.OrdinalIgnoreCase);
-                var isSelected = e.Row == _claudeModelList.SelectedItem;
-
-                e.RowAttribute = (isSelected, isPicked) switch
+                var typed = _claudeCombo.Text?.Trim() ?? string.Empty;
+                var known = ClaudeEntryIndexForText(typed);
+                if (known >= 0)
                 {
-                    (true, true) => PickedAndSelectedAttr,
-                    (true, false) => SelectedAttr,
-                    (false, true) => PickedAttr,
-                    _ => NormalAttr,
-                };
-            };
-            _claudeModelList.ValueChanged += (_, _) => _claudeModelList.SetNeedsDraw();
-            _claudeModelList.Accepting += (_, _) =>
-            {
-                var selected = _claudeModelList.SelectedItem ?? -1;
-                if (selected >= 0 && selected < ClaudeModels.All.Length)
+                    _pendingClaudeId = _claudeEntries[known].Id;
+                    _claudeTextTyped = false;
+                }
+                else
                 {
-                    _draft.ClaudeModel = ClaudeModels.All[selected].Id;
-                    _claudeCustomModel.Text = _draft.ClaudeModel;
-                    _claudeModelList.SetNeedsDraw();
+                    _draft.ClaudeModel = typed;
+                    _pendingClaudeId = null;
+                    _claudeTextTyped = true;
                     UpdateSummary();
-                    Say(_messageLabel, $"Picked model: {ClaudeModels.All[selected].Name}", TextRole.Place);
-                    MoveFormFocus(1);
+                }
+            };
+            _claudeCombo.ValueChanged += (_, _) =>
+            {
+                if (_isLoadingClaude)
+                {
+                    return;
+                }
+
+                var selected = ClaudeEntryIndexForValue(_claudeCombo.Value);
+                _pendingClaudeId = selected >= 0 ? _claudeEntries[selected].Id : null;
+                _claudeTextTyped = false;
+                _claudeCombo.SetNeedsDraw();
+            };
+            _claudeCombo.Accepting += (_, _) => CommitClaudePick(advance: true);
+            // A pick made inside the open list commits the same way but stays put: the
+            // list just closed onto this box, so advancing would yank focus away.
+            _claudeCombo.Accepted += (_, _) => CommitClaudePick(advance: false);
+            _claudeCombo.HasFocusChanged += (_, _) =>
+            {
+                if (_claudeCombo.HasFocus)
+                {
+                    _ = EnsureClaudeFreshAsync();
                 }
             };
 
             var claudeNote = new Label
             {
                 X = 1,
-                Y = 10,
+                Y = 3,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
                 Text = "Note: Claude Code requires the 'claude' CLI command to be installed and authenticated on your PATH.",
             };
             claudeNote.SetScheme(Theme.LabelScheme(TextRole.System));
 
-            section.Add(claudeModelLabel, _claudeModelList, customModelLabel, _claudeCustomModel, claudeNote);
-            return section;
+            box.Add(claudeModelLabel, _claudeCombo, claudeNote);
+            return box;
         }
 
-        private View BuildOpenAiSection()
+        private static string ClaudeLabel(ClaudeModels.Entry entry) =>
+            string.IsNullOrEmpty(entry.Id) ? $"{entry.Name} ({entry.Detail})" : $"{entry.Name} - {entry.Id} ({entry.Detail})";
+
+        /// <summary>The row label for a stored id, or the id itself when no row owns it.</summary>
+        private string ClaudeDisplayForId(string? id)
         {
-            var section = new View
+            var wanted = id?.Trim() ?? string.Empty;
+            foreach (var entry in _claudeEntries)
             {
-                X = 0,
-                Y = 0,
-                Width = Dim.Fill(),
-                Height = Dim.Fill(),
+                if (string.Equals(entry.Id, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ClaudeLabel(entry);
+                }
+            }
+
+            return wanted;
+        }
+
+        /// <summary>Rebuilds the Claude dropdown rows from the current entries.</summary>
+        private void RefreshClaudeItems()
+        {
+            _claudeItems.Clear();
+            foreach (var entry in _claudeEntries)
+            {
+                _claudeItems.Add(ClaudeLabel(entry));
+            }
+        }
+
+        /// <summary>Moves the row highlight to the stored id where it is a known row.</summary>
+        private void SyncClaudeSelection()
+        {
+            var wanted = _draft.ClaudeModel?.Trim() ?? string.Empty;
+            for (var i = 0; i < _claudeEntries.Count; i++)
+            {
+                if (string.Equals(_claudeEntries[i].Id, wanted, StringComparison.OrdinalIgnoreCase))
+                {
+                    var label = ClaudeLabel(_claudeEntries[i]);
+                    if (!string.Equals(_claudeCombo.Value, label, StringComparison.Ordinal))
+                    {
+                        _claudeCombo.Value = label;
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Maps the dropdown's value back to an entry: the value may be a row label (from a
+        /// pick) or a raw id (restored text). -1 when it matches neither.
+        /// </summary>
+        private int ClaudeEntryIndexForValue(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                for (var i = 0; i < _claudeEntries.Count; i++)
+                {
+                    if (_claudeEntries[i].Id.Length == 0)
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
+
+            for (var i = 0; i < _claudeEntries.Count; i++)
+            {
+                if (string.Equals(ClaudeLabel(_claudeEntries[i]), value, StringComparison.Ordinal)
+                    || string.Equals(_claudeEntries[i].Id, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>
+        /// Maps dropdown text back to an entry: the text may be a row label (from a pick)
+        /// or a raw id (restored or typed text). -1 when it matches neither.
+        /// </summary>
+        private int ClaudeEntryIndexForText(string? text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                for (var i = 0; i < _claudeEntries.Count; i++)
+                {
+                    if (_claudeEntries[i].Id.Length == 0)
+                    {
+                        return i;
+                    }
+                }
+
+                return -1;
+            }
+
+            for (var i = 0; i < _claudeEntries.Count; i++)
+            {
+                if (string.Equals(_claudeEntries[i].Id, text, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ClaudeLabel(_claudeEntries[i]), text, StringComparison.Ordinal))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        /// <summary>Commits the box on Enter: the picked row's id, or the typed text
+        /// resolved to a known row where it names one, or raw for a custom id. The box keeps
+        /// showing the row label so it agrees with the list.</summary>
+        private void CommitClaudePick(bool advance)
+        {
+            var typed = _claudeCombo.Text?.Trim() ?? string.Empty;
+            string id;
+            if (!_claudeTextTyped && _pendingClaudeId is { } pending)
+            {
+                id = pending;
+            }
+            else if (ClaudeEntryIndexForText(typed) is { } known && known >= 0)
+            {
+                id = _claudeEntries[known].Id;
+            }
+            else
+            {
+                id = typed;
+            }
+
+            _pendingClaudeId = null;
+            _claudeTextTyped = false;
+            _draft.ClaudeModel = id;
+            _isLoadingClaude = true;
+            try
+            {
+                _claudeCombo.Text = ClaudeDisplayForId(id);
+                SyncClaudeSelection();
+            }
+            finally
+            {
+                _isLoadingClaude = false;
+            }
+
+            UpdateSummary();
+            Say(_messageLabel, $"Picked model: {(string.IsNullOrEmpty(id) ? "CLI Default" : ClaudeModels.Describe(id))}", TextRole.Place);
+            if (advance)
+            {
+                MoveFormFocus(1);
+            }
+        }
+
+        /// <summary>
+        /// Merges ids newer than this build into the Claude dropdown, once per window. Runs
+        /// only when a key is available and never blanks the curated list on failure.
+        /// </summary>
+        private async Task EnsureClaudeFreshAsync()
+        {
+            if (_claudeRefreshed)
+            {
+                return;
+            }
+
+            _claudeRefreshed = true;
+
+            var apiKey = AppSettings.GetEnvironmentApiKey(AgentProvider.Anthropic)
+                ?? _draft.EndpointFor(AgentProvider.Anthropic).ResolveApiKey();
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                return;
+            }
+
+            IReadOnlyList<string> live;
+            try
+            {
+                live = await AnthropicModels.ListAsync(apiKey, ProbeTimeout).ConfigureAwait(false);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (live.Count == 0)
+            {
+                return;
+            }
+
+            _app.Invoke(() =>
+            {
+                var currentId = _pendingClaudeId
+                    ?? (ClaudeEntryIndexForText(_claudeCombo.Text?.Trim() ?? string.Empty) is { } known && known >= 0
+                        ? _claudeEntries[known].Id
+                        : _claudeCombo.Text?.Trim() ?? string.Empty);
+                _claudeEntries = [.. ClaudeModels.WithLiveIds(live)];
+                RefreshClaudeItems();
+                _isLoadingClaude = true;
+                try
+                {
+                    _claudeCombo.Text = ClaudeDisplayForId(currentId);
+                    _pendingClaudeId = null;
+                    _claudeTextTyped = false;
+                    SyncClaudeSelection();
+                }
+                finally
+                {
+                    _isLoadingClaude = false;
+                }
+            });
+        }
+
+        private View BuildEndpointBox()
+        {
+            var box = new View
+            {
+                X = 1,
+                Y = 4,
+                Width = Dim.Fill() - 2,
+                Height = EndpointBoxHeight,
                 CanFocus = true,
                 Visible = false,
             };
-            section.SetScheme(Theme.CreateScheme());
+            box.SetScheme(Theme.CreateScheme());
+
+            _builtinUrlLabel = new Label
+            {
+                X = 1,
+                Y = 0,
+                Width = Dim.Fill() - 2,
+                CanFocus = false,
+            };
+            _builtinUrlLabel.SetScheme(Theme.LabelScheme(TextRole.Normal));
 
             var urlLabel = new Label
             {
-                Text = "Server Base URL (http:// or https://):",
+                Text = "Server Base URL (OpenAI-compatible only, http:// or https://):",
                 X = 1,
-                Y = 0,
+                Y = 1,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
             };
             urlLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            _lmStudioBaseUrl = new NavTextField
+            _endpointBaseUrl = new NavTextField
             {
                 X = 1,
-                Y = 1,
+                Y = 2,
                 Width = Dim.Fill() - 2,
-                Text = _draft.LmStudioBaseUrl,
             };
-            _lmStudioBaseUrl.SetScheme(Theme.CreateScheme());
-            _lmStudioBaseUrl.BeforeKey = FormFieldKey;
+            _endpointBaseUrl.SetScheme(Theme.CreateScheme());
+            _endpointBaseUrl.BeforeKey = FormFieldKey;
 
-            var presetLabel = new Label
+            _endpointMatchHint = new Label
             {
-                Text = "Preset (Up/Down: highlight, Enter: apply endpoint):",
                 X = 1,
                 Y = 3,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
             };
-            presetLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
+            _endpointMatchHint.SetScheme(Theme.LabelScheme(TextRole.System));
 
-            _presetList = new NavListView
+            _endpointVendorHint = new Label
             {
                 X = 1,
                 Y = 4,
                 Width = Dim.Fill() - 2,
-                Height = OpenAiPresets.All.Length,
-            };
-            _presetList.SetScheme(Theme.CreateScheme());
-            _presetList.SetSource(new ObservableCollection<string>(OpenAiPresets.All.Select(p => p.Name).ToList()));
-            _presetList.BeforeKey = FormListKey;
-
-            _presetDetails = new Label
-            {
-                X = 1,
-                Y = 9,
-                Width = Dim.Fill() - 2,
-                Height = 1,
                 CanFocus = false,
             };
-            _presetDetails.SetScheme(Theme.LabelScheme(TextRole.Normal));
+            _endpointVendorHint.SetScheme(Theme.LabelScheme(TextRole.System));
 
-            var apiKeyLabel = new Label
+            _apiKeyLabel = new Label
             {
-                Text = "API Key (optional depending on vendor configuration):",
                 X = 1,
-                Y = 11,
+                Y = 6,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
             };
-            apiKeyLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
+            _apiKeyLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            _lmStudioApiKey = new NavTextField
+            _endpointApiKey = new NavTextField
             {
                 X = 1,
-                Y = 12,
+                Y = 7,
                 Width = Dim.Fill() - 2,
-                Text = _draft.LmStudioApiKey,
                 Secret = true,
             };
-            _lmStudioApiKey.SetScheme(Theme.CreateScheme());
-            _lmStudioApiKey.BeforeKey = FormFieldKey;
+            _endpointApiKey.SetScheme(Theme.CreateScheme());
+            _endpointApiKey.BeforeKey = FormFieldKey;
 
             var modelLabel = new Label
             {
-                Text = "Model Name / ID (or probe with button below):",
+                Text = "Model Name / ID (type, Enter: pick / open probed list, Esc: close):",
                 X = 1,
-                Y = 14,
+                Y = 9,
                 Width = Dim.Fill() - 2,
                 CanFocus = false,
             };
             modelLabel.SetScheme(Theme.LabelScheme(TextRole.Item));
 
-            _lmStudioModel = new NavTextField
+            // One editable dropdown is the whole model picker: typing sets the id, opening
+            // it probes the server and offers what answers. The list holds raw ids, so the
+            // box text is always the id itself.
+            _endpointModelCombo = new NavDropDownList
             {
                 X = 1,
-                Y = 15,
+                Y = 10,
                 Width = Dim.Fill() - 2,
-                Text = _draft.LmStudioModel,
+                Height = 1,
             };
-            _lmStudioModel.SetScheme(Theme.CreateScheme());
-            _lmStudioModel.BeforeKey = FormFieldKey;
+            _endpointModelCombo.SetScheme(Theme.CreateScheme());
+            _endpointModelCombo.Source = new ListWrapper<string>(_endpointModelItems);
+            _endpointModelCombo.IsPopoverOpen = IsSelecting;
+            // Dirty means the box no longer shows the last confirmed id: Enter confirms
+            // it. Clean means Enter opens the probed list instead.
+            _endpointModelCombo.HasUncommitted = () =>
+                !string.Equals(_endpointModelCombo.Text?.Trim() ?? string.Empty, _endpointAcceptedText, StringComparison.Ordinal);
+            _endpointModelCombo.BeforeKey = key =>
+            {
+                // Opening the list probes first so it never opens onto stale results.
+                if (key == Key.F4 || key == Key.Space)
+                {
+                    _ = EnsureProbedAsync();
+                }
 
-            _probeButton = new Button
+                return FormListKey(key);
+            };
+
+            var apiNote = new Label
             {
                 X = 1,
-                Y = 17,
-                Text = "Probe Models",
+                Y = 11,
+                Width = Dim.Fill() - 2,
+                CanFocus = false,
+                Text = "Note: these providers support only OpenAI-compatible chat APIs (/v1).",
             };
-            _probeButton.SetScheme(Theme.CreateScheme());
+            apiNote.SetScheme(Theme.LabelScheme(TextRole.System));
 
             _probeStatus = new Label
             {
-                X = Pos.Right(_probeButton) + 2,
-                Y = 17,
+                X = 1,
+                Y = 12,
                 Width = Dim.Fill() - 2,
+                Height = 2,
                 CanFocus = false,
                 Text = string.Empty,
             };
             _probeStatus.SetScheme(Theme.CreateScheme());
 
-            _lmStudioModelsList = new NavListView
+            // Typing is explicit: the draft follows the fields; the match hint follows the URL.
+            // A URL or key edit marks the probe stale without probing on every keystroke.
+            _endpointBaseUrl.TextChanged += (_, _) =>
             {
-                X = 1,
-                Y = 19,
-                Width = Dim.Fill() - 2,
-                Height = Dim.Fill(1),
-                Visible = false,
-            };
-            _lmStudioModelsList.SetScheme(Theme.CreateScheme());
-            _lmStudioModelsList.BeforeKey = FormListKey;
-
-            // Typing is explicit: the draft follows the URL, and the preset highlight
-            // follows the URL without touching the draft.
-            _lmStudioBaseUrl.TextChanged += (_, _) =>
-            {
-                if (_isApplyingPreset)
+                if (_isLoadingEndpoint)
                 {
                     return;
                 }
 
-                var url = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
-                _draft.LmStudioBaseUrl = url;
-                _draft.OpenAiPreset = OpenAiPresets.DetectPreset(url).Name;
-                SyncPresetHighlight();
+                _draft.EndpointFor(_draft.Provider).BaseUrl = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
+                _lastProbeKey = null;
+                UpdateMatchHint();
                 UpdateSummary();
             };
-            _lmStudioBaseUrl.Accepting += (_, _) => MoveFormFocus(1);
-            _lmStudioApiKey.TextChanged += (_, _) => _draft.LmStudioApiKey = _lmStudioApiKey.Text?.Trim() ?? string.Empty;
-            _lmStudioApiKey.Accepting += (_, _) => MoveFormFocus(1);
-            _lmStudioModel.TextChanged += (_, _) =>
+            _endpointBaseUrl.Accepting += (_, _) => MoveFormFocus(1);
+            _endpointApiKey.TextChanged += (_, _) =>
             {
-                _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
-                UpdateSummary();
-            };
-            _lmStudioModel.Accepting += (_, _) => MoveFormFocus(1);
-
-            _presetList.RowRender += (_, e) =>
-            {
-                var isPicked = e.Row >= 0 && e.Row < OpenAiPresets.All.Length
-                    && string.Equals(OpenAiPresets.All[e.Row].Name, _draft.OpenAiPreset, StringComparison.OrdinalIgnoreCase);
-                var isSelected = e.Row == _presetList.SelectedItem;
-
-                e.RowAttribute = (isSelected, isPicked) switch
+                if (_isLoadingEndpoint)
                 {
-                    (true, true) => PickedAndSelectedAttr,
-                    (true, false) => SelectedAttr,
-                    (false, true) => PickedAttr,
-                    _ => NormalAttr,
-                };
-            };
-            _presetList.ValueChanged += (_, _) =>
-            {
-                UpdatePresetDetails();
-                _presetList.SetNeedsDraw();
-            };
-            _presetList.Accepting += (_, _) =>
-            {
-                if (ApplyPresetSelection(_presetList.SelectedItem ?? -1))
-                {
-                    MoveFormFocus(1);
+                    return;
                 }
-            };
 
-            _lmStudioModelsList.RowRender += (_, e) =>
-            {
-                var isPicked = e.Row >= 0 && e.Row < _probedModels.Count
-                    && string.Equals(_probedModels[e.Row], _draft.LmStudioModel, StringComparison.OrdinalIgnoreCase);
-                var isSelected = e.Row == _lmStudioModelsList.SelectedItem;
-
-                e.RowAttribute = (isSelected, isPicked) switch
-                {
-                    (true, true) => PickedAndSelectedAttr,
-                    (true, false) => SelectedAttr,
-                    (false, true) => PickedAttr,
-                    _ => NormalAttr,
-                };
+                _draft.EndpointFor(_draft.Provider).SetApiKey(_endpointApiKey.Text);
+                _lastProbeKey = null;
             };
-            _lmStudioModelsList.ValueChanged += (_, _) => _lmStudioModelsList.SetNeedsDraw();
-            _lmStudioModelsList.Accepting += (_, _) =>
+            _endpointApiKey.Accepting += (_, _) => MoveFormFocus(1);
+            _endpointModelCombo.TextChanged += (_, _) =>
             {
-                var selected = _lmStudioModelsList.SelectedItem ?? -1;
-                if (selected >= 0 && selected < _probedModels.Count)
+                if (_isLoadingEndpoint)
                 {
-                    var modelName = _probedModels[selected];
-                    _lmStudioModel.Text = modelName;
-                    _draft.LmStudioModel = modelName;
-                    Say(_probeStatus, $"Picked: {modelName}", TextRole.Place);
-                    _lmStudioModelsList.SetNeedsDraw();
+                    return;
+                }
+
+                _draft.EndpointFor(_draft.Provider).Model = _endpointModelCombo.Text?.Trim() ?? string.Empty;
+                UpdateSummary();
+            };
+            _endpointModelCombo.ValueChanged += (_, _) =>
+            {
+                if (_isLoadingEndpoint)
+                {
+                    return;
+                }
+
+                // Picking a probed row writes its id like typing would; Enter confirms it.
+                var picked = _endpointModelCombo.Value?.Trim() ?? string.Empty;
+                if (picked.Length > 0)
+                {
+                    _draft.EndpointFor(_draft.Provider).Model = picked;
                     UpdateSummary();
-                    MoveFormFocus(1);
+                }
+
+                _endpointModelCombo.SetNeedsDraw();
+            };
+            _endpointModelCombo.Accepting += (_, _) => AcceptEndpointModel(advance: true);
+            // A pick made inside the open list confirms the same way but stays put.
+            _endpointModelCombo.Accepted += (_, _) => AcceptEndpointModel(advance: false);
+            _endpointModelCombo.HasFocusChanged += (_, _) =>
+            {
+                // Opening the field probes the server, so the list is fresh when asked for.
+                if (_endpointModelCombo.HasFocus)
+                {
+                    _ = EnsureProbedAsync();
                 }
             };
 
-            _probeButton.Accepting += async (_, _) =>
-            {
-                await ProbeLmStudioModelsAsync();
-            };
-
-            SyncPresetHighlight();
-            UpdatePresetDetails();
-
-            section.Add(
+            box.Add(
+                _builtinUrlLabel,
                 urlLabel,
-                _lmStudioBaseUrl,
-                presetLabel,
-                _presetList,
-                _presetDetails,
-                apiKeyLabel,
-                _lmStudioApiKey,
+                _endpointBaseUrl,
+                _endpointMatchHint,
+                _endpointVendorHint,
+                _apiKeyLabel,
+                _endpointApiKey,
                 modelLabel,
-                _lmStudioModel,
-                _probeButton,
-                _probeStatus,
-                _lmStudioModelsList);
-            return section;
+                _endpointModelCombo,
+                apiNote,
+                _probeStatus);
+            return box;
         }
 
         private View BuildPrefsSection()
@@ -872,19 +1293,94 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
+        /// Shows the picked provider's settings: the Claude model list for the CLI, or the
+        /// endpoint fields rebound to the picked provider's own slot for the rest.
+        /// </summary>
+        private void RefreshProviderSettings()
+        {
+            var isClaude = !AppSettings.IsOpenAiProvider(_draft.Provider);
+            _claudeBox.Visible = isClaude;
+            _endpointBox.Visible = !isClaude;
+
+            // Populated even while hidden so every label reads truthfully whenever it is shown.
+            LoadEndpointControls();
+
+            SyncProviderComboToDraft();
+            UpdateProviderScrollHeight();
+            _lastFormFocus = null;
+        }
+
+        /// <summary>
+        /// Rebinds the shared endpoint fields to the picked provider's slot.
+        /// </summary>
+        private void LoadEndpointControls()
+        {
+            var provider = AppSettings.EffectiveProvider(_draft.Provider);
+            var preset = OpenAiPresets.ForProvider(provider);
+            var slot = _draft.EndpointFor(provider);
+
+            _isLoadingEndpoint = true;
+            try
+            {
+                _builtinUrlLabel.Text = $"Built-in endpoint: {preset.BaseUrl}";
+                _endpointBaseUrl.Text = slot.BaseUrl;
+                _endpointApiKey.Text = slot.ResolveApiKey();
+                _endpointModelCombo.Text = slot.Model;
+                _endpointAcceptedText = slot.Model?.Trim() ?? string.Empty;
+                _apiKeyLabel.Text = $"API Key (sealed on this machine; {EnvVarName(provider)} wins when set):";
+                _endpointVendorHint.Text = preset.Description;
+                _probedModels.Clear();
+                _endpointModelItems.Clear();
+                _lastProbeKey = null;
+                _probeStatus.Text = string.Empty;
+            }
+            finally
+            {
+                _isLoadingEndpoint = false;
+            }
+
+            UpdateMatchHint();
+        }
+
+        private static string EnvVarName(AgentProvider provider) => AppSettings.EffectiveProvider(provider) switch
+        {
+            AgentProvider.Google => "TQ2_GOOGLE_API_KEY",
+            AgentProvider.OpenAI => "TQ2_OPENAI_API_KEY",
+            AgentProvider.Anthropic => "TQ2_ANTHROPIC_API_KEY",
+            _ => "TQ2_CUSTOM_API_KEY",
+        };
+
+        /// <summary>
+        /// Writes the visible endpoint fields back into the picked provider's slot. Called before
+        /// the provider changes and before saving, so a half-typed value never leaks sideways.
+        /// </summary>
+        private void FlushEndpointControls()
+        {
+            if (!_endpointBox.Visible)
+            {
+                return;
+            }
+
+            var slot = _draft.EndpointFor(_draft.Provider);
+            slot.BaseUrl = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
+            slot.Model = _endpointModelCombo.Text?.Trim() ?? string.Empty;
+            slot.SetApiKey(_endpointApiKey.Text);
+        }
+
+        /// <summary>
         /// The focusable controls of the visible section, in top-to-bottom order.
         /// Hidden controls (like the probe results before probing) and disabled controls
         /// (like the probe button while probing) are skipped.
         /// </summary>
         private List<View> ActiveFormControls()
         {
+            // The provider section holds the picker first, then the picked provider's
+            // settings, so arrows walk from one into the other.
             List<View> controls = _activeSection switch
             {
-                SettingsSection.Provider => [_providerList],
-                SettingsSection.ClaudeCode => [_claudeModelList, _claudeCustomModel],
-                SettingsSection.OpenAiApi => (_lmStudioModelsList.Visible
-                    ? [_lmStudioBaseUrl, _presetList, _lmStudioApiKey, _lmStudioModel, _probeButton, _lmStudioModelsList]
-                    : [_lmStudioBaseUrl, _presetList, _lmStudioApiKey, _lmStudioModel, _probeButton]),
+                SettingsSection.Provider => _claudeBox.Visible
+                    ? [_providerCombo, _claudeCombo]
+                    : [_providerCombo, _endpointBaseUrl, _endpointApiKey, _endpointModelCombo],
                 _ => [_recallChars, _editorCommand, _testEditorButton, _openConfigFolderButton],
             };
 
@@ -893,9 +1389,10 @@ namespace TerminalQuest.Ui
 
         private IEnumerable<View> AllFormControls() =>
         [
-            _providerList,
-            _claudeModelList, _claudeCustomModel,
-            _lmStudioBaseUrl, _presetList, _lmStudioApiKey, _lmStudioModel, _probeButton, _lmStudioModelsList,
+            _providerScroll,
+            _providerCombo,
+            _claudeCombo,
+            _endpointBaseUrl, _endpointApiKey, _endpointModelCombo,
             _recallChars, _editorCommand, _testEditorButton, _openConfigFolderButton,
         ];
 
@@ -904,6 +1401,18 @@ namespace TerminalQuest.Ui
         private bool IsFooterFocused() => MostFocused is Button focused && _actionButtons.Contains(focused);
 
         private bool IsFormFocused() => MostFocused is { } focused && ActiveFormControls().Contains(focused);
+
+        /// <summary>
+        /// Returns focus to the form after a dropdown list closes, unless focus already
+        /// sits on a known pane (the list may have returned it to the box itself).
+        /// </summary>
+        private void RestoreFormFocus()
+        {
+            if (!IsNavFocused() && !IsFormFocused() && !IsFooterFocused())
+            {
+                FocusForm();
+            }
+        }
 
         /// <summary>
         /// Moves focus through the panes: sections list, form, footer. Claimed before
@@ -1037,7 +1546,7 @@ namespace TerminalQuest.Ui
             _hintLabel.Text = (inNav, inForm, inFooter) switch
             {
                 (true, _, _) => "Up/Down: section | Enter: edit section | Tab: next pane | Ctrl+S: save | Esc: cancel",
-                (_, true, _) => "Up/Down: fields (rows in lists) | Left/Right: fields in lists | Enter: pick / next field | Tab: next pane | Ctrl+S: save",
+                (_, true, _) => "Up/Down: fields (browse in dropdowns) | Left/Right: fields | Enter: open/pick | Esc: close list | Tab: next pane | Ctrl+S: save",
                 (_, _, true) => "Left/Right: choose action | Enter: run | Tab: next pane | Ctrl+S: save | Esc: cancel",
                 _ => "Tab: switch pane | Up/Down: move | Enter: pick | Ctrl+S: save | Esc: cancel",
             };
@@ -1076,8 +1585,8 @@ namespace TerminalQuest.Ui
         }
 
         /// <summary>
-        /// In a form list, Up/Down navigate rows natively while Left/Right move between
-        /// fields so the focus can leave the list without reaching for Tab.
+        /// In a form dropdown, Up/Down browse options natively while Left/Right move between
+        /// fields so the focus can leave the dropdown without reaching for Tab.
         /// </summary>
         private bool FormListKey(Key key)
         {
@@ -1143,6 +1652,26 @@ namespace TerminalQuest.Ui
 
         protected override bool OnKeyDown(Key key)
         {
+            // A dropdown list open above the form owns Esc and Tab. Esc closes just the
+            // list (never the window: cancelling a pick must not cancel settings), Tab
+            // closes it and then moves panes as usual. Native close is idempotent, so this
+            // also swallows a bubble from a list that closed itself.
+            if (_app.Popovers is { } popovers && popovers.GetActivePopover() is { } open)
+            {
+                if (key == Key.Esc)
+                {
+                    popovers.Hide(open);
+                    RestoreFormFocus();
+                    return true;
+                }
+
+                if (key == Key.Tab || key == Key.Tab.WithShift)
+                {
+                    popovers.Hide(open);
+                    RestoreFormFocus();
+                }
+            }
+
             if (key == Key.Esc)
             {
                 CancelAndClose();
@@ -1216,8 +1745,6 @@ namespace TerminalQuest.Ui
         {
             _activeSection = section;
             _providerSection.Visible = section == SettingsSection.Provider;
-            _claudeSection.Visible = section == SettingsSection.ClaudeCode;
-            _openAiSection.Visible = section == SettingsSection.OpenAiApi;
             _prefsSection.Visible = section == SettingsSection.Preferences;
             UpdatePaneChrome();
             SetNeedsDraw();
@@ -1225,24 +1752,23 @@ namespace TerminalQuest.Ui
 
         private void UpdateSummary()
         {
-            var claudeDesc = string.IsNullOrEmpty(_draft.ClaudeModel)
-                ? "CLI Default"
-                : ClaudeModels.Describe(_draft.ClaudeModel);
-
-            var openAiDesc = string.IsNullOrEmpty(_draft.LmStudioModel)
-                ? $"{_draft.OpenAiPreset} (Default loaded model)"
-                : $"{_draft.OpenAiPreset} ({_draft.LmStudioModel})";
-
-            if (_draft.Provider == AgentProvider.ClaudeCode)
+            if (!AppSettings.IsOpenAiProvider(_draft.Provider))
             {
+                var claudeDesc = string.IsNullOrEmpty(_draft.ClaudeModel)
+                    ? "CLI Default"
+                    : ClaudeModels.Describe(_draft.ClaudeModel);
                 _summaryActiveLabel.Text = $"Current Configuration: Claude Code [{claudeDesc}]";
-                _summaryStandbyLabel.Text = $"OpenAI API standby: [{openAiDesc}]";
+                _summaryStandbyLabel.Text = "Runs the 'claude' CLI locally — no endpoint, no key.";
+                return;
             }
-            else
-            {
-                _summaryActiveLabel.Text = $"Current Configuration: OpenAI API [{openAiDesc}]";
-                _summaryStandbyLabel.Text = $"Claude Code standby: [{claudeDesc}]";
-            }
+
+            var provider = AppSettings.EffectiveProvider(_draft.Provider);
+            var preset = OpenAiPresets.ForProvider(provider);
+            var slot = _draft.EndpointFor(provider);
+            var modelDesc = string.IsNullOrEmpty(slot.Model) ? "default model" : slot.Model;
+            _summaryActiveLabel.Text = $"Current Configuration: {preset.Name} [{modelDesc}]";
+            var keyNote = AppSettings.GetEnvironmentApiKey(provider) is not null ? " (key from environment)" : string.Empty;
+            _summaryStandbyLabel.Text = $"Endpoint: {slot.BaseUrl} — OpenAI-compatible API only{keyNote}.";
         }
 
         /// <summary>
@@ -1256,64 +1782,13 @@ namespace TerminalQuest.Ui
             line.SetNeedsDraw();
         }
 
-        private void SyncPresetHighlight()
+        private void UpdateMatchHint()
         {
-            var detected = OpenAiPresets.DetectPreset(_draft.LmStudioBaseUrl);
-            var index = Array.FindIndex(OpenAiPresets.All, p => p.Name == detected.Name);
-            if (index >= 0)
-            {
-                _presetList.SelectedItem = index;
-            }
-            UpdatePresetDetails();
-            _presetList.SetNeedsDraw();
-        }
-
-        private void UpdatePresetDetails()
-        {
-            var highlighted = _presetList.SelectedItem ?? -1;
-            if (highlighted >= 0 && highlighted < OpenAiPresets.All.Length)
-            {
-                var preset = OpenAiPresets.All[highlighted];
-                _presetDetails.Text = $"Endpoint: {preset.BaseUrl}";
-            }
-            else
-            {
-                _presetDetails.Text = string.Empty;
-            }
-        }
-
-        private bool ApplyPresetSelection(int index)
-        {
-            if (index < 0 || index >= OpenAiPresets.All.Length)
-            {
-                return false;
-            }
-
-            var matched = OpenAiPresets.All[index];
-            _draft.OpenAiPreset = matched.Name;
-            _draft.LmStudioBaseUrl = matched.BaseUrl;
-
-            _isApplyingPreset = true;
-            try
-            {
-                _lmStudioBaseUrl.Text = matched.BaseUrl;
-            }
-            finally
-            {
-                _isApplyingPreset = false;
-            }
-
-            if (!string.IsNullOrEmpty(matched.DefaultModel) &&
-                (string.IsNullOrEmpty(_draft.LmStudioModel) || OpenAiPresets.All.Any(p => !string.IsNullOrEmpty(p.DefaultModel) && p.DefaultModel == _draft.LmStudioModel)))
-            {
-                _draft.LmStudioModel = matched.DefaultModel;
-                _lmStudioModel.Text = matched.DefaultModel;
-            }
-
-            SyncPresetHighlight();
-            UpdateSummary();
-            Say(_messageLabel, $"Selected preset: {matched.Name}", TextRole.Place);
-            return true;
+            var url = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
+            var matched = OpenAiPresets.DetectPreset(url);
+            _endpointMatchHint.Text = matched.IsCustom
+                ? "Custom endpoint address."
+                : $"URL matches the {matched.Name} built-in endpoint.";
         }
 
         protected override void Dispose(bool disposing)
@@ -1329,51 +1804,125 @@ namespace TerminalQuest.Ui
             base.Dispose(disposing);
         }
 
-        private async Task ProbeLmStudioModelsAsync()
+        /// <summary>
+        /// Confirms the model box on Enter: typed text or the picked row's id. The open
+        /// list stays on this box afterwards; a closed box advances like other fields.
+        /// </summary>
+        private void AcceptEndpointModel(bool advance)
         {
-            var rawUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
+            var modelName = _endpointModelCombo.Text?.Trim() ?? string.Empty;
+            if (modelName.Length > 0)
+            {
+                _draft.EndpointFor(_draft.Provider).Model = modelName;
+                _endpointAcceptedText = modelName;
+                Say(_probeStatus, $"Picked: {modelName}", TextRole.Place);
+                UpdateSummary();
+            }
+
+            if (advance)
+            {
+                MoveFormFocus(1);
+            }
+        }
+
+        /// <summary>
+        /// What the probe answers for: provider, URL, and whether a key is present (length
+        /// only, never the secret). A URL or key edit marks the last probe stale without
+        /// probing on every keystroke; the next focus or open probes again.
+        /// </summary>
+        private string CurrentProbeKey()
+        {
+            var url = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
+            var keyLength = _endpointApiKey.Text?.Length ?? 0;
+            return $"{_draft.Provider}\n{url}\n{keyLength}";
+        }
+
+        /// <summary>
+        /// Probes on focus or open when the results are stale or missing. Concurrent entries
+        /// collapse into the running probe; a failed probe stays stale so refocusing retries.
+        /// </summary>
+        private async Task EnsureProbedAsync()
+        {
+            if (_isProbing || !_endpointBox.Visible)
+            {
+                return;
+            }
+
+            var key = CurrentProbeKey();
+            if (key == _lastProbeKey && _probedModels.Count > 0)
+            {
+                return;
+            }
+
+            await ProbeEndpointModelsAsync(key).ConfigureAwait(false);
+        }
+
+        private async Task ProbeEndpointModelsAsync(string? probeKey = null)
+        {
+            probeKey ??= CurrentProbeKey();
+            if (_isProbing)
+            {
+                return;
+            }
+
+            var rawUrl = _endpointBaseUrl.Text?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(rawUrl) || !AppSettings.IsAddress(rawUrl))
             {
-                Say(_probeStatus, "Enter a valid server URL before probing.", TextRole.Danger);
+                Say(_probeStatus, "Enter a valid server URL, then open the list to probe.", TextRole.Danger);
                 return;
             }
 
             var baseUrl = AppSettings.NormalizeBaseUrl(rawUrl);
+            var typedKey = _endpointApiKey.Text?.Trim();
+            var apiKey = string.IsNullOrEmpty(typedKey)
+                ? AppSettings.GetEnvironmentApiKey(_draft.Provider)
+                : typedKey;
 
             _probe?.Cancel();
             _probe?.Dispose();
             _probe = new CancellationTokenSource(ProbeTimeout);
-
-            _probeButton.Enabled = false;
-            if (MostFocused == _probeButton)
-            {
-                _lmStudioModel.SetFocus();
-                UpdatePaneChrome();
-            }
+            _isProbing = true;
 
             Say(_probeStatus, "Connecting to API endpoint...");
 
             try
             {
-                var models = await LmStudioModels.ListAsync(baseUrl, _lmStudioApiKey.Text?.Trim(), ProbeTimeout, _probe.Token);
+                var models = await LmStudioModels.ListAsync(baseUrl, apiKey, ProbeTimeout, _probe.Token);
 
                 _app.Invoke(() =>
                 {
                     if (models.Count == 0)
                     {
                         Say(_probeStatus, "Connected, but no models found.");
-                        _lmStudioModelsList.Visible = false;
                         _probedModels.Clear();
+                        _endpointModelItems.Clear();
+                        _lastProbeKey = probeKey;
                     }
                     else
                     {
                         var sortedModels = models.OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
-                        Say(_probeStatus, $"Found {sortedModels.Count} model(s). Select with Up/Down, Enter to pick:");
-                        _probedModels.Clear();
-                        _probedModels.AddRange(sortedModels);
-                        _lmStudioModelsList.SetSource(new ObservableCollection<string>(sortedModels));
-                        _lmStudioModelsList.Visible = true;
-                        _lmStudioModelsList.SetFocus();
+                        Say(_probeStatus, $"Found {sortedModels.Count} model(s). Open the list, Up/Down to browse, Enter to pick:");
+                        var currentText = _endpointModelCombo.Text;
+                        _isLoadingEndpoint = true;
+                        try
+                        {
+                            _probedModels.Clear();
+                            _probedModels.AddRange(sortedModels);
+                            _endpointModelItems.Clear();
+                            foreach (var model in sortedModels)
+                            {
+                                _endpointModelItems.Add(model);
+                            }
+
+                            // The box text is the id: keep what was typed, not the first hit.
+                            _endpointModelCombo.Text = currentText;
+                        }
+                        finally
+                        {
+                            _isLoadingEndpoint = false;
+                        }
+
+                        _lastProbeKey = probeKey;
                     }
                 });
             }
@@ -1383,16 +1932,13 @@ namespace TerminalQuest.Ui
                 {
                     var firstLine = ex.Message.IndexOf('\n') > 0 ? ex.Message[..ex.Message.IndexOf('\n')] : ex.Message;
                     Say(_probeStatus, $"Probe failed: {firstLine}", TextRole.Danger);
-                    _lmStudioModelsList.Visible = false;
                     _probedModels.Clear();
+                    _endpointModelItems.Clear();
                 });
             }
             finally
             {
-                _app.Invoke(() =>
-                {
-                    _probeButton.Enabled = true;
-                });
+                _isProbing = false;
             }
         }
 
@@ -1401,25 +1947,20 @@ namespace TerminalQuest.Ui
             var defaults = new AppSettings();
             _draft.CopyFrom(defaults);
 
-            _providerList.SelectedItem = defaults.Provider == AgentProvider.ClaudeCode ? 0 : 1;
-            _providerList.SetNeedsDraw();
-
-            var modelIdx = ClaudeModels.IndexOf(defaults.ClaudeModel);
-            if (modelIdx >= 0)
+            _isLoadingClaude = true;
+            try
             {
-                _claudeModelList.SelectedItem = modelIdx;
+                _claudeCombo.Text = ClaudeDisplayForId(defaults.ClaudeModel);
+                _pendingClaudeId = null;
+                _claudeTextTyped = false;
             }
-            _claudeCustomModel.Text = defaults.ClaudeModel;
-            _claudeModelList.SetNeedsDraw();
+            finally
+            {
+                _isLoadingClaude = false;
+            }
 
-            _lmStudioBaseUrl.Text = defaults.LmStudioBaseUrl;
-            _lmStudioApiKey.Text = defaults.LmStudioApiKey;
-            _lmStudioModel.Text = defaults.LmStudioModel;
-            _draft.OpenAiPreset = OpenAiPresets.DetectPreset(defaults.LmStudioBaseUrl).Name;
-            SyncPresetHighlight();
-            _probedModels.Clear();
-            _lmStudioModelsList.Visible = false;
-            _probeStatus.Text = string.Empty;
+            RefreshProviderSettings();
+            SyncClaudeSelection();
 
             _recallChars.Text = defaults.TranscriptRecallCharacters.ToString();
             _editorCommand.Text = defaults.EditorCommand;
@@ -1432,21 +1973,21 @@ namespace TerminalQuest.Ui
 
         private void SaveAndClose()
         {
-            var baseUrl = _lmStudioBaseUrl.Text?.Trim() ?? string.Empty;
-            if (!string.IsNullOrEmpty(baseUrl) && !AppSettings.IsAddress(baseUrl))
-            {
-                Say(_messageLabel, "OpenAI API Base URL must be a valid http:// or https:// address.", TextRole.Danger);
-                SwitchToSection(SettingsSection.OpenAiApi);
-                _lmStudioBaseUrl.SetFocus();
-                return;
-            }
-            _draft.LmStudioBaseUrl = AppSettings.NormalizeBaseUrl(baseUrl);
-            _draft.LmStudioApiKey = _lmStudioApiKey.Text?.Trim() ?? string.Empty;
-            _draft.LmStudioModel = _lmStudioModel.Text?.Trim() ?? string.Empty;
+            FlushEndpointControls();
 
-            if (string.IsNullOrWhiteSpace(_draft.OpenAiPreset))
+            if (AppSettings.IsOpenAiProvider(_draft.Provider))
             {
-                _draft.OpenAiPreset = OpenAiPresets.DetectPreset(_draft.LmStudioBaseUrl).Name;
+                var slot = _draft.EndpointFor(_draft.Provider);
+                var baseUrl = slot.BaseUrl?.Trim() ?? string.Empty;
+                if (!string.IsNullOrEmpty(baseUrl) && !AppSettings.IsAddress(baseUrl))
+                {
+                    Say(_messageLabel, $"{OpenAiPresets.ForProvider(AppSettings.EffectiveProvider(_draft.Provider)).Name} Base URL must be a valid http:// or https:// address.", TextRole.Danger);
+                    SwitchToSection(SettingsSection.Provider);
+                    _endpointBaseUrl.SetFocus();
+                    return;
+                }
+
+                slot.BaseUrl = AppSettings.NormalizeBaseUrl(baseUrl);
             }
 
             var recallText = _recallChars.Text?.Trim() ?? string.Empty;

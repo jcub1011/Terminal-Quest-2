@@ -62,7 +62,7 @@ namespace TerminalQuest.Agents
 
             try
             {
-                if (settings.Provider == AgentProvider.OpenAiApi)
+                if (AppSettings.IsOpenAiProvider(settings.Provider))
                 {
                     return await GenerateOpenAiAsync(settings, prompt, cancellationToken, handler).ConfigureAwait(false);
                 }
@@ -81,15 +81,15 @@ namespace TerminalQuest.Agents
             CancellationToken cancellationToken,
             HttpMessageHandler? handler)
         {
-            var rawUrl = settings.LmStudioBaseUrl?.Trim();
+            var rawUrl = settings.ActiveBaseUrl?.Trim();
             if (string.IsNullOrEmpty(rawUrl) || !AppSettings.IsAddress(rawUrl))
             {
                 return GetDefaultItems();
             }
 
             var baseUrl = AppSettings.NormalizeBaseUrl(rawUrl);
-            var model = settings.LmStudioModel?.Trim();
-            var apiKey = settings.LmStudioApiKey?.Trim();
+            var model = settings.ActiveModel?.Trim();
+            var apiKey = settings.ActiveApiKey?.Trim();
 
             using var client = new HttpClient(handler ?? new HttpClientHandler(), disposeHandler: handler is null)
             {

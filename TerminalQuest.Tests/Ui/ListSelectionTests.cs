@@ -198,8 +198,8 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            // Browse to OpenAI API without pressing Enter: the draft is untouched.
-            window.ProviderList.SelectedItem = 1;
+            // Browse to Google without pressing Enter: the draft is untouched.
+            window.ProviderCombo.Value = window.ProviderNames[1];
 
             // Save settings via Ctrl+S
             window.NewKeyDownEvent(Key.S.WithCtrl);
@@ -215,12 +215,40 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            window.ProviderList.SelectedItem = 1;
-            window.ProviderList.NewKeyDownEvent(Key.Enter);
+            window.ProviderCombo.Value = window.ProviderNames[1];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
 
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
-            Assert.Equal(AgentProvider.OpenAiApi, window.Chosen.Provider);
+            Assert.Equal(AgentProvider.Google, window.Chosen.Provider);
+        }
+
+        [Fact]
+        public void SettingsWindow_provider_list_offers_every_provider()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            Assert.Equal(5, window.ProviderCombo.Source!.Count);
+
+            // Each row picks its provider into the draft.
+            var expected = new[]
+            {
+                AgentProvider.ClaudeCode,
+                AgentProvider.Google,
+                AgentProvider.OpenAI,
+                AgentProvider.Anthropic,
+                AgentProvider.Custom,
+            };
+            for (var i = 0; i < expected.Length; i++)
+            {
+                window.ProviderCombo.Value = window.ProviderNames[i];
+                window.ProviderCombo.NewKeyDownEvent(Key.Enter);
+                window.NewKeyDownEvent(Key.S.WithCtrl);
+                Assert.Equal(expected[i], window.Chosen!.Provider);
+            }
         }
 
         [Fact]
@@ -231,21 +259,22 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            // Switch to Claude Code section
-            window.SwitchToSection(SettingsSection.ClaudeCode);
-            Assert.Equal(SettingsSection.ClaudeCode, window.ActiveSection);
+            // Switch to Provider Settings with Claude Code picked
+            window.SwitchToSection(SettingsSection.Provider);
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
             window.SetFocus();
-            window.ClaudeModelList.SetFocus();
+            window.ClaudeModelCombo.SetFocus();
 
-            // Select Haiku (index 1) and press Enter to pick it
-            window.ClaudeModelList.SelectedItem = 1;
-            window.ClaudeModelList.NewKeyDownEvent(Key.Enter);
+            // Select Haiku (index 1) and press Enter to pick it: the box shows the row
+            // label while the draft takes the id.
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[1];
+            window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
 
-            Assert.Equal(ClaudeModels.All[1].Id, window.ClaudeCustomModelField.Text);
+            Assert.Equal(window.ClaudeLabels[1], window.ClaudeModelCombo.Text);
 
-            // Enter advances into the custom model field
-            Assert.Equal(window.ClaudeCustomModelField, window.MostFocused);
+            // Enter advances to the next field, wrapping to the provider picker
+            Assert.Equal(window.ProviderCombo, window.MostFocused);
 
             // Save settings via Ctrl+S
             window.NewKeyDownEvent(Key.S.WithCtrl);
@@ -261,10 +290,10 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToSection(SettingsSection.ClaudeCode);
+            window.SwitchToSection(SettingsSection.Provider);
 
             // Browse to Opus without pressing Enter
-            window.ClaudeModelList.SelectedItem = 3;
+            window.ClaudeModelCombo.Value = window.ClaudeLabels[3];
 
             // Save via Ctrl+S: the browsed row must not leak into the draft
             window.NewKeyDownEvent(Key.S.WithCtrl);
@@ -273,53 +302,199 @@ namespace TerminalQuest.Tests.Ui
         }
 
         [Fact]
-        public void SettingsWindow_openai_preset_enter_applies_endpoint()
+        public void SettingsWindow_claude_typing_custom_id_saves_without_enter()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
             var window = new SettingsWindow(app, settings);
 
-            // Switch to OpenAI API section
-            window.SwitchToSection(SettingsSection.OpenAiApi);
-            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
+            window.SwitchToSection(SettingsSection.Provider);
 
-            // Highlight Google and press Enter to apply it
-            window.PresetList.SelectedItem = 0;
-            window.PresetList.NewKeyDownEvent(Key.Enter);
-            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.BaseUrlField.Text);
+            // Typing is explicit: a hand-typed id reaches the draft without Enter.
+            window.ClaudeModelCombo.Text = "my-custom-model";
 
-            // Typing a custom URL moves the preset highlight to Custom without saving yet
-            window.BaseUrlField.Text = "http://my-custom-host:8080/v1";
-            Assert.Equal(3, window.PresetList.SelectedItem);
-
-            // Find API key label and verify note
-            var apiKeyLabel = FindDescendants<Label>(window).First(l => l.Text.Contains("API Key"));
-            Assert.Equal("API Key (optional depending on vendor configuration):", apiKeyLabel.Text);
+            window.NewKeyDownEvent(Key.S.WithCtrl);
+            Assert.NotNull(window.Chosen);
+            Assert.Equal("my-custom-model", window.Chosen.ClaudeModel);
         }
 
         [Fact]
-        public void SettingsWindow_preset_pick_persists_on_save()
+        public void SettingsWindow_provider_browse_leaves_panels_and_summary_alone()
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToSection(SettingsSection.OpenAiApi);
+            window.SwitchToSection(SettingsSection.Provider);
 
-            // Pick the Google preset with Enter
-            window.PresetList.SelectedItem = 0;
-            window.PresetList.NewKeyDownEvent(Key.Enter);
+            // Browsing the collapsed dropdown changes the display only: the Claude panel
+            // stays, and the summary still names the picked provider.
+            window.ProviderCombo.Value = window.ProviderNames[1];
+
+            Assert.True(window.IsClaudeSettingsVisible);
+            Assert.False(window.IsEndpointSettingsVisible);
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.Contains(labels, l => $"{l.Text}".StartsWith("Current Configuration: Claude Code"));
+        }
+
+        [Fact]
+        public void SettingsWindow_enter_on_clean_dropdown_opens_instead_of_picking()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+            window.SetFocus();
+            window.ProviderCombo.SetFocus();
+
+            // Clean (highlight == picked): Enter begins selecting rather than picking, so
+            // no confirmation appears and focus stays in the box.
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
+
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.DoesNotContain(labels, l => $"{l.Text}".Contains("Active provider set to"));
+            Assert.Equal(window.ProviderCombo, window.MostFocused);
+
+            // ...while a browsed row still picks on Enter.
+            window.ProviderCombo.Value = window.ProviderNames[1];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
+            Assert.Contains(labels, l => $"{l.Text}".Contains("Active provider set to: Google"));
+        }
+
+        [Fact]
+        public void SettingsWindow_enter_on_clean_model_boxes_opens_instead_of_advancing()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode, ClaudeModel = ClaudeModels.All[0].Id };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+            window.SetFocus();
+            window.ClaudeModelCombo.SetFocus();
+
+            // Clean: Enter opens rather than advancing to the next field.
+            window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
+            Assert.Equal(window.ClaudeModelCombo, window.MostFocused);
+
+            // Dirty (typed): Enter still accepts and advances.
+            window.ClaudeModelCombo.Text = "my-custom-model";
+            window.ClaudeModelCombo.NewKeyDownEvent(Key.Enter);
+            Assert.Equal(window.ProviderCombo, window.MostFocused);
+        }
+
+        [Fact]
+        public void SettingsWindow_enter_on_endpoint_model_confirms_and_advances_when_dirty()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+            window.SetFocus();
+            window.ModelField.SetFocus();
+
+            // Clean (matches the loaded slot): Enter opens rather than confirming.
+            window.ModelField.NewKeyDownEvent(Key.Enter);
+            Assert.Equal(window.ModelField, window.MostFocused);
+            var labels = FindDescendants<Label>(window).ToList();
+            Assert.DoesNotContain(labels, l => $"{l.Text}".StartsWith("Picked:"));
+
+            // Dirty (typed): Enter confirms and advances.
+            window.ModelField.Text = "gemini-2-0-test";
+            window.ModelField.NewKeyDownEvent(Key.Enter);
+            Assert.Contains(labels, l => $"{l.Text}".StartsWith("Picked: gemini-2-0-test"));
+            Assert.Equal(window.ProviderCombo, window.MostFocused);
+        }
+
+        [Fact]
+        public void SettingsWindow_provider_settings_rebinds_per_provider()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            // Switch to Provider Settings: Google's built-in endpoint shows, fields rebound.
+            window.SwitchToSection(SettingsSection.Provider);
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
             Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.BaseUrlField.Text);
+            Assert.Contains("https://generativelanguage.googleapis.com/v1beta/openai", $"{window.BuiltinUrlLabel.Text}");
 
-            // Save via Ctrl+S
+            // Typing a custom URL updates the match hint without saving yet.
+            window.BaseUrlField.Text = "http://my-custom-host:8080/v1";
+            var matchHint = FindDescendants<Label>(window).First(l => $"{l.Text}".Contains("endpoint address"));
+            Assert.Contains("Custom", $"{matchHint.Text}");
+
+            // The API key field is present and masked.
+            var apiKeyLabel = FindDescendants<Label>(window).First(l => $"{l.Text}".StartsWith("API Key"));
+            Assert.Contains("TQ2_GOOGLE_API_KEY", $"{apiKeyLabel.Text}");
+            Assert.True(window.ApiKeyField.Secret);
+        }
+
+        [Fact]
+        public void SettingsWindow_each_provider_keeps_its_own_values()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+
+            // Type a Google model, then switch to Custom: the fields rebind to Custom's slot.
+            window.ModelField.Text = "gemini-2-0-test";
+            window.SwitchToSection(SettingsSection.Provider);
+            window.ProviderCombo.Value = window.ProviderNames[4];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
+            window.SwitchToSection(SettingsSection.Provider);
+
+            Assert.Equal("http://localhost:1234/v1", window.BaseUrlField.Text);
+
+            // A Custom URL persists on save without touching Google's slot.
+            window.BaseUrlField.Text = "http://my-custom-host:8080/v1";
             window.NewKeyDownEvent(Key.S.WithCtrl);
             Assert.NotNull(window.Chosen);
-            Assert.Equal("Google", window.Chosen.OpenAiPreset);
-            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.Chosen.LmStudioBaseUrl);
-            Assert.Equal("gemini-flash-lite-latest", window.Chosen.LmStudioModel);
+            Assert.Equal(AgentProvider.Custom, window.Chosen.Provider);
+            Assert.Equal("http://my-custom-host:8080/v1", window.Chosen.Custom.BaseUrl);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/openai", window.Chosen.Google.BaseUrl);
+            Assert.Equal("gemini-2-0-test", window.Chosen.Google.Model);
+        }
+
+        [Fact]
+        public void SettingsWindow_claude_box_shows_for_claude_and_endpoint_for_the_rest()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            window.SwitchToSection(SettingsSection.Provider);
+
+            // Both panels live in the provider section at once: the picker stays put while
+            // the settings beneath it follow the picked provider.
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
+            Assert.True(window.ProviderCombo.Visible);
+
+            // Claude Code picked: the Claude model controls show, the endpoint ones hide.
+            Assert.True(window.IsClaudeSettingsVisible);
+            Assert.False(window.IsEndpointSettingsVisible);
+
+            // Pick Anthropic (API): the endpoint fields return, the Claude ones hide.
+            window.SwitchToSection(SettingsSection.Provider);
+            window.ProviderCombo.Value = window.ProviderNames[3];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
+            window.SwitchToSection(SettingsSection.Provider);
+
+            Assert.False(window.IsClaudeSettingsVisible);
+            Assert.True(window.IsEndpointSettingsVisible);
+            Assert.Equal("https://api.anthropic.com/v1", window.BaseUrlField.Text);
         }
 
         [Fact]
@@ -327,18 +502,71 @@ namespace TerminalQuest.Tests.Ui
         {
             using var root = new SavesRoot();
             var app = Application.Create();
-            var settings = new AppSettings { Provider = AgentProvider.OpenAiApi };
+            var settings = new AppSettings { Provider = AgentProvider.Google };
             var window = new SettingsWindow(app, settings);
 
-            window.SwitchToSection(SettingsSection.OpenAiApi);
+            window.SwitchToSection(SettingsSection.Provider);
 
-            // The probed models list starts with no source until a probe runs
-            Assert.True(window.ProbedModelsList.Source == null || window.ProbedModelsList.Source.Count == 0);
+            // The probed models start empty until a probe runs
+            Assert.Empty(window.ProbedModels);
+            Assert.Equal(0, window.ModelField.Source!.Count);
 
             // Verify alphabetical sort (case-insensitive)
             var sampleUnsorted = new List<string> { "zebra-3b", "Alpha-7b", "beta-8b", "alpha-13b" };
             var sorted = sampleUnsorted.OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
             Assert.Equal(new[] { "alpha-13b", "Alpha-7b", "beta-8b", "zebra-3b" }, sorted);
+        }
+
+        [Fact]
+        public void SettingsWindow_provider_page_is_one_continuous_scroll()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
+            var window = new SettingsWindow(app, settings);
+
+            // One scrolling page, no sub-panels: picker and settings share the scroll view.
+            Assert.Empty(FindDescendants<FrameView>(window.ProviderScroll));
+            Assert.Same(window.ProviderScroll, window.ProviderCombo.SuperView);
+            Assert.Same(window.ProviderScroll, window.ClaudeModelCombo.SuperView!.SuperView);
+
+            // Picker above, header between, settings below: one compact page of collapsed
+            // dropdowns rather than stacked lists. (Order in SubViews, not frames: frames
+            // only resolve once laid out.)
+            var kids = window.ProviderScroll.SubViews.ToList();
+            var header = FindDescendants<Label>(window.ProviderScroll).First(l => $"{l.Text}" == "Provider Settings");
+            Assert.True(kids.IndexOf(window.ProviderCombo) < kids.IndexOf(header));
+            Assert.True(kids.IndexOf(header) < kids.IndexOf(window.ClaudeModelCombo.SuperView!));
+
+            // A headed gap separates the picker from the settings below.
+            Assert.Contains(
+                FindDescendants<Label>(window.ProviderScroll),
+                l => $"{l.Text}" == "Provider Settings");
+
+            // The scroll view knows its content height: Claude box at Y=4, five rows tall.
+            Assert.Equal(4 + 5 + 1, window.ProviderScroll.GetContentHeight());
+        }
+
+        [Fact]
+        public void SettingsWindow_provider_page_scrolls_when_content_overflows()
+        {
+            using var root = new SavesRoot();
+            var app = Application.Create();
+            var settings = new AppSettings { Provider = AgentProvider.Google };
+            var window = new SettingsWindow(app, settings);
+
+            // A vertical scrollbar that only appears when the content overflows, and a
+            // content height that actually covers the settings below the picker:
+            // endpoint box at Y=4, fourteen rows tall.
+            Assert.True(window.ProviderScroll.ViewportSettings.HasFlag(ViewportSettingsFlags.HasVerticalScrollBar));
+            Assert.Equal(4 + 14 + 1, window.ProviderScroll.GetContentHeight());
+
+            // A control buried deep in the settings still takes focus through the nesting.
+            window.SwitchToSection(SettingsSection.Provider);
+            window.SetFocus();
+            window.ModelField.SetFocus();
+
+            Assert.Same(window.ModelField, window.MostFocused);
         }
 
         [Fact]
@@ -349,19 +577,20 @@ namespace TerminalQuest.Tests.Ui
             var settings = new AppSettings { Provider = AgentProvider.ClaudeCode };
             var window = new SettingsWindow(app, settings);
 
-            Assert.Equal(4, window.SectionsList.Source?.Count);
+            Assert.Equal(2, window.SectionsList.Source?.Count);
             Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
-            // Each row maps to its section in order.
-            window.SectionsList.SelectedItem = 2;
-            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
+            // Each row maps to its section in order. Provider Settings rides along inside
+            // the provider section rather than taking a row of its own.
+            window.SectionsList.SelectedItem = 1;
+            Assert.Equal(SettingsSection.Preferences, window.ActiveSection);
             window.SectionsList.SelectedItem = 0;
             Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
-            window.ProviderList.SelectedItem = 1;
-            window.ProviderList.NewKeyDownEvent(Key.Enter);
+            window.ProviderCombo.Value = window.ProviderNames[1];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
             window.NewKeyDownEvent(Key.S.WithCtrl);
-            Assert.Equal(AgentProvider.OpenAiApi, window.Chosen!.Provider);
+            Assert.Equal(AgentProvider.Google, window.Chosen!.Provider);
         }
 
         [Fact]
@@ -377,8 +606,8 @@ namespace TerminalQuest.Tests.Ui
             window.SwitchToSection(SettingsSection.Preferences);
             Assert.Equal(SettingsSection.Preferences, window.ActiveSection);
 
-            window.SwitchToSection(SettingsSection.OpenAiApi);
-            Assert.Equal(SettingsSection.OpenAiApi, window.ActiveSection);
+            window.SwitchToSection(SettingsSection.Provider);
+            Assert.Equal(SettingsSection.Provider, window.ActiveSection);
 
             // Press Esc to cancel without saving
             var cancelledFired = false;
@@ -402,32 +631,34 @@ namespace TerminalQuest.Tests.Ui
             // Every input label draws the eye in gold...
             foreach (var prefix in new[]
             {
-                "Active Narrative Provider",
+                "Narrative Provider",
                 "Preset Claude Models",
-                "Or custom model identifier:",
                 "Server Base URL",
-                "Preset (Up/Down",
                 "API Key",
                 "Model Name / ID",
                 "Transcript Recall Characters:",
                 "External Editor Command",
             })
             {
-                var label = labels.First(l => l.Text.StartsWith(prefix));
+                var label = labels.First(l => $"{l.Text}".StartsWith(prefix));
                 Assert.Equal(Theme.Attr(TextRole.Item), label.GetAttributeForRole(VisualRole.Normal));
             }
 
             // ...while help text recedes into grey.
             foreach (var fragment in new[]
             {
-                "connects over HTTP",
+                "support only OpenAI-compatible",
                 "requires the 'claude' CLI",
                 "Boundaries:",
             })
             {
-                var label = labels.First(l => l.Text.Contains(fragment));
+                var label = labels.First(l => $"{l.Text}".Contains(fragment));
                 Assert.Equal(Theme.Attr(TextRole.System), label.GetAttributeForRole(VisualRole.Normal));
             }
+
+            // The built-in endpoint readout is information, not an input: plain text.
+            var builtin = labels.First(l => $"{l.Text}".StartsWith("Built-in endpoint:"));
+            Assert.Equal(Theme.Attr(TextRole.Normal), builtin.GetAttributeForRole(VisualRole.Normal));
         }
 
         [Fact]
@@ -440,11 +671,11 @@ namespace TerminalQuest.Tests.Ui
 
             var labels = FindDescendants<Label>(window).ToList();
 
-            var active = labels.First(l => l.Text.StartsWith("Current Configuration:"));
+            var active = labels.First(l => $"{l.Text}".StartsWith("Current Configuration:"));
             Assert.Equal(Theme.Attr(TextRole.Command), active.GetAttributeForRole(VisualRole.Normal));
 
-            var standby = labels.First(l => l.Text.Contains("standby:"));
-            Assert.Equal(Theme.Attr(TextRole.System), standby.GetAttributeForRole(VisualRole.Normal));
+            var detail = labels.First(l => $"{l.Text}".StartsWith("Runs the 'claude' CLI"));
+            Assert.Equal(Theme.Attr(TextRole.System), detail.GetAttributeForRole(VisualRole.Normal));
         }
 
         [Fact]
@@ -456,8 +687,8 @@ namespace TerminalQuest.Tests.Ui
             var window = new SettingsWindow(app, settings);
 
             // A confirmation reads green.
-            window.ProviderList.SelectedItem = 1;
-            window.ProviderList.NewKeyDownEvent(Key.Enter);
+            window.ProviderCombo.Value = window.ProviderNames[1];
+            window.ProviderCombo.NewKeyDownEvent(Key.Enter);
             var confirm = FindDescendants<Label>(window).First(l => l.Text.Contains("Active provider set to"));
             Assert.Equal(Theme.Attr(TextRole.Place), confirm.GetAttributeForRole(VisualRole.Normal));
 
@@ -484,7 +715,7 @@ namespace TerminalQuest.Tests.Ui
 
             // Tab moves into the form instead of walking every field.
             window.NewKeyDownEvent(Key.Tab);
-            Assert.Equal(window.ProviderList, window.MostFocused);
+            Assert.Equal(window.ProviderCombo, window.MostFocused);
 
             // Tab jumps straight to the action bar.
             window.NewKeyDownEvent(Key.Tab);

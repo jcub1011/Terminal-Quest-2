@@ -18,6 +18,8 @@ namespace TerminalQuest.Settings
         PropertyNameCaseInsensitive = true,
         UseStringEnumConverter = false)]
     [JsonSerializable(typeof(AppSettings))]
+    [JsonSerializable(typeof(OpenAiEndpointConfig))]
+    [JsonSerializable(typeof(LegacyAppSettings))]
     [JsonSerializable(typeof(AgentProvider))]
     internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 }

@@ -1317,14 +1317,18 @@ namespace TerminalQuest
         }
 
         /// <summary>The one-line summary of who will be narrating, for the save menu.</summary>
-        private static string Describe(AppSettings settings) => settings.Provider switch
+        private static string Describe(AppSettings settings)
         {
-            AgentProvider.OpenAiApi =>
-                $"OpenAI API ({(settings.OpenAiPreset is { Length: > 0 } preset ? preset : "Custom")}) - {(settings.LmStudioModel is { Length: > 0 } model ? model : "whichever model is loaded")}",
+            if (AppSettings.IsOpenAiProvider(settings.Provider))
+            {
+                var name = OpenAiPresets.ForProvider(AppSettings.EffectiveProvider(settings.Provider)).Name;
+                return $"{name} (OpenAI API) - {(settings.ActiveModel is { Length: > 0 } model ? model : "whichever model is loaded")}";
+            }
+
             // By the name the settings screen offered rather than the raw id, so the menu says
             // back the same word the player picked.
-            _ => $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } model ? ClaudeModels.Describe(model) : "default model")}",
-        };
+            return $"Claude Code - {(settings.ClaudeModel is { Length: > 0 } claudeModel ? ClaudeModels.Describe(claudeModel) : "default model")}";
+        }
 
         /// <summary>What the character screen settled, once it has been written to the save.</summary>
         /// <param name="HasStartLocation">

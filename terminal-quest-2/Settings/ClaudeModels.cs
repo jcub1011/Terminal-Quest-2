@@ -58,6 +58,34 @@ namespace TerminalQuest.Settings
         }
 
         /// <summary>
+        /// The offered models with live ids merged in: the curated entries first, then any
+        /// fetched id this build does not already know, shown under its own id. Case-insensitive,
+        /// so a live id that only differs in case from a known one is not offered twice.
+        /// </summary>
+        public static Entry[] WithLiveIds(IEnumerable<string>? liveIds)
+        {
+            if (liveIds is null)
+            {
+                return All;
+            }
+
+            var known = new HashSet<string>(All.Select(e => e.Id), StringComparer.OrdinalIgnoreCase);
+            var merged = new List<Entry>(All);
+            foreach (var raw in liveIds)
+            {
+                var id = raw?.Trim() ?? string.Empty;
+                if (id.Length == 0 || !known.Add(id))
+                {
+                    continue;
+                }
+
+                merged.Add(new Entry(id, id, "live from the Anthropic API"));
+            }
+
+            return [.. merged];
+        }
+
+        /// <summary>
         /// The name for an id, falling back to the id itself so an unknown model is still named
         /// something truthful.
         /// </summary>

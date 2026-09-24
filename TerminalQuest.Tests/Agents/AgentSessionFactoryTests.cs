@@ -33,23 +33,17 @@ namespace TerminalQuest.Tests.Agents
             await BuiltAsync<ClaudeSession>(new AppSettings(), save.Store);
         }
 
-        [Fact]
-        public async Task Choosing_lm_studio_builds_an_lm_studio_session()
+        [Theory]
+        [InlineData(AgentProvider.Google)]
+        [InlineData(AgentProvider.OpenAI)]
+        [InlineData(AgentProvider.Anthropic)]
+        [InlineData(AgentProvider.Custom)]
+        internal async Task Choosing_an_openai_compatible_provider_builds_an_lm_studio_session(AgentProvider provider)
         {
             using var save = new TempSave();
 
             await BuiltAsync<LmStudioSession>(
-                new AppSettings { Provider = AgentProvider.LmStudio },
-                save.Store);
-        }
-
-        [Fact]
-        public async Task Choosing_openai_api_builds_an_openai_session()
-        {
-            using var save = new TempSave();
-
-            await BuiltAsync<LmStudioSession>(
-                new AppSettings { Provider = AgentProvider.OpenAiApi },
+                new AppSettings { Provider = provider },
                 save.Store);
         }
 
@@ -86,7 +80,11 @@ namespace TerminalQuest.Tests.Agents
             foreach (var provider in Enum.GetValues<AgentProvider>())
             {
                 var session = AgentSessionFactory.Create(
-                    new AppSettings { Provider = provider, LmStudioBaseUrl = "http://127.0.0.1:1/v1" },
+                    new AppSettings
+                    {
+                        Provider = provider,
+                        Custom = new OpenAiEndpointConfig { BaseUrl = "http://127.0.0.1:1/v1" },
+                    },
                     save.Store,
                     "You narrate.");
 

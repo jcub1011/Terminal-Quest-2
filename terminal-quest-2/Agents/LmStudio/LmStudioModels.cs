@@ -60,8 +60,8 @@ namespace TerminalQuest.Agents.LmStudio
                     // Worth its own sentence: the server is up and correctly addressed, so every
                     // other reading of a refusal sends the player looking in the wrong place.
                     throw new AgentException(
-                        $"{baseUrl} wants an API key. Copy the token from LM Studio's developer "
-                      + "settings into the API key field.",
+                        $"{baseUrl} refused the request: the API key is missing or incorrect. "
+                      + "Enter it in the API key field and probe again.",
                         body,
                         (int)response.StatusCode);
                 }

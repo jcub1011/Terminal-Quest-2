@@ -61,6 +61,23 @@ namespace TerminalQuest.Settings
                     return new AppSettings();
                 }
 
+                // A file from before providers were split carries its address, model, and key
+                // under the old shared names. Harvest them separately: the new shape ignores
+                // unknown properties, so without this they would be dropped unread.
+                try
+                {
+                    var legacy = JsonSerializer.Deserialize(text, SettingsJsonContext.Default.LegacyAppSettings);
+                    if (legacy?.HasValues == true)
+                    {
+                        settings.MigrateLegacy(legacy);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // The main document already parsed; a legacy section that does not parse is
+                    // simply not migrated.
+                }
+
                 settings.Normalize();
                 return settings;
             }
@@ -96,10 +113,42 @@ namespace TerminalQuest.Settings
                     JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppSettings),
                     Utf8NoBom);
                 File.Move(temporary, path, overwrite: true);
+                RestrictToCurrentUser(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
                 throw new SaveException($"Could not write settings: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Locks the settings file down to the current user, since it holds sealed API keys.
+        /// Best effort and Windows-only: it must never break a save, and elsewhere the file
+        /// keeps the platform defaults.
+        /// </summary>
+        private static void RestrictToCurrentUser(string path)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return;
+            }
+
+            try
+            {
+                var info = new FileInfo(path);
+                var security = info.GetAccessControl();
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                security.SetOwner(System.Security.Principal.WindowsIdentity.GetCurrent().User!);
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    System.Security.Principal.WindowsIdentity.GetCurrent().User!,
+                    System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.AccessControlType.Allow));
+                info.SetAccessControl(security);
+            }
+            catch
+            {
+                // A file with default permissions still works; DPAPI keeps another user from
+                // unsealing the keys inside it.
             }
         }
     }
