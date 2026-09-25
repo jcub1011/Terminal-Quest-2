@@ -70,6 +70,19 @@ namespace TerminalQuest.Agents.LmStudio
         /// </summary>
         public TimeSpan TurnTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+        /// <summary>
+        /// Where prices and context windows come from. Called once, from
+        /// <see cref="LmStudioSession.StartAsync"/> and never from the constructor, because building a
+        /// session must not reach the network. Null leaves every turn unpriced.
+        /// </summary>
+        public Func<CancellationToken, Task<Pricing.ModelCatalog>>? Catalog { get; init; }
+
+        /// <summary>
+        /// The catalog provider the model is listed under - <c>openai</c>, <c>google</c> and so on
+        /// (see <see cref="Pricing.ModelCatalog.ProviderFor"/>). Null leaves every turn unpriced.
+        /// </summary>
+        public string? CatalogProvider { get; init; }
+
         /// <summary>Which role's tools to expose to the model.</summary>
         public Mcp.ToolRole Role { get; init; } = Mcp.ToolRole.Narrator;
 

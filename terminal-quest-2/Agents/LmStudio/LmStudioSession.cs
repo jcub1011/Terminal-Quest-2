@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
+using TerminalQuest.Agents.Pricing;
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
 using TerminalQuest.Settings;
@@ -75,6 +76,19 @@ namespace TerminalQuest.Agents.LmStudio
         /// </summary>
         private int _contextWindowTokens;
 
+        /// <summary>
+        /// Whether the server is one the player runs themselves, which charges nothing. Worked out
+        /// from the address rather than the provider, so a Custom endpoint pointed at a hosted API is
+        /// still treated as one that bills.
+        /// </summary>
+        private readonly bool _isLocal;
+
+        /// <summary>
+        /// What the model costs, looked up once at startup. Null for a local server, and for a paid one
+        /// the catalog does not list - whose turns are then reported as incomplete rather than free.
+        /// </summary>
+        private ModelRates? _rates;
+
         /// <param name="handler">
         /// Where the requests go. Null means a real socket, which is what the game always passes.
         /// It exists so the streaming reply can be driven from canned bytes. A supplied handler
@@ -91,6 +105,7 @@ namespace TerminalQuest.Agents.LmStudio
 
             _options = options with { BaseUrl = AppSettings.NormalizeBaseUrl(options.BaseUrl) };
             _store = store;
+            _isLocal = ModelCatalog.IsLocal(_options.BaseUrl);
 
             _handler = handler;
 
@@ -113,6 +128,14 @@ namespace TerminalQuest.Agents.LmStudio
 
         /// <inheritdoc />
         public event Action<string>? OnTextDelta;
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// Once per round trip of the tool loop: the usage frame closes each response, so that is the
+        /// earliest the count is known. The last one lands before the narration is paced out, so the
+        /// pane is already up to date while the prose is still arriving.
+        /// </remarks>
+        public event Action<AgentProgress>? OnProgress;
 
         /// <summary>
         /// Confirms the server is up and has the configured model.
@@ -166,7 +189,49 @@ namespace TerminalQuest.Agents.LmStudio
                     _handler)
                 .ConfigureAwait(false) ?? 0;
 
+            _rates = await LookUpRatesAsync(cancellationToken).ConfigureAwait(false);
+
+            // A hosted API does not say how much its model holds, so the catalog's figure stands in.
+            // A local server's own answer is preferred when it gave one: it is the length actually
+            // loaded, which the player may have set lower than the model allows.
+            if (_contextWindowTokens == 0 && _rates is { ContextLimit: > 0 } rates)
+            {
+                _contextWindowTokens = rates.ContextLimit;
+            }
+
             _started = true;
+        }
+
+        /// <summary>
+        /// The catalog entry for the configured model, or null where there is none to find.
+        /// </summary>
+        /// <remarks>
+        /// Unable to fail the start, for the same reason as the context-length probe: prices feed the
+        /// status pane and nothing else. Bounded by the startup timeout, so a slow first download
+        /// leaves the session unpriced rather than holding up the scene.
+        /// </remarks>
+        private async Task<ModelRates?> LookUpRatesAsync(CancellationToken cancellationToken)
+        {
+            if (_isLocal
+                || _options.Catalog is not { } catalog
+                || _options.CatalogProvider is not { Length: > 0 } provider
+                || _options.Model is not { Length: > 0 } model)
+            {
+                return null;
+            }
+
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            wait.CancelAfter(_options.StartupTimeout);
+
+            try
+            {
+                var loaded = await catalog(wait.Token).ConfigureAwait(false);
+                return loaded.Resolve(provider, model);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -203,13 +268,7 @@ namespace TerminalQuest.Agents.LmStudio
                 // because the world has moved since.
                 var answered = new Dictionary<string, string>(StringComparer.Ordinal);
 
-                var inputTokens = 0;
-                var outputTokens = 0;
-
-                // Kept apart from outputTokens because the two answer different questions. That one
-                // is billing and totals the turn; this one is occupancy, and only the reply still in
-                // the context counts - the earlier ones are already inside inputTokens.
-                var lastOutputTokens = 0;
+                var tally = new TurnTally(_isLocal, _rates);
 
                 string? lastAssistantTextWithTools = null;
 
@@ -219,11 +278,15 @@ namespace TerminalQuest.Agents.LmStudio
                         turn.Token,
                         allowEmpty: !string.IsNullOrWhiteSpace(lastAssistantTextWithTools)).ConfigureAwait(false);
 
-                    // Input tokens are the whole prompt, so the last request's count is the turn's;
-                    // output accumulates across every request the turn made.
-                    inputTokens = reply.InputTokens > 0 ? reply.InputTokens : inputTokens;
-                    outputTokens += reply.OutputTokens;
-                    lastOutputTokens = reply.OutputTokens;
+                    tally.Add(reply);
+
+                    OnProgress?.Invoke(new AgentProgress
+                    {
+                        ContextTokens = tally.ContextTokens,
+                        ContextWindowTokens = _contextWindowTokens,
+                        CostUsd = tally.CostUsd,
+                        CostIncomplete = tally.Incomplete,
+                    });
 
                     _history.Add(ChatMessage.Assistant(reply.Text, reply.ToolCalls, reply.ThoughtSignature));
 
@@ -240,7 +303,7 @@ namespace TerminalQuest.Agents.LmStudio
                             await StreamPacedAsync(finalText, turn.Token).ConfigureAwait(false);
                         }
 
-                        return Finish(finalText, isError: false, inputTokens, outputTokens, lastOutputTokens, start);
+                        return Finish(finalText, isError: false, tally, start);
                     }
 
                     if (!string.IsNullOrWhiteSpace(reply.Text))
@@ -258,9 +321,7 @@ namespace TerminalQuest.Agents.LmStudio
                     $"The narrator used tools {_options.MaxToolIterations} times without telling any of it. "
                   + "Try again, or try a larger model.",
                     isError: true,
-                    inputTokens,
-                    outputTokens,
-                    lastOutputTokens,
+                    tally,
                     start);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -310,28 +371,19 @@ namespace TerminalQuest.Agents.LmStudio
             return ValueTask.CompletedTask;
         }
 
-        private AgentTurnResult Finish(
-            string text,
-            bool isError,
-            int inputTokens,
-            int outputTokens,
-            int lastOutputTokens,
-            long start) =>
+        private AgentTurnResult Finish(string text, bool isError, TurnTally tally, long start) =>
             new()
             {
                 Text = text,
                 IsError = isError,
-                InputTokens = inputTokens,
-                OutputTokens = outputTokens,
+                InputTokens = tally.UncachedPromptTokens,
+                OutputTokens = tally.OutputTokens,
+                CacheReadTokens = tally.CachedTokens,
+                CostUsd = tally.CostUsd,
+                CostIncomplete = tally.Incomplete,
 
-                // The prompt of the last request plus the answer to it. Every earlier round trip of
-                // the turn is already counted inside that prompt, because this provider resends the
-                // whole history on each one.
-                ContextTokens = inputTokens > 0 ? inputTokens + lastOutputTokens : 0,
+                ContextTokens = tally.ContextTokens,
                 ContextWindowTokens = _contextWindowTokens,
-
-                // CostUsd and the cache counts stay zero: a model running on this machine has
-                // neither a price nor a prompt cache to report.
                 DurationMs = (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
             };
 
@@ -492,6 +544,9 @@ namespace TerminalQuest.Agents.LmStudio
             var calls = new List<PartialToolCall>();
             var inputTokens = 0;
             var outputTokens = 0;
+            var cachedTokens = 0;
+            double? reportedCost = null;
+            var hasUsage = false;
             string? thoughtSignature = null;
 
             while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
@@ -546,8 +601,18 @@ namespace TerminalQuest.Agents.LmStudio
                     && root.TryGetProperty("usage", out var usage)
                     && usage.ValueKind == JsonValueKind.Object)
                 {
+                    hasUsage = true;
                     inputTokens = ReadInt32(usage, "prompt_tokens");
                     outputTokens = ReadInt32(usage, "completion_tokens");
+
+                    // Part of prompt_tokens, not in addition to it, and billed at the cache rate.
+                    cachedTokens = usage.TryGetProperty("prompt_tokens_details", out var details)
+                        ? ReadInt32(details, "cached_tokens")
+                        : 0;
+
+                    // OpenRouter and a few gateways put the price of the request right in the frame,
+                    // which beats anything worked out from a catalog.
+                    reportedCost = ReadDouble(usage, "cost") ?? ReadDouble(usage, "total_cost");
                 }
 
                 if (root.ValueKind != JsonValueKind.Object
@@ -638,7 +703,10 @@ namespace TerminalQuest.Agents.LmStudio
                 builtCalls,
                 inputTokens,
                 outputTokens,
-                thoughtSignature);
+                thoughtSignature,
+                hasUsage,
+                Math.Clamp(cachedTokens, 0, inputTokens),
+                reportedCost);
         }
 
         private static void Emit(string visible, StringBuilder text)
@@ -1035,13 +1103,93 @@ namespace TerminalQuest.Agents.LmStudio
                 ? number
                 : 0;
 
+        private static double? ReadDouble(JsonElement owner, string propertyName) =>
+            owner.ValueKind == JsonValueKind.Object
+            && owner.TryGetProperty(propertyName, out var value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetDouble(out var number)
+                ? number
+                : null;
+
         /// <summary>What one request to the endpoint produced.</summary>
+        /// <param name="HasUsage">Whether the stream carried a usage frame at all.</param>
+        /// <param name="CachedTokens">The part of <paramref name="InputTokens"/> served from the provider's cache.</param>
+        /// <param name="ReportedCost">The request's price in USD, where the server stated one.</param>
         private readonly record struct Reply(
             string Text,
             IReadOnlyList<ToolCall> ToolCalls,
             int InputTokens,
             int OutputTokens,
-            string? ThoughtSignature = null);
+            string? ThoughtSignature = null,
+            bool HasUsage = false,
+            int CachedTokens = 0,
+            double? ReportedCost = null);
+
+        /// <summary>
+        /// Adds up what one turn's requests cost.
+        /// </summary>
+        /// <remarks>
+        /// Every round trip of the tool loop resends the whole conversation and is billed for all of
+        /// it, so billing sums the prompts. Occupancy does not - the last prompt already contains the
+        /// earlier ones - which is why the last request's counts are kept apart for
+        /// <see cref="AgentTurnResult.ContextTokens"/>.
+        /// </remarks>
+        private sealed class TurnTally(bool isLocal, ModelRates? rates)
+        {
+            private int _promptTokens;
+
+            public int CachedTokens { get; private set; }
+
+            public int OutputTokens { get; private set; }
+
+            public int LastPromptTokens { get; private set; }
+
+            public int LastOutputTokens { get; private set; }
+
+            public double CostUsd { get; private set; }
+
+            /// <summary>True once a request could not be priced; <see cref="CostUsd"/> is then a floor.</summary>
+            public bool Incomplete { get; private set; }
+
+            public int UncachedPromptTokens => _promptTokens - CachedTokens;
+
+            /// <summary>
+            /// The prompt of the last request plus the answer to it. Every earlier round trip of the
+            /// turn is already counted inside that prompt, because this provider resends the whole
+            /// history on each one. Zero while no request has reported a prompt.
+            /// </summary>
+            public int ContextTokens => LastPromptTokens > 0 ? LastPromptTokens + LastOutputTokens : 0;
+
+            public void Add(Reply reply)
+            {
+                _promptTokens += reply.InputTokens;
+                CachedTokens += reply.CachedTokens;
+                OutputTokens += reply.OutputTokens;
+
+                // A request that reported no prompt keeps the last one that did, so a frame-less
+                // round trip does not read as a context that emptied.
+                LastPromptTokens = reply.InputTokens > 0 ? reply.InputTokens : LastPromptTokens;
+                LastOutputTokens = reply.OutputTokens;
+
+                if (isLocal)
+                {
+                    return;
+                }
+
+                if (reply.ReportedCost is { } reported)
+                {
+                    CostUsd += reported;
+                }
+                else if (reply.HasUsage && rates?.Cost(reply.InputTokens - reply.CachedTokens, reply.CachedTokens, reply.OutputTokens) is { } priced)
+                {
+                    CostUsd += priced;
+                }
+                else
+                {
+                    Incomplete = true;
+                }
+            }
+        }
 
         /// <summary>A tool call still being assembled out of stream fragments.</summary>
         internal sealed class PartialToolCall

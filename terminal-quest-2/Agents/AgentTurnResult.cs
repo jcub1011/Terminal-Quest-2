@@ -22,6 +22,13 @@ namespace TerminalQuest.Agents
         /// <summary>Cost of the turn in USD. Zero for a locally served model.</summary>
         public double CostUsd { get; init; }
 
+        /// <summary>
+        /// True when <see cref="CostUsd"/> leaves something out: a paid model with no published price,
+        /// or a request that came back without its token counts. The figure is then a floor, and the
+        /// status pane says so rather than passing it off as the whole bill.
+        /// </summary>
+        public bool CostIncomplete { get; init; }
+
         /// <summary>Uncached input tokens billed for this turn.</summary>
         public int InputTokens { get; init; }
 

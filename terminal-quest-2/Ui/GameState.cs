@@ -55,8 +55,24 @@ namespace TerminalQuest.Ui
         /// <summary>Coin in hand, shown on its own line however long the item list gets.</summary>
         public int Money { get; set; }
 
-        /// <summary>Running total for the session, accumulated from each turn's reported cost.</summary>
+        /// <summary>
+        /// Running total for the session, accumulated from each turn's reported cost - the narrator's
+        /// and the Director's together, because the player pays for both.
+        /// </summary>
         public double CostUsd { get; set; }
+
+        /// <summary>
+        /// True once any turn could not be priced, so <see cref="CostUsd"/> is a floor rather than the
+        /// bill. Sticky: a later turn that priced cleanly does not make the earlier gap go away.
+        /// </summary>
+        public bool CostIncomplete { get; set; }
+
+        /// <summary>
+        /// What the turns still running have cost so far - the narrator's and the Director's, which can
+        /// overlap. Shown on top of <see cref="CostUsd"/> and kept apart from it, so that the final
+        /// figure a turn reports replaces its running one instead of being added on top.
+        /// </summary>
+        public double PendingCostUsd { get; set; }
 
         /// <summary>Cache tokens read on the most recent turn.</summary>
         public int LastCacheRead { get; set; }
@@ -72,6 +88,15 @@ namespace TerminalQuest.Ui
         /// case the pane shows the count without a proportion rather than inventing a denominator.
         /// </summary>
         public int ContextWindowTokens { get; set; }
+
+        /// <summary>
+        /// How much of the Director's context is occupied as of its last wake. Kept apart from the
+        /// narrator's: they are separate conversations, each filling its own window.
+        /// </summary>
+        public int DirectorContextTokens { get; set; }
+
+        /// <summary>The window <see cref="DirectorContextTokens"/> is filling, or zero where it is not known.</summary>
+        public int DirectorContextWindowTokens { get; set; }
 
         /// <summary>Wall-clock duration of the most recent turn.</summary>
         public int LastDurationMs { get; set; }

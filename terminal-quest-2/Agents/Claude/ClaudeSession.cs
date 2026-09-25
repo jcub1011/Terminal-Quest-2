@@ -69,6 +69,14 @@ namespace TerminalQuest.Agents.Claude
         /// </summary>
         public event Action<string>? OnTextDelta;
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// Raised as each request of the turn opens and again as its answer closes, from the same
+        /// frames that feed <see cref="AgentTurnResult.ContextTokens"/>. Cost is left null: the CLI
+        /// prices a turn only in its closing <c>result</c>.
+        /// </remarks>
+        public event Action<AgentProgress>? OnProgress;
+
         /// <summary>
         /// Session id reported by Claude Code. Null until the first turn completes: the process
         /// stays silent until it receives its first message.
@@ -502,6 +510,8 @@ namespace TerminalQuest.Agents.Claude
             // The answer has not been written yet, so this starts at whatever the opening frame
             // claims and is corrected by the deltas below as it arrives.
             Volatile.Write(ref _contextOutputTokens, ReadInt32(usage, "output_tokens"));
+
+            ReportProgress();
         }
 
         /// <summary>
@@ -519,7 +529,23 @@ namespace TerminalQuest.Agents.Claude
             if (output > 0)
             {
                 Volatile.Write(ref _contextOutputTokens, output);
+                ReportProgress();
             }
+        }
+
+        private void ReportProgress()
+        {
+            var prompt = Volatile.Read(ref _contextPromptTokens);
+            if (prompt <= 0)
+            {
+                return;
+            }
+
+            OnProgress?.Invoke(new AgentProgress
+            {
+                ContextTokens = prompt + Volatile.Read(ref _contextOutputTokens),
+                ContextWindowTokens = ClaudeContextTokens,
+            });
         }
 
         private void ForwardTextDelta(JsonElement payload)

@@ -275,7 +275,7 @@ namespace TerminalQuest.Tests.Ui
         {
             using var view = new StatusView(new GameState { Health = 20, MaxHealth = 20 });
 
-            foreach (var caption in new[] { "HP:", "Turn:", "Gold:", "Context:" })
+            foreach (var caption in new[] { "HP:", "Turn:", "Gold:", "Narrator:", "Director:" })
             {
                 Assert.Equal(Theme.Attr(TextRole.Hint), LabelWith(view, caption).GetAttributeForRole(VisualRole.Normal));
             }
@@ -307,6 +307,31 @@ namespace TerminalQuest.Tests.Ui
             using var view = new StatusView(new GameState { ContextTokens = percent, ContextWindowTokens = 100 });
 
             Assert.Equal(Theme.Attr((TextRole)expectedRole), LabelWith(view, $"{percent} ({percent}%)").GetAttributeForRole(VisualRole.Normal));
+        }
+
+        [Fact]
+        public void The_director_has_a_gauge_of_its_own()
+        {
+            using var view = new StatusView(new GameState
+            {
+                ContextTokens = 12_000,
+                ContextWindowTokens = 128_000,
+                DirectorContextTokens = 3_000,
+                DirectorContextWindowTokens = 100_000,
+            });
+
+            Assert.NotNull(LabelWith(view, "12k (9%)"));
+            Assert.NotNull(LabelWith(view, "3k (3%)"));
+        }
+
+        [Theory]
+        [InlineData(0.0123, false, "$0.0123")]
+        [InlineData(0.0, false, "$0.0000")]
+        [InlineData(0.0123, true, "$0.0123+")]
+        [InlineData(0.0, true, "?")]
+        public void A_cost_with_gaps_in_it_says_so(double cost, bool incomplete, string expected)
+        {
+            Assert.Equal(expected, StatusView.FormatCost(cost, incomplete));
         }
 
         [Fact]

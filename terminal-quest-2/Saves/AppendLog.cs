@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -45,19 +46,6 @@ namespace TerminalQuest.Saves
         /// </remarks>
         private const int TailBytes = 8 * 1024;
 
-        /// <summary>
-        /// Tries at the lock before giving up, and the pause between them.
-        /// </summary>
-        /// <remarks>
-        /// More attempts than <see cref="SaveStore"/>'s read retry, and for a different reason.
-        /// Losing that race costs a redraw; losing this one loses a line of history for good. The
-        /// holder's critical section is a small read and a small write, so ten is generous rather
-        /// than hopeful.
-        /// </remarks>
-        private const int Attempts = 10;
-
-        private const int RetryMilliseconds = 20;
-
         private readonly JsonTypeInfo<TEntry> _typeInfo;
 
         public AppendLog(string path, JsonTypeInfo<TEntry> typeInfo)
@@ -96,7 +84,12 @@ namespace TerminalQuest.Saves
 
             var directory = System.IO.Path.GetDirectoryName(Path);
 
-            for (var attempt = 1; ; attempt++)
+            // A deadline rather than a count of tries, on SaveStore's budget. The other appender lets go
+            // within milliseconds, but a scanner opening the file it just saw change can hold it for
+            // hundreds - and losing this race loses a line of history for good.
+            var start = Stopwatch.GetTimestamp();
+
+            while (true)
             {
                 try
                 {
@@ -142,12 +135,12 @@ namespace TerminalQuest.Saves
 
                     return entry.Seq;
                 }
-                catch (IOException) when (attempt < Attempts)
+                catch (IOException) when (Stopwatch.GetElapsedTime(start) < SaveStore.ContentionBudget)
                 {
-                    // Another appender holds the handle. Blocking, for the reason SaveStore's read
+                    // Somebody else holds the handle. Blocking, for the reason SaveStore's read
                     // retry blocks: the caller is a tool call the model is already waiting on, and
                     // it has nothing else to be doing for twenty milliseconds.
-                    Thread.Sleep(RetryMilliseconds);
+                    Thread.Sleep(SaveStore.ContentionPauseMilliseconds);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

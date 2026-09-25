@@ -2,6 +2,7 @@ using System.Net;
 
 using TerminalQuest.Agents;
 using TerminalQuest.Agents.LmStudio;
+using TerminalQuest.Agents.Pricing;
 using TerminalQuest.Saves;
 using TerminalQuest.Tests.Infrastructure;
 
@@ -360,6 +361,191 @@ namespace TerminalQuest.Tests.Agents
 
             Assert.Equal(30, result.InputTokens);
             Assert.Equal(7, result.OutputTokens);
+        }
+
+        // ---- Pricing ------------------------------------------------------------------------
+
+        /// <summary>A hosted endpoint priced from the sample catalog, as the OpenAI preset would be.</summary>
+        private static LmStudioSessionOptions Hosted(string model = "gpt-4o-mini", string? catalogJson = null) =>
+            Options(model) with
+            {
+                BaseUrl = "https://api.example.com/v1",
+                Catalog = _ => Task.FromResult(ModelCatalog.Parse(catalogJson ?? ModelCatalogTests.Sample)),
+                CatalogProvider = "openai",
+            };
+
+        [Fact]
+        public async Task A_hosted_model_is_priced_from_the_catalog()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Says("Hello.", promptTokens: 1_000_000, completionTokens: 1_000_000);
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            // $0.15 in + $0.60 out, per million.
+            Assert.Equal(0.75, result.CostUsd, precision: 10);
+            Assert.False(result.CostIncomplete);
+        }
+
+        [Fact]
+        public async Task Every_round_trip_of_the_tool_loop_is_billed_for_its_whole_prompt()
+        {
+            // The history is resent each time and charged each time. Context is not summed the same way;
+            // see A_turn_that_used_tools_counts_the_conversation_once.
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Calls("get_characters", "{}", promptTokens: 800, completionTokens: 5)
+                .Says("Hello.", promptTokens: 1500, completionTokens: 40);
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(2300, result.InputTokens);
+            Assert.Equal(1540, result.ContextTokens);
+            Assert.Equal((2300 * 0.15 + 45 * 0.6) / 1_000_000, result.CostUsd, precision: 12);
+        }
+
+        [Fact]
+        public async Task Context_and_cost_are_reported_after_every_round_trip_while_the_turn_runs()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Calls("get_characters", "{}", promptTokens: 800, completionTokens: 5)
+                .Says("Hello.", promptTokens: 1500, completionTokens: 40);
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+            var reports = new List<AgentProgress>();
+            session.OnProgress += reports.Add;
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal([805, 1540], reports.Select(report => report.ContextTokens));
+            Assert.Equal((800 * 0.15 + 5 * 0.6) / 1_000_000, reports[0].CostUsd!.Value, precision: 12);
+
+            // The last report is the turn's final figure, so the result changes nothing on screen.
+            Assert.Equal(result.CostUsd, reports[^1].CostUsd!.Value, precision: 12);
+            Assert.Equal(result.ContextTokens, reports[^1].ContextTokens);
+        }
+
+        [Fact]
+        public async Task Cached_prompt_tokens_are_billed_at_the_cache_rate()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Says("Hello.", promptTokens: 1_000_000, completionTokens: 0, cachedTokens: 600_000);
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(400_000, result.InputTokens);
+            Assert.Equal(600_000, result.CacheReadTokens);
+            Assert.Equal(0.4 * 0.15 + 0.6 * 0.075, result.CostUsd, precision: 10);
+        }
+
+        [Fact]
+        public async Task A_cost_the_server_reports_beats_the_catalog()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Says("Hello.", promptTokens: 1_000_000, completionTokens: 1_000_000, cost: 0.0123);
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(0.0123, result.CostUsd, precision: 10);
+            Assert.False(result.CostIncomplete);
+        }
+
+        [Fact]
+        public async Task A_paid_model_the_catalog_does_not_list_is_marked_incomplete_rather_than_free()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("mystery-model").Says("Hello.", promptTokens: 500, completionTokens: 50);
+            await using var session = new LmStudioSession(Hosted("mystery-model"), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(0d, result.CostUsd);
+            Assert.True(result.CostIncomplete);
+        }
+
+        [Fact]
+        public async Task A_hosted_reply_with_no_usage_is_marked_incomplete()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler()
+                .Models("gpt-4o-mini")
+                .Stream("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello.\"}}]}", "data: [DONE]");
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.True(result.CostIncomplete);
+        }
+
+        [Fact]
+        public async Task A_local_server_is_free_and_says_so()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("gpt-4o-mini").Says("Hello.", promptTokens: 500, completionTokens: 50);
+
+            // Priced catalog and all: a model on this machine charges nothing whatever it is called.
+            await using var session = new LmStudioSession(
+                Hosted() with { BaseUrl = "http://localhost:1234/v1" }, save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(0d, result.CostUsd);
+            Assert.False(result.CostIncomplete);
+        }
+
+        [Fact]
+        public async Task The_catalog_supplies_the_context_window_a_hosted_api_will_not()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("gpt-4o-mini").Says("Hello.");
+            await using var session = new LmStudioSession(Hosted(), save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.Equal(128000, result.ContextWindowTokens);
+        }
+
+        [Fact]
+        public async Task A_catalog_that_never_arrives_does_not_hold_up_the_start()
+        {
+            using var save = Seeded();
+            var handler = new ScriptedHandler().Models("gpt-4o-mini").Says("Hello.");
+            var options = Hosted() with
+            {
+                Catalog = async token =>
+                {
+                    await Task.Delay(Timeout.Infinite, token);
+                    return ModelCatalog.Empty;
+                },
+                StartupTimeout = TimeSpan.FromMilliseconds(100),
+            };
+            await using var session = new LmStudioSession(options, save.Store, handler);
+
+            await session.StartAsync(Token);
+            var result = await session.SendAsync("Look around.", Token);
+
+            Assert.True(result.CostIncomplete);
         }
 
         [Fact]

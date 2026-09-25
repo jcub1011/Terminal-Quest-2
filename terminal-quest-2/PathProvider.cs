@@ -30,6 +30,9 @@ namespace TerminalQuest
         /// <summary>Subfolder where settings are stored.</summary>
         public static string Settings => Path.Combine(Root, "Settings");
 
+        /// <summary>Subfolder for downloaded data the game can always fetch again, such as model prices.</summary>
+        public static string Cache => Path.Combine(Root, "Cache");
+
         /// <summary>
         /// Migrates legacy saves and settings to the new directory layout if needed.
         /// Safe to call multiple times (idempotent).

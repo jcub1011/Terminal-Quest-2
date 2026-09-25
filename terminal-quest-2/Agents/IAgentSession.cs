@@ -24,6 +24,13 @@ namespace TerminalQuest.Agents
         event Action<string>? OnTextDelta;
 
         /// <summary>
+        /// Raised while a turn is running, each time the provider reports how much the turn has used,
+        /// so the status pane can follow the context filling instead of learning about it at the end.
+        /// Invoked on a background thread.
+        /// </summary>
+        event Action<AgentProgress>? OnProgress;
+
+        /// <summary>
         /// Makes the session ready to take a turn, and confirms the provider is actually there.
         /// </summary>
         /// <exception cref="AgentException">

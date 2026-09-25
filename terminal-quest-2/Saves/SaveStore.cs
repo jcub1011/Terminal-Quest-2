@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -29,6 +30,22 @@ namespace TerminalQuest.Saves
         private const string OptionsFileName = "options.json";
 
         internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
+        /// <summary>
+        /// How long a read, a replace or an append keeps retrying a file somebody else has open.
+        /// </summary>
+        /// <remarks>
+        /// Sized for the slowest holder rather than the usual one. The usual one is the other process
+        /// of the pair - the game and the tool server share this folder - and it lets go within a few
+        /// milliseconds. The slow one is a virus scanner or search indexer opening a file the moment it
+        /// has been written, which can take hundreds of milliseconds and does not ask first. Failing
+        /// inside that window would cost the player a turn over nothing; a genuinely stuck file still
+        /// fails, just two seconds later.
+        /// </remarks>
+        internal static readonly TimeSpan ContentionBudget = TimeSpan.FromSeconds(2);
+
+        /// <summary>The pause between attempts inside <see cref="ContentionBudget"/>.</summary>
+        internal const int ContentionPauseMilliseconds = 20;
 
         public const int CurrentSchemaVersion = 2;
 
@@ -355,7 +372,7 @@ namespace TerminalQuest.Saves
                 System.IO.Directory.CreateDirectory(Directory);
 
                 File.WriteAllText(temporary, text, Utf8NoBom);
-                File.Move(temporary, path, overwrite: true);
+                Replace(temporary, path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
             {
@@ -366,9 +383,9 @@ namespace TerminalQuest.Saves
 
         private static string ReadShared(string path)
         {
-            const int attempts = 3;
+            var start = Stopwatch.GetTimestamp();
 
-            for (var attempt = 1; ; attempt++)
+            while (true)
             {
                 try
                 {
@@ -381,9 +398,35 @@ namespace TerminalQuest.Saves
                     using var reader = new StreamReader(stream, Utf8NoBom);
                     return reader.ReadToEnd();
                 }
-                catch (Exception ex) when (attempt < attempts && ex is IOException or UnauthorizedAccessException)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                    && Stopwatch.GetElapsedTime(start) < ContentionBudget)
                 {
-                    Thread.Sleep(20);
+                    Thread.Sleep(ContentionPauseMilliseconds);
+                }
+            }
+        }
+
+        /// <summary>Renames a finished temporary file over the real one, waiting out anybody holding it.</summary>
+        /// <remarks>
+        /// The rename is where a scanner bites. It opens the file just replaced without sharing delete,
+        /// and until it lets go Windows refuses to replace it - as a sharing violation or as access
+        /// denied, depending on how far the scan has got - so both are retried.
+        /// </remarks>
+        private static void Replace(string temporary, string path)
+        {
+            var start = Stopwatch.GetTimestamp();
+
+            while (true)
+            {
+                try
+                {
+                    File.Move(temporary, path, overwrite: true);
+                    return;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                    && Stopwatch.GetElapsedTime(start) < ContentionBudget)
+                {
+                    Thread.Sleep(ContentionPauseMilliseconds);
                 }
             }
         }
@@ -399,7 +442,7 @@ namespace TerminalQuest.Saves
 
                 File.WriteAllText(temporary, JsonSerializer.Serialize(value, typeInfo), Utf8NoBom);
 
-                File.Move(temporary, path, overwrite: true);
+                Replace(temporary, path);
 
                 lock (_cache)
                 {

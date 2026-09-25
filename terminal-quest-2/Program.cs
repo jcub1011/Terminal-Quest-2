@@ -329,6 +329,14 @@ namespace TerminalQuest
             narrator.OnTextDelta += pump.Enqueue;
             narrator.OnTextDelta += recorder.Append;
 
+            // What each turn still running has cost so far. Touched only on the UI thread, inside
+            // app.Invoke, which is also what keeps a turn's last progress report ahead of its result.
+            var narratorPendingCost = 0d;
+            var directorPendingCost = 0d;
+
+            narrator.OnProgress += NarratorProgress;
+            director.OnProgress += DirectorProgress;
+
             // Written down rather than shown. A journal that cannot be written is the game's problem
             // with its own record-keeping: the story is unaffected, the player can do nothing about
             // it, and a red line in the middle of a scene only takes the scene away from them.
@@ -406,6 +414,8 @@ namespace TerminalQuest
             // finished unwinding would otherwise be pumped into a view that is being disposed.
             narrator.OnTextDelta -= pump.Enqueue;
             narrator.OnTextDelta -= recorder.Append;
+            narrator.OnProgress -= NarratorProgress;
+            director.OnProgress -= DirectorProgress;
 
             // Cleared for the same reason, one level up: this one is static, so left in place it would
             // outlive the session and draw the next save's trouble into a window that has closed.
@@ -917,7 +927,11 @@ namespace TerminalQuest
                             return;
                         }
 
+                        // The result's figure replaces the running one rather than adding to it.
+                        narratorPendingCost = 0;
+                        state.PendingCostUsd = directorPendingCost;
                         state.CostUsd += turn.CostUsd;
+                        state.CostIncomplete |= turn.CostIncomplete;
                         state.LastCacheRead = turn.CacheReadTokens;
                         state.LastDurationMs = turn.DurationMs;
 
@@ -1006,6 +1020,10 @@ namespace TerminalQuest
 
                         window.Narration.CommitBlock();
                         window.Narration.AddLine($"[{ex.Message}]", TextRole.Danger);
+
+                        // The requests that did finish were billed whether or not the turn did.
+                        KeepPendingCost(ref narratorPendingCost);
+
                         window.IsBusy = false;
                     });
                 }
@@ -1069,7 +1087,25 @@ namespace TerminalQuest
                                + $"Unratified claims on record: {unratifiedCount}\n\n"
                                + "Inspect world state and unratified claims. Ratify claims, promote or grant secrets, and emit a directive for upcoming scenes.";
 
-                    await director.SendAsync(prompt, life.Token);
+                    var review = await director.SendAsync(prompt, life.Token);
+
+                    // Billed like any narrator turn, so it counts toward the one cost figure; its
+                    // context is its own conversation and gets its own gauge.
+                    app.Invoke(() =>
+                    {
+                        if (leaving)
+                        {
+                            return;
+                        }
+
+                        directorPendingCost = 0;
+                        state.PendingCostUsd = narratorPendingCost;
+                        state.CostUsd += review.CostUsd;
+                        state.CostIncomplete |= review.CostIncomplete;
+                        state.DirectorContextTokens = review.ContextTokens;
+                        state.DirectorContextWindowTokens = review.ContextWindowTokens;
+                        window.RefreshState();
+                    });
                 }
                 catch (OperationCanceledException)
                 {
@@ -1077,8 +1113,59 @@ namespace TerminalQuest
                 }
                 catch (Exception)
                 {
-                    // Director is an asynchronous overseer; failures should not interrupt the game
+                    // Director is an asynchronous overseer; failures should not interrupt the game.
+                    // What it spent before failing is still spent.
+                    app.Invoke(() =>
+                    {
+                        if (!leaving)
+                        {
+                            KeepPendingCost(ref directorPendingCost);
+                        }
+                    });
                 }
+            }
+
+            void NarratorProgress(AgentProgress progress) => app.Invoke(() =>
+            {
+                if (leaving)
+                {
+                    return;
+                }
+
+                state.ContextTokens = progress.ContextTokens;
+                state.ContextWindowTokens = progress.ContextWindowTokens;
+                narratorPendingCost = progress.CostUsd ?? narratorPendingCost;
+                ShowProgress(progress);
+            });
+
+            void DirectorProgress(AgentProgress progress) => app.Invoke(() =>
+            {
+                if (leaving)
+                {
+                    return;
+                }
+
+                state.DirectorContextTokens = progress.ContextTokens;
+                state.DirectorContextWindowTokens = progress.ContextWindowTokens;
+                directorPendingCost = progress.CostUsd ?? directorPendingCost;
+                ShowProgress(progress);
+            });
+
+            void ShowProgress(AgentProgress progress)
+            {
+                state.PendingCostUsd = narratorPendingCost + directorPendingCost;
+                state.CostIncomplete |= progress.CostIncomplete;
+                window.RefreshState();
+            }
+
+            // A turn that failed never reports a result, so its running cost is moved into the total
+            // as it stands: a floor, since the request that failed may have been billed too.
+            void KeepPendingCost(ref double pending)
+            {
+                state.CostUsd += pending;
+                pending = 0;
+                state.PendingCostUsd = narratorPendingCost + directorPendingCost;
+                window.RefreshState();
             }
 
             static string? TryGetActiveDirective(SaveStore store, int turn)

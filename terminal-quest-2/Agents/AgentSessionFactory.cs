@@ -1,5 +1,6 @@
 using TerminalQuest.Agents.Claude;
 using TerminalQuest.Agents.LmStudio;
+using TerminalQuest.Agents.Pricing;
 using TerminalQuest.Mcp;
 using TerminalQuest.Saves;
 using TerminalQuest.Settings;
@@ -68,14 +69,21 @@ namespace TerminalQuest.Agents
                 });
             }
 
+            var baseUrl = settings.ActiveBaseUrl;
+
             return new LmStudioSession(
                 new LmStudioSessionOptions
                 {
-                    BaseUrl = settings.ActiveBaseUrl,
+                    BaseUrl = baseUrl,
                     Model = Trimmed(lmStudioModel),
                     SystemPrompt = systemPrompt,
                     ApiKey = settings.ActiveApiKey,
                     Role = role,
+
+                    // Handed over as a method rather than a catalog: construction must not reach the
+                    // network, and the shared catalog starts downloading the first time it is asked.
+                    Catalog = ModelCatalog.GetSharedAsync,
+                    CatalogProvider = ModelCatalog.ProviderFor(settings.Provider, baseUrl),
                 },
                 store);
         }

@@ -92,11 +92,16 @@ namespace TerminalQuest.Tests.Infrastructure
         }
 
         /// <summary>Answers with a chat completion that streams <paramref name="text"/> and stops.</summary>
-        public ScriptedHandler Says(string text, int promptTokens = 10, int completionTokens = 5)
+        public ScriptedHandler Says(
+            string text,
+            int promptTokens = 10,
+            int completionTokens = 5,
+            int cachedTokens = 0,
+            double? cost = null)
         {
             return Stream(
                 "data: " + Chunk($"\"content\":{Quote(text)}"),
-                "data: " + Usage(promptTokens, completionTokens),
+                "data: " + Usage(promptTokens, completionTokens, cachedTokens, cost),
                 "data: [DONE]");
         }
 
@@ -127,7 +132,8 @@ namespace TerminalQuest.Tests.Infrastructure
             string arguments,
             string id = "call_1",
             int promptTokens = 0,
-            int completionTokens = 0)
+            int completionTokens = 0,
+            int cachedTokens = 0)
         {
             var call = $"\"tool_calls\":[{{\"index\":0,\"id\":\"{id}\","
                 + $"\"function\":{{\"name\":\"{tool}\",\"arguments\":{Quote(arguments)}}}}}]";
@@ -135,7 +141,7 @@ namespace TerminalQuest.Tests.Infrastructure
             return promptTokens > 0 || completionTokens > 0
                 ? Stream(
                     "data: " + Chunk(call),
-                    "data: " + Usage(promptTokens, completionTokens),
+                    "data: " + Usage(promptTokens, completionTokens, cachedTokens),
                     "data: [DONE]")
                 : Stream("data: " + Chunk(call), "data: [DONE]");
         }
@@ -216,9 +222,14 @@ namespace TerminalQuest.Tests.Infrastructure
         private static string Chunk(string delta) =>
             $"{{\"choices\":[{{\"index\":0,\"delta\":{{{delta}}}}}]}}";
 
-        private static string Usage(int promptTokens, int completionTokens) =>
-            $"{{\"choices\":[],\"usage\":{{\"prompt_tokens\":{promptTokens},"
-            + $"\"completion_tokens\":{completionTokens}}}}}";
+        private static string Usage(int promptTokens, int completionTokens, int cachedTokens = 0, double? cost = null)
+        {
+            var extra = (cachedTokens > 0 ? $",\"prompt_tokens_details\":{{\"cached_tokens\":{cachedTokens}}}" : string.Empty)
+                + (cost is { } c ? $",\"cost\":{c.ToString(System.Globalization.CultureInfo.InvariantCulture)}" : string.Empty);
+
+            return $"{{\"choices\":[],\"usage\":{{\"prompt_tokens\":{promptTokens},"
+                + $"\"completion_tokens\":{completionTokens}{extra}}}}}";
+        }
 
         private static string Quote(string value) => System.Text.Json.JsonSerializer.Serialize(value);
     }

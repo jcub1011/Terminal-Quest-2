@@ -34,6 +34,9 @@ namespace TerminalQuest.Ui
         private readonly Label _contextCaption;
         private readonly Label _contextValue;
         private readonly ProgressBar _contextBar;
+        private readonly Label _directorCaption;
+        private readonly Label _directorValue;
+        private readonly ProgressBar _directorBar;
         private readonly Label _metricsLabel;
 
         /// <summary>
@@ -158,26 +161,18 @@ namespace TerminalQuest.Ui
             };
             _sessionFrame.SetScheme(Theme.CreateScheme());
 
-            _contextCaption = new Label { X = 1, Y = 0, Width = 8, Text = "Context:" };
-            _contextCaption.SetScheme(Theme.LabelScheme(TextRole.Hint));
+            // One gauge per conversation: the narrator and the Director each fill a window of their
+            // own, and one number for both would be the size of neither.
+            (_contextCaption, _contextValue, _contextBar) = Gauge("Narrator:", 0);
+            (_directorCaption, _directorValue, _directorBar) = Gauge("Director:", 2);
 
-            _contextValue = new Label { X = 10, Y = 0, Width = Dim.Fill() - 11, Text = "-" };
-            _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
-
-            _contextBar = new ProgressBar
-            {
-                X = 1,
-                Y = 1,
-                Width = Dim.Fill() - 2,
-                Height = 1,
-                Fraction = 0f,
-            };
-            _contextBar.SetScheme(Theme.CreateScheme());
-
-            _metricsLabel = new Label { X = 1, Y = 3, Width = Dim.Fill() - 2, Text = "$0.0000 | 0ms" };
+            _metricsLabel = new Label { X = 1, Y = 4, Width = Dim.Fill() - 2, Text = "$0.0000 | 0ms" };
             _metricsLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
 
-            _sessionFrame.Add(_contextCaption, _contextValue, _contextBar, _metricsLabel);
+            _sessionFrame.Add(
+                _contextCaption, _contextValue, _contextBar,
+                _directorCaption, _directorValue, _directorBar,
+                _metricsLabel);
 
             Add(_vitalsFrame, _attributesFrame, _inventoryFrame, _sessionFrame);
 
@@ -235,38 +230,75 @@ namespace TerminalQuest.Ui
             _inventoryView.SetItems(_state.Inventory);
 
             // Update Session & Context
-            if (_state.ContextTokens > 0)
-            {
-                if (_state.ContextWindowTokens > 0)
-                {
-                    var pct = (int)Math.Clamp(_state.ContextTokens * 100L / _state.ContextWindowTokens, 0, 100);
-                    _contextValue.Text = $"{FormatTokens(_state.ContextTokens)} ({pct}%)";
-                    _contextBar.Fraction = Math.Clamp((float)_state.ContextTokens / _state.ContextWindowTokens, 0f, 1f);
-                    var alert = pct >= 95 ? TextRole.Danger : pct >= 80 ? TextRole.Important : TextRole.Normal;
-                    _contextValue.SetScheme(Theme.LabelScheme(alert));
-                    _contextBar.SetScheme(alert == TextRole.Normal ? Theme.CreateScheme() : Theme.LabelScheme(alert));
-                }
-                else
-                {
-                    _contextValue.Text = FormatTokens(_state.ContextTokens);
-                    _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
-                    _contextBar.Fraction = 0f;
-                    _contextBar.SetScheme(Theme.CreateScheme());
-                }
-            }
-            else
-            {
-                _contextValue.Text = "-";
-                _contextValue.SetScheme(Theme.LabelScheme(TextRole.Normal));
-                _contextBar.Fraction = 0f;
-                _contextBar.SetScheme(Theme.CreateScheme());
-            }
+            UpdateGauge(_contextValue, _contextBar, _state.ContextTokens, _state.ContextWindowTokens);
+            UpdateGauge(_directorValue, _directorBar, _state.DirectorContextTokens, _state.DirectorContextWindowTokens);
 
-            var costStr = $"${_state.CostUsd:F4}";
             var durationStr = _state.LastDurationMs > 0 ? $"{_state.LastDurationMs}ms" : "-";
-            _metricsLabel.Text = $"Cost: {costStr} | Latency: {durationStr}";
+            _metricsLabel.Text = $"Cost: {FormatCost(_state.CostUsd + _state.PendingCostUsd, _state.CostIncomplete)} | Latency: {durationStr}";
 
             SetNeedsDraw();
+        }
+
+        /// <summary>
+        /// The session's cost as the pane shows it.
+        /// </summary>
+        /// <remarks>
+        /// A total with a gap in it is marked with a trailing <c>+</c>, and one with nothing but gaps
+        /// is <c>?</c>. A paid model the catalog does not list costs something; printing $0.0000 for it
+        /// would state a figure nobody measured.
+        /// </remarks>
+        internal static string FormatCost(double costUsd, bool incomplete) =>
+            !incomplete ? $"${costUsd:F4}"
+            : costUsd > 0 ? $"${costUsd:F4}+"
+            : "?";
+
+        private static (Label Caption, Label Value, ProgressBar Bar) Gauge(string caption, int row)
+        {
+            var captionLabel = new Label { X = 1, Y = row, Width = caption.Length, Text = caption };
+            captionLabel.SetScheme(Theme.LabelScheme(TextRole.Hint));
+
+            var value = new Label { X = caption.Length + 2, Y = row, Width = Dim.Fill() - (caption.Length + 3), Text = "-" };
+            value.SetScheme(Theme.LabelScheme(TextRole.Normal));
+
+            var bar = new ProgressBar
+            {
+                X = 1,
+                Y = row + 1,
+                Width = Dim.Fill() - 2,
+                Height = 1,
+                Fraction = 0f,
+            };
+            bar.SetScheme(Theme.CreateScheme());
+
+            return (captionLabel, value, bar);
+        }
+
+        private static void UpdateGauge(Label value, ProgressBar bar, int used, int window)
+        {
+            if (used <= 0)
+            {
+                value.Text = "-";
+                value.SetScheme(Theme.LabelScheme(TextRole.Normal));
+                bar.Fraction = 0f;
+                bar.SetScheme(Theme.CreateScheme());
+                return;
+            }
+
+            if (window <= 0)
+            {
+                value.Text = FormatTokens(used);
+                value.SetScheme(Theme.LabelScheme(TextRole.Normal));
+                bar.Fraction = 0f;
+                bar.SetScheme(Theme.CreateScheme());
+                return;
+            }
+
+            var pct = (int)Math.Clamp(used * 100L / window, 0, 100);
+            value.Text = $"{FormatTokens(used)} ({pct}%)";
+            bar.Fraction = Math.Clamp((float)used / window, 0f, 1f);
+            var alert = pct >= 95 ? TextRole.Danger : pct >= 80 ? TextRole.Important : TextRole.Normal;
+            value.SetScheme(Theme.LabelScheme(alert));
+            bar.SetScheme(alert == TextRole.Normal ? Theme.CreateScheme() : Theme.LabelScheme(alert));
         }
 
         /// <summary>

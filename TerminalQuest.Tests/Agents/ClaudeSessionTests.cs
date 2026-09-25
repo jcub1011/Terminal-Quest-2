@@ -215,6 +215,24 @@ namespace TerminalQuest.Tests.Agents
         }
 
         [Fact]
+        public async Task Context_is_reported_as_each_request_opens_and_closes_while_the_turn_runs()
+        {
+            using var script = new Script("context");
+            await using var session = new ClaudeSession(Options());
+            var reports = new List<AgentProgress>();
+            session.OnProgress += reports.Add;
+
+            await session.StartAsync(Token);
+            await session.SendAsync("Look around.", Token);
+
+            // Each message_start opens with an answer one token long; the message_delta closes the
+            // last one at its full length. No cost: the CLI only prices the turn in its result.
+            Assert.Equal([600 + 1, 1510 + 1, 1510 + 77], reports.Select(report => report.ContextTokens));
+            Assert.All(reports, report => Assert.Null(report.CostUsd));
+            Assert.All(reports, report => Assert.Equal(1_000_000, report.ContextWindowTokens));
+        }
+
+        [Fact]
         public async Task Context_falls_back_to_the_result_totals_when_no_request_frames_arrive()
         {
             // A build that does not emit message_start leaves the whole-turn totals as the only
